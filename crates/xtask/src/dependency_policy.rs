@@ -194,17 +194,17 @@ pub fn check(data: &Value) -> Result<Vec<Value>, String> {
 
     for package in package_list {
         license_choice(package)?;
-        if let Some(source) = package.get("source").and_then(Value::as_str) {
-            if !source.starts_with("registry+https://github.com/rust-lang/crates.io-index") {
-                let name = package_string(package, "name")?;
-                let expected_git = "git+https://github.com/bytecodealliance/tree-sitter-wit?";
-                let expected_revision = format!("#{GRAMMAR_REV}");
-                if name != "tree-sitter-wit"
-                    || !source.starts_with(expected_git)
-                    || !source.ends_with(&expected_revision)
-                {
-                    return Err(format!("unreviewed dependency source: {source}"));
-                }
+        if let Some(source) = package.get("source").and_then(Value::as_str)
+            && !source.starts_with("registry+https://github.com/rust-lang/crates.io-index")
+        {
+            let name = package_string(package, "name")?;
+            let expected_git = "git+https://github.com/bytecodealliance/tree-sitter-wit?";
+            let expected_revision = format!("#{GRAMMAR_REV}");
+            if name != "tree-sitter-wit"
+                || !source.starts_with(expected_git)
+                || !source.ends_with(&expected_revision)
+            {
+                return Err(format!("unreviewed dependency source: {source}"));
             }
         }
     }

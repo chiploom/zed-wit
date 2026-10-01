@@ -225,6 +225,22 @@ pub fn validate_release(tag: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_license_notices(path: &Path, target: &str, lock_digest: &str) -> Result<(), String> {
+    ensure_regular_nonempty(path)?;
+    let text =
+        fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    let expected_prefix = format!(
+        "WIT language server redistribution notices\nTarget: {target}\nCargo.lock SHA256: {lock_digest}\n"
+    );
+    if !text.starts_with(&expected_prefix) {
+        return Err(format!(
+            "{} does not match target or Cargo.lock",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 fn verify_provenance(
     path: &Path,
     asset: &str,
@@ -302,6 +318,7 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
         expected.insert(name.clone());
         expected.insert(format!("{name}.sha256"));
         expected.insert(format!("{name}.provenance.json"));
+        expected.insert(format!("{name}.licenses.txt"));
 
         let asset = input.join(&name);
         ensure_regular_nonempty(&asset)?;
@@ -315,6 +332,12 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
         if actual_sidecar != expected_sidecar {
             return Err(format!("invalid checksum: {name}"));
         }
+
+        verify_license_notices(
+            &input.join(format!("{name}.licenses.txt")),
+            target,
+            &lock_digest,
+        )?;
 
         verify_provenance(
             &input.join(format!("{name}.provenance.json")),

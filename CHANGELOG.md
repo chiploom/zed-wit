@@ -11,6 +11,7 @@
   overlays and bounded package dependency discovery.
 - Add Topiary document formatting and regression coverage.
 - Define five-platform native CI and a protected manual release workflow with
-  SHA-256 sidecars and artifact attestations.
+  SHA-256 sidecars, verified per-target redistribution notices and artifact
+  attestations.
 - Document licensing, architecture, development testing and registry succession
   gates. No hosted release or registry publication is claimed by this entry.
