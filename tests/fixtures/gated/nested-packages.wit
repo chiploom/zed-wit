@@ -1,0 +1,10 @@
+package example:outer;
+interface local { run: func(); }
+package example:inner@1.0.0 {
+    interface nested { type value = u32; }
+    world application { export nested; }
+}
+package example:other {
+    use example:inner/nested@1.0.0 as shared;
+    interface api { use shared.{value}; call: func(v: value); }
+}

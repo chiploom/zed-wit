@@ -1,0 +1,128 @@
+{
+  "Package": {
+    "prefix": "wit-package",
+    "body": [
+      "package ${1:example}:${2:package-name}@${3:0.1.0};",
+      "$0"
+    ],
+    "description": "Declare a versioned package"
+  },
+  "Interface": {
+    "prefix": "wit-interface",
+    "body": [
+      "interface ${1:api} {",
+      "    $0",
+      "}"
+    ],
+    "description": "Declare an interface"
+  },
+  "World": {
+    "prefix": "wit-world",
+    "body": [
+      "world ${1:application} {",
+      "    $0",
+      "}"
+    ],
+    "description": "Declare a world"
+  },
+  "Type alias": {
+    "prefix": "wit-type",
+    "body": [
+      "type ${1:bytes} = ${2:list<u8>};"
+    ],
+    "description": "Define a type alias inside an interface or world"
+  },
+  "Record": {
+    "prefix": "wit-record",
+    "body": [
+      "record ${1:entry} {",
+      "    ${2:value}: ${3:string},",
+      "    $0",
+      "}"
+    ],
+    "description": "Define a record"
+  },
+  "Variant": {
+    "prefix": "wit-variant",
+    "body": [
+      "variant ${1:event} {",
+      "    ${2:empty},",
+      "    ${3:data}(${4:string}),",
+      "    $0",
+      "}"
+    ],
+    "description": "Define a tagged variant"
+  },
+  "Enum": {
+    "prefix": "wit-enum",
+    "body": [
+      "enum ${1:status} {",
+      "    ${2:ready},",
+      "    $0",
+      "}"
+    ],
+    "description": "Define an enum"
+  },
+  "Flags": {
+    "prefix": "wit-flags",
+    "body": [
+      "flags ${1:access} {",
+      "    ${2:read},",
+      "    $0",
+      "}"
+    ],
+    "description": "Define flags"
+  },
+  "Resource": {
+    "prefix": "wit-resource",
+    "body": [
+      "resource ${1:connection} {",
+      "    constructor(${2:address}: ${3:string});",
+      "    $0",
+      "}"
+    ],
+    "description": "Define a resource with a constructor"
+  },
+  "Function": {
+    "prefix": "wit-func",
+    "body": [
+      "${1:call}: func(${2:value}: ${3:string}) -> ${4:result};"
+    ],
+    "description": "Declare a function"
+  },
+  "Async function": {
+    "prefix": "wit-async",
+    "body": [
+      "${1:read}: async func() -> ${2:future<string>};"
+    ],
+    "description": "Declare an asynchronous function"
+  },
+  "Use types": {
+    "prefix": "wit-use",
+    "body": [
+      "use ${1:types}.{${2:value}};"
+    ],
+    "description": "Bring interface types into scope"
+  },
+  "Import function": {
+    "prefix": "wit-import",
+    "body": [
+      "import ${1:log}: func(${2:message}: ${3:string});"
+    ],
+    "description": "Import a function into a world"
+  },
+  "Export interface": {
+    "prefix": "wit-export",
+    "body": [
+      "export ${1:api};"
+    ],
+    "description": "Export an interface from a world"
+  },
+  "Include world": {
+    "prefix": "wit-include",
+    "body": [
+      "include ${1:base};"
+    ],
+    "description": "Include another world"
+  }
+}

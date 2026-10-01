@@ -1,0 +1,33 @@
+[package]
+name = "zed-wit"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+publish = false
+repository = "https://github.com/chiploom/zed-wit"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[workspace]
+members = ["crates/wit-syntax", "crates/wit-analysis", "crates/wit-language-server"]
+default-members = [".", "crates/wit-syntax", "crates/wit-analysis", "crates/wit-language-server"]
+resolver = "3"
+
+[dependencies]
+zed_extension_api = "=0.7.0"
+sha2 = { version = "=0.11.0", default-features = false }
+
+[dev-dependencies]
+toml = "0.9"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

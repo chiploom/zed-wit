@@ -1,0 +1,23 @@
+package example:features;
+interface advanced {
+    type table = map<string, list<u8>>;
+    type ipv4 = list<u8, 4>;
+    @external-id("DB.Record")
+    record row { value: string }
+    @external-id("café/日本語/\u{1f9e9}")
+    lookup: func(key: string) -> row;
+    resource store {
+        @external-id("create\"store")
+        constructor();
+        @external-id("read\2frow")
+        read: func() -> row;
+        @external-id("static\\open")
+        open: static func() -> store;
+    }
+}
+world application {
+    @external-id("https://example.test/module")
+    import module: interface { run: func(); }
+    @external-id("output")
+    export result: func() -> string;
+}

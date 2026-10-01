@@ -1,0 +1,16 @@
+id = "wit"
+name = "WIT"
+version = "0.1.0"
+schema_version = 1
+authors = ["Chiploom"]
+description = "Modern WebAssembly Interface Types: syntax, package diagnostics, and formatting."
+repository = "https://github.com/chiploom/zed-wit"
+snippets = ["snippets/wit.json"]
+
+[grammars.wit]
+repository = "https://github.com/bytecodealliance/tree-sitter-wit"
+rev = "cdf07263b136054b413cab449ac7a1d059c27542"
+
+[language_servers.wit-language-server]
+name = "WIT Language Server"
+languages = ["WIT"]

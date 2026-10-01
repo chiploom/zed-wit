@@ -1,0 +1,16 @@
+name = "WIT"
+grammar = "wit"
+path_suffixes = ["wit"]
+line_comments = ["// "]
+block_comment = ["/*", "*/"]
+tab_size = 4
+hard_tabs = false
+word_characters = ["-", "%"]
+code_fence_block_name = "wit"
+autoclose_before = ";:.,=})>"
+brackets = [
+    { start = "{", end = "}", close = true, newline = true, not_in = ["comment", "string"] },
+    { start = "(", end = ")", close = true, newline = true, not_in = ["comment", "string"] },
+    { start = "<", end = ">", close = true, newline = true, not_in = ["comment", "string"] },
+    { start = "\"", end = "\"", close = true, newline = false, not_in = ["comment", "string"] },
+]

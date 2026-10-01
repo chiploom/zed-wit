@@ -1,0 +1,36 @@
+package example:annotations@1.0.0-rc.1+build.2;
+@since(version = 1.0.0)
+interface api {
+    @unstable(feature = experimental-type)
+    type feature-value = u32;
+    @since(version = 1.0.0)
+    @deprecated(version = 2.0.0)
+    old-call: func();
+    record metadata {
+        @since(version = 1.0.0)
+        value: string,
+    }
+    flags options {
+        @since(version = 1.0.0)
+        enabled,
+    }
+    enum states {
+        @since(version = 1.0.0)
+        ready,
+    }
+    variant message {
+        @since(version = 1.0.0)
+        text(string),
+    }
+    resource object {
+        @since(version = 1.0.0)
+        constructor();
+        @unstable(feature = experimental-call)
+        work: func();
+    }
+}
+@since(version = 1.0.0)
+world application {
+    @unstable(feature = experimental-api)
+    import api;
+}
