@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Install pinned toolchain
-        run: rustup show active-toolchain
+        run: rustup show active-toolchain || rustup toolchain install
       - name: Enforce repository automation policy
         run: |
           cargo xtask check-no-python
@@ -70,8 +70,8 @@ jobs:
           ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
       - name: Install pinned toolchain
-        run: rustup show active-toolchain
-      - run: cargo test --workspace --locked --target "$TARGET"
+        run: rustup show active-toolchain || rustup toolchain install
+      - run: cargo test --workspace --exclude xtask --locked --target "$TARGET"
       - run: cargo build -p wit-language-server --release --locked --target "$TARGET"
       - run: cargo xtask package-release --target "$TARGET" --output dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -100,7 +100,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Install pinned toolchain
-        run: rustup show active-toolchain
+        run: rustup show active-toolchain || rustup toolchain install
       - name: Verify complete asset set
         run: cargo xtask verify-release-assets --input dist
       - name: Attest release artifacts

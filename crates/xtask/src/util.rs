@@ -70,7 +70,14 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
         }
         hasher.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    let digest = hasher.finalize();
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut encoded, "{byte:02x}")
+            .map_err(|error| format!("encode SHA-256 for {}: {error}", path.display()))?;
+    }
+    Ok(encoded)
 }
 
 pub fn write_new(path: &Path, content: &str) -> Result<(), String> {
