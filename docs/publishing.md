@@ -24,7 +24,7 @@ without testing them. Native Windows ARM64, Linux musl and other targets are not
 in this release matrix. macOS signing/notarization and Windows signing are not
 configured or claimed.
 
-`python3 scripts/package-release.py --target <target> --output dist` packages the
+`cargo xtask package-release --target <target> --output dist` packages the
 already-built `target/<target>/release/wit-language-server[.exe]`. Each asset gets
 one checksum line, `<64 lowercase hex digits>  <exact asset filename>`, followed by
 a newline, and a `<asset>.provenance.json` build record. Build provenance JSON is
@@ -38,7 +38,9 @@ not itself a cryptographic attestation.
    reporting. These are manual repository settings; inspect them before release.
 2. Complete CI on the intended commit, including all five native targets and the
    adapter Wasm check. Complete and retain the [manual matrix](manual-testing.md).
-   Audit the locked dependency licenses and supply any additional binary notices.
+   Run `cargo xtask check-dependencies`, audit the locked dependency licenses, and
+   use `cargo xtask collect-licenses --target <target> --output dist` when preparing
+   redistribution notices for a native target.
 3. Ensure `Cargo.toml`, the native server manifest, `extension.toml`, and the
    adapter's pinned release version agree. Update changelog and compatibility
    notes. Retain `Cargo.lock`; do not resolve new dependencies during release.

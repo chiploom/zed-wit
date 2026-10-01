@@ -21,6 +21,8 @@ jobs:
           persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show active-toolchain
+      - run: cargo xtask check-no-python
+      - run: cargo xtask check-dependencies
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo check --workspace --locked
@@ -57,7 +59,7 @@ jobs:
         run: rustup show active-toolchain
       - run: cargo test --workspace --locked --target "$TARGET"
       - run: cargo build -p wit-language-server --release --locked --target "$TARGET"
-      - run: python3 scripts/package-release.py --target "$TARGET" --output dist
+      - run: cargo xtask package-release --target "$TARGET" --output dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-${{ matrix.target }}

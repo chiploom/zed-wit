@@ -1682,6 +1682,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xtask"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+ "toml",
+]
+
+[[package]]
 name = "zed-wit"
 version = "0.1.0"
 dependencies = [
