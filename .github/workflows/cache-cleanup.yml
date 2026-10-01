@@ -10,6 +10,7 @@ permissions:
 jobs:
   cleanup:
     name: Delete PR-scoped caches
+    cache-mode: none
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
