@@ -235,12 +235,19 @@ fn render(target: &str, data: &Value, sysroot: &Path) -> Result<(String, usize),
         ),
     ]);
 
-    let mut license_files = fs::read_dir(&license_dir)
+    let mut license_files = Vec::new();
+    for entry in fs::read_dir(&license_dir)
         .map_err(|error| format!("read {}: {error}", license_dir.display()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_file())
-        .collect::<Vec<_>>();
+    {
+        let entry =
+            entry.map_err(|error| format!("read {} entry: {error}", license_dir.display()))?;
+        let path = entry.path();
+        let metadata =
+            fs::metadata(&path).map_err(|error| format!("stat {}: {error}", path.display()))?;
+        if metadata.is_file() {
+            license_files.push(path);
+        }
+    }
     license_files.sort();
     if license_files.is_empty() {
         return Err("pinned Rust distribution has no standard-library license texts".into());

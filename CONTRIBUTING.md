@@ -16,7 +16,7 @@ rustfmt, clippy and the `wasm32-wasip2` target. Commit `Cargo.lock`.
 Run from the repository root:
 
 ```sh
-rustup show active-toolchain
+rustup toolchain install
 cargo xtask check-no-python
 cargo xtask check-dependencies
 cargo fmt --all -- --check
@@ -26,6 +26,7 @@ cargo test --workspace --locked
 cargo check -p zed-wit --target wasm32-wasip2 --locked
 cargo build -p wit-language-server --release --locked
 cargo xtask package-release --target <target> --output dist
+cargo xtask collect-licenses --target <target> --output dist
 ```
 
 Only the adapter is compiled to Wasm. Native tests cover semantic analysis,

@@ -238,6 +238,19 @@ fn verify_license_notices(path: &Path, target: &str, lock_digest: &str) -> Resul
             path.display()
         ));
     }
+    for required in [
+        "Scope: target-filtered native normal/build dependency closure; dev-only edges excluded.",
+        "\nPROJECT AND DIRECTLY COPIED MATERIAL\n",
+        "\nPACKAGE: ",
+        "\nRUST STANDARD LIBRARY: full notices from the pinned toolchain distribution\n",
+    ] {
+        if !text.contains(required) {
+            return Err(format!(
+                "{} is missing required redistribution section {required:?}",
+                path.display()
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -322,6 +335,14 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
 
         let asset = input.join(&name);
         ensure_regular_nonempty(&asset)?;
+        let metadata =
+            fs::metadata(&asset).map_err(|error| format!("stat {}: {error}", asset.display()))?;
+        if metadata.len() > MAX_BINARY_BYTES {
+            return Err(format!(
+                "{} exceeds the 128 MiB release size limit",
+                asset.display()
+            ));
+        }
         let digest = util::sha256_file(&asset)?;
 
         let sidecar = input.join(format!("{name}.sha256"));
