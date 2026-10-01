@@ -1,0 +1,26 @@
+name: Cleanup PR caches
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    name: Delete PR-scoped caches
+    cache-mode: none
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Delete caches for closed pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh cache delete --all --ref "$PR_REF" --succeed-on-no-caches
