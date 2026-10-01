@@ -8,6 +8,8 @@ on:
         type: string
 permissions:
   contents: read
+env:
+  RUSTUP_AUTO_INSTALL: "0"
 concurrency:
   group: release-native-server
   cancel-in-progress: false
