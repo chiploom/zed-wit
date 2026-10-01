@@ -24,6 +24,8 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - run: cargo xtask check-no-python
       - run: cargo xtask check-dependencies
+      - name: Verify native license collection
+        run: cargo xtask collect-licenses --target x86_64-unknown-linux-gnu --output target/xtask-license-test
       - run: cargo test -p xtask --locked
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings

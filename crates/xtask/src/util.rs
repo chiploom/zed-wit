@@ -56,6 +56,16 @@ pub fn read_nonempty(path: &Path) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|error| format!("decode {} as UTF-8: {error}", path.display()))
 }
 
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
 pub fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
     let mut hasher = Sha256::new();
@@ -69,14 +79,7 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
         }
         hasher.update(&buffer[..count]);
     }
-    let digest = hasher.finalize();
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write as _;
-        write!(&mut encoded, "{byte:02x}")
-            .map_err(|error| format!("encode SHA-256 for {}: {error}", path.display()))?;
-    }
-    Ok(encoded)
+    Ok(encode_hex(&hasher.finalize()))
 }
 
 pub fn write_new(path: &Path, content: &str) -> Result<(), String> {
@@ -144,6 +147,15 @@ pub fn ensure_empty_options(options: BTreeMap<String, String>) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_hex_encoding_is_canonical() {
+        let digest = Sha256::digest(b"abc");
+        assert_eq!(
+            encode_hex(&digest),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[test]
     fn option_parser_rejects_duplicates_and_unknowns() {
