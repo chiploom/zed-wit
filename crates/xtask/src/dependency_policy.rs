@@ -87,12 +87,7 @@ pub fn native_packages(data: &Value) -> Result<Vec<Value>, String> {
     let package_list = packages(data)?;
     let packages_by_id: HashMap<String, Value> = package_list
         .iter()
-        .map(|package| {
-            Ok((
-                package_string(package, "id")?.to_owned(),
-                package.clone(),
-            ))
-        })
+        .map(|package| Ok((package_string(package, "id")?.to_owned(), package.clone())))
         .collect::<Result<_, String>>()?;
 
     let nodes = data
@@ -202,8 +197,7 @@ pub fn check(data: &Value) -> Result<Vec<Value>, String> {
         if let Some(source) = package.get("source").and_then(Value::as_str) {
             if !source.starts_with("registry+https://github.com/rust-lang/crates.io-index") {
                 let name = package_string(package, "name")?;
-                let expected_git =
-                    "git+https://github.com/bytecodealliance/tree-sitter-wit?";
+                let expected_git = "git+https://github.com/bytecodealliance/tree-sitter-wit?";
                 let expected_revision = format!("#{GRAMMAR_REV}");
                 if name != "tree-sitter-wit"
                     || !source.starts_with(expected_git)

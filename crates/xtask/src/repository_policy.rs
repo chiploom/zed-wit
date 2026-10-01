@@ -107,7 +107,8 @@ fn inspect_text_file(root: &Path, path: &Path, violations: &mut Vec<String>) -> 
     };
     let first_line = text.lines().next().unwrap_or_default().to_ascii_lowercase();
     let python_shebang = first_line.starts_with("#!") && first_line.contains("python");
-    if python_shebang || (should_scan_for_invocations(root, path) && contains_python_invocation(&text))
+    if python_shebang
+        || (should_scan_for_invocations(root, path) && contains_python_invocation(&text))
     {
         violations.push(format!(
             "{} (contains Python tooling or invocation)",
@@ -118,8 +119,8 @@ fn inspect_text_file(root: &Path, path: &Path, violations: &mut Vec<String>) -> 
 }
 
 fn visit(root: &Path, path: &Path, violations: &mut Vec<String>) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("stat {}: {error}", path.display()))?;
+    let metadata =
+        fs::symlink_metadata(path).map_err(|error| format!("stat {}: {error}", path.display()))?;
     if metadata.file_type().is_symlink() {
         if is_python_path(path) {
             violations.push(
@@ -146,11 +147,10 @@ fn visit(root: &Path, path: &Path, violations: &mut Vec<String>) -> Result<(), S
         if path != root && SKIP_DIRECTORIES.contains(&name.as_str()) {
             return Ok(());
         }
-        for entry in fs::read_dir(path)
-            .map_err(|error| format!("read {}: {error}", path.display()))?
+        for entry in
+            fs::read_dir(path).map_err(|error| format!("read {}: {error}", path.display()))?
         {
-            let entry =
-                entry.map_err(|error| format!("read {} entry: {error}", path.display()))?;
+            let entry = entry.map_err(|error| format!("read {} entry: {error}", path.display()))?;
             visit(root, &entry.path(), violations)?;
         }
         return Ok(());

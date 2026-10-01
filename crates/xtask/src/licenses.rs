@@ -55,9 +55,13 @@ fn package_notices(package: &Value) -> Result<Vec<(String, String)>, String> {
     for entry in
         fs::read_dir(directory).map_err(|error| format!("read {}: {error}", directory.display()))?
     {
-        let entry = entry.map_err(|error| format!("read {} entry: {error}", directory.display()))?;
+        let entry =
+            entry.map_err(|error| format!("read {} entry: {error}", directory.display()))?;
         let name = entry.file_name().to_string_lossy().to_uppercase();
-        if NOTICE_PREFIXES.iter().any(|prefix| name.starts_with(prefix)) {
+        if NOTICE_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
             let path = entry.path();
             let file_type = entry
                 .file_type()
@@ -130,23 +134,20 @@ fn package_notices(package: &Value) -> Result<Vec<(String, String)>, String> {
                 util::read_nonempty(&root.join(".github/licenses/topiary-core-0.7.3/LICENSE"))?,
             )])
         }
-        ("backtrace-ext", "0.2.1", Some("043c95350875a36be6cd755dcef21a44a52ec2cc")) => {
-            Ok(vec![
-                (
-                    "Cargo.toml.orig (upstream license declaration)".to_owned(),
-                    util::read_nonempty(&directory.join("Cargo.toml.orig"))?,
-                ),
-                (
-                    "README.md (upstream attribution)".to_owned(),
-                    util::read_nonempty(&directory.join("README.md"))?,
-                ),
-                (
-                    "Apache-2.0 canonical text; selected from declared MIT OR Apache-2.0"
-                        .to_owned(),
-                    util::read_nonempty(&root.join("LICENSE-APACHE"))?,
-                ),
-            ])
-        }
+        ("backtrace-ext", "0.2.1", Some("043c95350875a36be6cd755dcef21a44a52ec2cc")) => Ok(vec![
+            (
+                "Cargo.toml.orig (upstream license declaration)".to_owned(),
+                util::read_nonempty(&directory.join("Cargo.toml.orig"))?,
+            ),
+            (
+                "README.md (upstream attribution)".to_owned(),
+                util::read_nonempty(&directory.join("README.md"))?,
+            ),
+            (
+                "Apache-2.0 canonical text; selected from declared MIT OR Apache-2.0".to_owned(),
+                util::read_nonempty(&root.join("LICENSE-APACHE"))?,
+            ),
+        ]),
         _ => Err(format!(
             "no license files for {name} {version}; review upstream source"
         )),
@@ -267,12 +268,13 @@ pub fn run(target: &str, output: &Path) -> Result<(), String> {
     )?);
     let data = dependency_policy::metadata(Some(target))?;
     let (content, count) = render(target, &data, &sysroot)?;
-    fs::create_dir_all(output)
-        .map_err(|error| format!("create {}: {error}", output.display()))?;
-    let suffix = if target.contains("windows") { ".exe" } else { "" };
-    let path = output.join(format!(
-        "wit-language-server-{target}{suffix}.licenses.txt"
-    ));
+    fs::create_dir_all(output).map_err(|error| format!("create {}: {error}", output.display()))?;
+    let suffix = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
+    let path = output.join(format!("wit-language-server-{target}{suffix}.licenses.txt"));
     util::write_new(&path, &content)?;
     println!(
         "{}",

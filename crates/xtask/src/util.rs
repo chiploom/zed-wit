@@ -57,8 +57,7 @@ pub fn read_nonempty(path: &Path) -> Result<String, String> {
 }
 
 pub fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file =
-        File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
+    let mut file = File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -90,7 +89,10 @@ pub fn write_new(path: &Path, content: &str) -> Result<(), String> {
         .map_err(|error| format!("write {}: {error}", path.display()))
 }
 
-pub fn parse_options(args: &[String], allowed: &[&str]) -> Result<BTreeMap<String, String>, String> {
+pub fn parse_options(
+    args: &[String],
+    allowed: &[&str],
+) -> Result<BTreeMap<String, String>, String> {
     let mut options = BTreeMap::new();
     let mut index = 0;
     while index < args.len() {
@@ -148,12 +150,7 @@ mod tests {
         assert!(parse_options(&["--other".into(), "x".into()], &["target"]).is_err());
         assert!(
             parse_options(
-                &[
-                    "--target".into(),
-                    "a".into(),
-                    "--target".into(),
-                    "b".into(),
-                ],
+                &["--target".into(), "a".into(), "--target".into(), "b".into(),],
                 &["target"],
             )
             .is_err()
@@ -162,9 +159,11 @@ mod tests {
 
     #[test]
     fn option_parser_accepts_known_values() {
-        let options =
-            parse_options(&["--target".into(), "x86_64-unknown-linux-gnu".into()], &["target"])
-                .unwrap();
+        let options = parse_options(
+            &["--target".into(), "x86_64-unknown-linux-gnu".into()],
+            &["target"],
+        )
+        .unwrap();
         assert_eq!(
             options.get("target").map(String::as_str),
             Some("x86_64-unknown-linux-gnu")

@@ -88,7 +88,9 @@ fn run() -> Result<(), String> {
             }
             repository_policy::check_no_python()
         }
-        other => Err(format!("unknown xtask command {other:?}; run `cargo xtask help`")),
+        other => Err(format!(
+            "unknown xtask command {other:?}; run `cargo xtask help`"
+        )),
     }
 }
 

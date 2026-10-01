@@ -1,19 +1,14 @@
 use crate::{dependency_policy::TARGETS, util};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeSet,
-    env, fs,
-    fs::OpenOptions,
-    io::Write,
-    path::Path,
-    process::Command,
+    collections::BTreeSet, env, fs, fs::OpenOptions, io::Write, path::Path, process::Command,
 };
 
 const MAX_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 
 fn read_toml(path: &Path) -> Result<toml::Value, String> {
-    let source = fs::read_to_string(path)
-        .map_err(|error| format!("read {}: {error}", path.display()))?;
+    let source =
+        fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
     toml::from_str(&source).map_err(|error| format!("parse {}: {error}", path.display()))
 }
 
@@ -38,12 +33,10 @@ fn project_versions() -> Result<BTreeSet<String>, String> {
         .and_then(toml::Value::as_str)
         .ok_or_else(|| "extension.toml omitted version".to_owned())?;
 
-    Ok(
-        [root_version, server_version, extension_version]
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
-    )
+    Ok([root_version, server_version, extension_version]
+        .into_iter()
+        .map(str::to_owned)
+        .collect())
 }
 
 fn project_version() -> Result<String, String> {
@@ -90,7 +83,11 @@ fn git_revision(root: &Path) -> Result<Option<String>, String> {
 }
 
 fn asset_name(target: &str) -> String {
-    let suffix = if target.contains("windows") { ".exe" } else { "" };
+    let suffix = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
     format!("wit-language-server-{target}{suffix}")
 }
 
@@ -113,13 +110,15 @@ fn json_string<'a>(value: &'a Value, key: &str, path: &Path) -> Result<&'a str, 
 pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let root = util::repo_root();
     let name = asset_name(target);
-    let source = root.join("target").join(target).join("release").join(
-        if target.contains("windows") {
-            "wit-language-server.exe"
-        } else {
-            "wit-language-server"
-        },
-    );
+    let source =
+        root.join("target")
+            .join(target)
+            .join("release")
+            .join(if target.contains("windows") {
+                "wit-language-server.exe"
+            } else {
+                "wit-language-server"
+            });
     ensure_regular_nonempty(&source)?;
     let metadata =
         fs::metadata(&source).map_err(|error| format!("stat {}: {error}", source.display()))?;
@@ -128,8 +127,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     }
 
     let version = project_version()?;
-    fs::create_dir_all(output)
-        .map_err(|error| format!("create {}: {error}", output.display()))?;
+    fs::create_dir_all(output).map_err(|error| format!("create {}: {error}", output.display()))?;
     let artifact = output.join(&name);
     let checksum = output.join(format!("{name}.sha256"));
     let provenance = output.join(format!("{name}.provenance.json"));
@@ -137,7 +135,9 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
         .iter()
         .any(|path| path.exists())
     {
-        return Err(format!("refusing to overwrite release artifacts for {target}"));
+        return Err(format!(
+            "refusing to overwrite release artifacts for {target}"
+        ));
     }
 
     let revision = git_revision(&root)?;
@@ -189,11 +189,7 @@ pub fn validate_release(tag: &str) -> Result<(), String> {
 
     let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     let tag_ref = format!("refs/tags/{tag}^{{commit}}");
-    let tagged = util::command_output(
-        "git",
-        ["rev-parse", "--verify", tag_ref.as_str()],
-        &root,
-    )?;
+    let tagged = util::command_output("git", ["rev-parse", "--verify", tag_ref.as_str()], &root)?;
     if tagged != head {
         return Err("tag must point to the default branch dispatch commit".into());
     }
@@ -267,7 +263,10 @@ fn verify_provenance(
     }
 
     if value.get("source_dirty").and_then(Value::as_bool) != Some(false) {
-        return Err(format!("{} was produced from a dirty checkout", path.display()));
+        return Err(format!(
+            "{} was produced from a dirty checkout",
+            path.display()
+        ));
     }
     if json_string(&value, "rustc", path)?.trim().is_empty() {
         return Err(format!("{} has empty rustc provenance", path.display()));
