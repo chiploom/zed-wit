@@ -107,7 +107,7 @@ jobs:
           cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check native target
-        run: cargo check --workspace --exclude xtask --locked --target "$TARGET"
+        run: cargo check --workspace --exclude xtask --all-targets --locked --target "$TARGET"
 
   native-artifacts:
     name: Artifact / ${{ matrix.target }}
