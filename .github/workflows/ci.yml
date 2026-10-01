@@ -35,6 +35,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo check --workspace --locked
+      - name: Run doctests
+        run: cargo test --doc --workspace --exclude xtask --locked
       - name: Check only the Zed adapter for Wasm
         run: cargo check -p zed-wit --target wasm32-wasip2 --locked
 
@@ -157,6 +159,7 @@ jobs:
   verify-native-artifacts:
     name: Verify native artifact set
     needs: native-artifacts
+    cache-mode: none
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
