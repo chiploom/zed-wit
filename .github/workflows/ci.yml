@@ -23,6 +23,7 @@ jobs:
           persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
+      # Pull-request caches are isolated to refs/pull/*/merge and cannot write to main's cache scope.
       - name: Restore/save Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
