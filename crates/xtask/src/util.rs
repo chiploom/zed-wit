@@ -2,8 +2,8 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     ffi::OsStr,
-    fs::{self, OpenOptions},
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -56,13 +56,21 @@ pub fn read_nonempty(path: &Path) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|error| format!("decode {} as UTF-8: {error}", path.display()))
 }
 
-pub fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
 pub fn sha256_file(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
-    Ok(sha256_bytes(&bytes))
+    let mut file =
+        File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| format!("read {}: {error}", path.display()))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 pub fn write_new(path: &Path, content: &str) -> Result<(), String> {
@@ -121,5 +129,38 @@ pub fn ensure_empty_options(options: BTreeMap<String, String>) -> Result<(), Str
                 .collect::<Vec<_>>()
                 .join(", ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn option_parser_rejects_duplicates_and_unknowns() {
+        assert!(parse_options(&["--other".into(), "x".into()], &["target"]).is_err());
+        assert!(
+            parse_options(
+                &[
+                    "--target".into(),
+                    "a".into(),
+                    "--target".into(),
+                    "b".into(),
+                ],
+                &["target"],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn option_parser_accepts_known_values() {
+        let options =
+            parse_options(&["--target".into(), "x86_64-unknown-linux-gnu".into()], &["target"])
+                .unwrap();
+        assert_eq!(
+            options.get("target").map(String::as_str),
+            Some("x86_64-unknown-linux-gnu")
+        );
     }
 }

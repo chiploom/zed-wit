@@ -1,5 +1,5 @@
 use crate::{dependency_policy::TARGETS, util};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
     env, fs,
@@ -46,6 +46,17 @@ fn project_versions() -> Result<BTreeSet<String>, String> {
     )
 }
 
+fn project_version() -> Result<String, String> {
+    let versions = project_versions()?;
+    if versions.len() != 1 {
+        return Err("extension, adapter and native server versions differ".into());
+    }
+    versions
+        .into_iter()
+        .next()
+        .ok_or_else(|| "project version set is empty".to_owned())
+}
+
 fn stable_tag_version(tag: &str) -> Option<&str> {
     let version = tag.strip_prefix('v')?;
     let parts = version.split('.').collect::<Vec<_>>();
@@ -55,7 +66,7 @@ fn stable_tag_version(tag: &str) -> Option<&str> {
     if parts.iter().all(|part| {
         !part.is_empty()
             && part.bytes().all(|byte| byte.is_ascii_digit())
-            && (part == &"0" || !part.starts_with('0'))
+            && (*part == "0" || !part.starts_with('0'))
     }) {
         Some(version)
     } else {
@@ -83,6 +94,22 @@ fn asset_name(target: &str) -> String {
     format!("wit-language-server-{target}{suffix}")
 }
 
+fn ensure_regular_nonempty(path: &Path) -> Result<(), String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|error| format!("stat {}: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
+        return Err(format!("invalid release artifact: {}", path.display()));
+    }
+    Ok(())
+}
+
+fn json_string<'a>(value: &'a Value, key: &str, path: &Path) -> Result<&'a str, String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{} omitted string field {key:?}", path.display()))
+}
+
 pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let root = util::repo_root();
     let name = asset_name(target);
@@ -93,20 +120,14 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
             "wit-language-server"
         },
     );
-    let metadata = fs::metadata(&source)
-        .map_err(|_| format!("build the release server for {target} before packaging"))?;
-    if metadata.len() == 0 {
-        return Err(format!("release server is empty: {}", source.display()));
-    }
+    ensure_regular_nonempty(&source)?;
+    let metadata =
+        fs::metadata(&source).map_err(|error| format!("stat {}: {error}", source.display()))?;
     if metadata.len() > MAX_BINARY_BYTES {
         return Err("release exceeds the adapter's 128 MiB binary size limit".into());
     }
 
-    let versions = project_versions()?;
-    if versions.len() != 1 {
-        return Err("extension, adapter and native server versions differ".into());
-    }
-
+    let version = project_version()?;
     fs::create_dir_all(output)
         .map_err(|error| format!("create {}: {error}", output.display()))?;
     let artifact = output.join(&name);
@@ -139,7 +160,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let provenance_value = json!({
         "artifact": name,
         "sha256": digest,
-        "version": versions.iter().next().expect("one version"),
+        "version": version,
         "target": target,
         "source_revision": revision,
         "source_dirty": dirty,
@@ -162,8 +183,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
 pub fn validate_release(tag: &str) -> Result<(), String> {
     let root = util::repo_root();
     let version = stable_tag_version(tag).ok_or("expected stable SemVer tag vX.Y.Z")?;
-    let versions = project_versions()?;
-    if versions != BTreeSet::from([version.to_owned()]) {
+    if project_version()? != version {
         return Err("tag and adapter/server/extension versions must agree".into());
     }
 
@@ -209,8 +229,75 @@ pub fn validate_release(tag: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_provenance(
+    path: &Path,
+    asset: &str,
+    target: &str,
+    digest: &str,
+    version: &str,
+    lock_digest: &str,
+    revision: Option<&str>,
+) -> Result<(), String> {
+    ensure_regular_nonempty(path)?;
+    let text =
+        fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|error| format!("parse {}: {error}", path.display()))?;
+
+    for (key, expected) in [
+        ("artifact", asset),
+        ("sha256", digest),
+        ("version", version),
+        ("target", target),
+        ("cargo_lock_sha256", lock_digest),
+    ] {
+        let actual = json_string(&value, key, path)?;
+        if actual != expected {
+            return Err(format!(
+                "{} has {key}={actual:?}, expected {expected:?}",
+                path.display()
+            ));
+        }
+    }
+
+    let expected_command =
+        format!("cargo build -p wit-language-server --release --locked --target {target}");
+    if json_string(&value, "build_command", path)? != expected_command {
+        return Err(format!("invalid build command in {}", path.display()));
+    }
+
+    if value.get("source_dirty").and_then(Value::as_bool) != Some(false) {
+        return Err(format!("{} was produced from a dirty checkout", path.display()));
+    }
+    if json_string(&value, "rustc", path)?.trim().is_empty() {
+        return Err(format!("{} has empty rustc provenance", path.display()));
+    }
+    if let Some(revision) = revision
+        && json_string(&value, "source_revision", path)? != revision
+    {
+        return Err(format!(
+            "{} source revision does not match the checked-out commit",
+            path.display()
+        ));
+    }
+    if let Ok(run_id) = env::var("GITHUB_RUN_ID")
+        && value.get("workflow_run").and_then(Value::as_str) != Some(run_id.as_str())
+    {
+        return Err(format!(
+            "{} workflow run does not match the verifier",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 pub fn verify_release_assets(input: &Path) -> Result<(), String> {
+    let root = util::repo_root();
+    let version = project_version()?;
+    let lock_digest = util::sha256_file(&root.join("Cargo.lock"))?;
+    let revision = git_revision(&root)?;
     let mut expected = BTreeSet::new();
+
     for target in TARGETS {
         let name = asset_name(target);
         expected.insert(name.clone());
@@ -218,19 +305,27 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
         expected.insert(format!("{name}.provenance.json"));
 
         let asset = input.join(&name);
-        let metadata = fs::symlink_metadata(&asset)
-            .map_err(|error| format!("stat {}: {error}", asset.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
-            return Err(format!("invalid release artifact: {}", asset.display()));
-        }
+        ensure_regular_nonempty(&asset)?;
         let digest = util::sha256_file(&asset)?;
+
         let sidecar = input.join(format!("{name}.sha256"));
+        ensure_regular_nonempty(&sidecar)?;
         let expected_sidecar = format!("{digest}  {name}\n");
         let actual_sidecar = fs::read_to_string(&sidecar)
             .map_err(|error| format!("read {}: {error}", sidecar.display()))?;
         if actual_sidecar != expected_sidecar {
             return Err(format!("invalid checksum: {name}"));
         }
+
+        verify_provenance(
+            &input.join(format!("{name}.provenance.json")),
+            &name,
+            target,
+            &digest,
+            &version,
+            &lock_digest,
+            revision.as_deref(),
+        )?;
     }
 
     let mut actual = BTreeSet::new();
@@ -239,11 +334,7 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
     {
         let entry = entry.map_err(|error| format!("read {} entry: {error}", input.display()))?;
         let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("stat {}: {error}", path.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
-            return Err(format!("invalid release artifact: {}", path.display()));
-        }
+        ensure_regular_nonempty(&path)?;
         let name = entry
             .file_name()
             .into_string()

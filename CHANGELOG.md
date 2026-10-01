@@ -3,8 +3,8 @@
 ## Unreleased
 
 - Replace Python repository and release helpers with locked Rust `xtask` automation,
-  including CI enforcement that rejects Python source/cache artifacts and workflow
-  invocations.
+  including CI enforcement that rejects Python source, tooling/config/cache artifacts,
+  shebangs and workflow/script invocations.
 - Establish the Rust workspace for the Zed adapter, pinned WIT syntax,
   native analysis and stdio language server.
 - Add canonical grammar queries and parser-backed diagnostics with open-buffer

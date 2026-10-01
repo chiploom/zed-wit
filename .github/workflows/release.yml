@@ -99,6 +99,8 @@ jobs:
           pattern: release-*
           path: dist
           merge-multiple: true
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain
       - name: Verify complete asset set
         run: cargo xtask verify-release-assets --input dist
       - name: Attest release artifacts

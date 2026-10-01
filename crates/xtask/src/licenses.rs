@@ -18,12 +18,18 @@ fn collect_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
     for entry in fs::read_dir(path).map_err(|error| format!("read {}: {error}", path.display()))? {
         let entry = entry.map_err(|error| format!("read {} entry: {error}", path.display()))?;
         let candidate = entry.path();
-        let metadata = entry
-            .metadata()
+        let file_type = entry
+            .file_type()
             .map_err(|error| format!("stat {}: {error}", candidate.display()))?;
-        if metadata.is_dir() {
+        if file_type.is_symlink() {
+            return Err(format!(
+                "refusing to follow symlink while collecting notices: {}",
+                candidate.display()
+            ));
+        }
+        if file_type.is_dir() {
             collect_files(&candidate, files)?;
-        } else if metadata.is_file() {
+        } else if file_type.is_file() {
             files.push(candidate);
         }
     }
@@ -53,13 +59,18 @@ fn package_notices(package: &Value) -> Result<Vec<(String, String)>, String> {
         let name = entry.file_name().to_string_lossy().to_uppercase();
         if NOTICE_PREFIXES.iter().any(|prefix| name.starts_with(prefix)) {
             let path = entry.path();
-            if entry
+            let file_type = entry
                 .file_type()
-                .map_err(|error| format!("stat {}: {error}", path.display()))?
-                .is_dir()
-            {
+                .map_err(|error| format!("stat {}: {error}", path.display()))?;
+            if file_type.is_symlink() {
+                return Err(format!(
+                    "refusing to follow symlink while collecting notices: {}",
+                    path.display()
+                ));
+            }
+            if file_type.is_dir() {
                 collect_files(&path, &mut candidates)?;
-            } else {
+            } else if file_type.is_file() {
                 candidates.push(path);
             }
         }
@@ -113,8 +124,7 @@ fn package_notices(package: &Value) -> Result<Vec<(String, String)>, String> {
     let name = package_string(package, "name")?;
     let version = package_string(package, "version")?;
     match (name, version, vcs.as_deref()) {
-        ("topiary-core", "0.7.3", Some("75ce8324ebaef45e00a964f110ed18ca3ed80235")) => {
-            let revision = vcs.as_deref().expect("matched revision");
+        ("topiary-core", "0.7.3", Some(revision @ "75ce8324ebaef45e00a964f110ed18ca3ed80235")) => {
             Ok(vec![(
                 format!("upstream root LICENSE at {revision}"),
                 util::read_nonempty(&root.join(".github/licenses/topiary-core-0.7.3/LICENSE"))?,
