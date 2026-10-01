@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Install pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
+        run: rustup toolchain install
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -90,7 +90,7 @@ jobs:
           ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
       - name: Install pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
+        run: rustup toolchain install
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -135,7 +135,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Install pinned toolchain
-        run: rustup show active-toolchain || rustup toolchain install
+        run: rustup toolchain install
       - name: Verify complete asset set
         run: cargo xtask verify-release-assets --input dist
       - name: Attest release artifacts
