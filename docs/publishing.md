@@ -24,11 +24,13 @@ without testing them. Native Windows ARM64, Linux musl and other targets are not
 in this release matrix. macOS signing/notarization and Windows signing are not
 configured or claimed.
 
-`python3 scripts/package-release.py --target <target> --output dist` packages the
+`cargo xtask package-release --target <target> --output dist` packages the
 already-built `target/<target>/release/wit-language-server[.exe]`. Each asset gets
 one checksum line, `<64 lowercase hex digits>  <exact asset filename>`, followed by
-a newline, and a `<asset>.provenance.json` build record. Build provenance JSON is
-not itself a cryptographic attestation.
+a newline, a `<asset>.provenance.json` build record, and an
+`<asset>.licenses.txt` redistribution-notice bundle for the target's native
+dependency closure and pinned Rust standard library. Build provenance JSON is not
+itself a cryptographic attestation.
 
 ## Release gate
 
@@ -38,7 +40,9 @@ not itself a cryptographic attestation.
    reporting. These are manual repository settings; inspect them before release.
 2. Complete CI on the intended commit, including all five native targets and the
    adapter Wasm check. Complete and retain the [manual matrix](manual-testing.md).
-   Audit the locked dependency licenses and supply any additional binary notices.
+   Run `cargo xtask check-dependencies` and audit the locked dependency licenses.
+   CI generates and validates the target-specific redistribution notices for every
+   native build; do not publish a native binary without its matching notice bundle.
 3. Ensure `Cargo.toml`, the native server manifest, `extension.toml`, and the
    adapter's pinned release version agree. Update changelog and compatibility
    notes. Retain `Cargo.lock`; do not resolve new dependencies during release.
@@ -47,10 +51,12 @@ not itself a cryptographic attestation.
    rejects other dispatch branches, mismatched versions and tags pointing to a
    different commit. Prerelease/build-metadata tags are intentionally excluded.
 5. Review the build jobs and approve the protected environment. The publisher
-   checks the complete asset/checksum set, generates GitHub artifact attestations,
-   checks the tag still resolves to the validated commit, and creates the release.
-   It never overwrites existing release assets. Attach the license/notice files.
-6. Download each published asset and sidecar, verify checksum and provenance, and
+   checks the complete binary/checksum/provenance/redistribution-notice set,
+   generates GitHub artifact attestations, checks the tag still resolves to the
+   validated commit, and creates the release. It never overwrites existing release
+   assets.
+6. Download each published asset and sidecar, verify checksum, provenance and the
+   target-specific redistribution notice, and
    exercise fresh-install and cache behavior in Zed before announcing support.
    For example, run `gh attestation verify <asset> --repo chiploom/zed-wit` against
    the downloaded bytes. The adapter itself verifies SHA-256, not attestations.

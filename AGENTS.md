@@ -14,11 +14,13 @@ Read [architecture](docs/architecture.md) before changing boundaries and
 - `crates/wit-analysis/`: upstream parsing, package overlays and formatting;
   no LSP types. Never create a second semantic parser. <!-- user-specified -->
 - `crates/wit-language-server/`: stdio LSP lifecycle and position conversions.
-- `.github/workflows/`, `scripts/package-release.py`: validation and release.
+- `.github/workflows/`, `crates/xtask/`: repository policy, validation and release automation.
 
 ## Commands
 
 ```sh
+cargo xtask check-no-python
+cargo xtask check-dependencies
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
@@ -48,6 +50,11 @@ programming and business-logic review do not need Context7. <!-- user-specified 
 
 Use official Gitmoji intent plus optional scope and message; do not add
 Conventional Commit prefixes or use caveman-commit. Do not create `CLAUDE.md`.
+<!-- user-specified -->
+
+Do not introduce Python source, scripts, tooling, build steps, workflow invocations,
+or runtime dependencies. Repository automation belongs in the Rust `xtask` crate
+unless a separately approved language has a clear architectural advantage.
 <!-- user-specified -->
 
 Every claimed capability needs observable proof. Keep Unicode, multi-file,
