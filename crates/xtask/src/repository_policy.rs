@@ -118,6 +118,24 @@ fn inspect_text_file(root: &Path, path: &Path, violations: &mut Vec<String>) -> 
     Ok(())
 }
 
+fn inspect_tracked_files(root: &Path, violations: &mut Vec<String>) -> Result<(), String> {
+    let tracked = util::command_output("git", ["ls-files", "-z"], root)?;
+    for relative in tracked.split('\0').filter(|path| !path.is_empty()) {
+        let path = root.join(relative);
+        if is_python_path(&path) {
+            violations.push(relative.to_owned());
+            continue;
+        }
+
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("stat tracked file {}: {error}", path.display()))?;
+        if !metadata.file_type().is_symlink() {
+            inspect_text_file(root, &path, violations)?;
+        }
+    }
+    Ok(())
+}
+
 fn visit(root: &Path, path: &Path, violations: &mut Vec<String>) -> Result<(), String> {
     let metadata =
         fs::symlink_metadata(path).map_err(|error| format!("stat {}: {error}", path.display()))?;
@@ -173,6 +191,7 @@ pub fn check_no_python() -> Result<(), String> {
     let root = util::repo_root();
     let mut violations = Vec::new();
     visit(&root, &root, &mut violations)?;
+    inspect_tracked_files(&root, &mut violations)?;
     violations.sort();
     violations.dedup();
     if violations.is_empty() {
