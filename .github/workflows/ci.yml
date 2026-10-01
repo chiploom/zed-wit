@@ -23,12 +23,11 @@ jobs:
           persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
-      - name: Restore Rust cache
+      - name: Restore/save Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: quality
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo xtask check-no-python
       - run: cargo xtask check-dependencies
       - run: cargo test -p xtask --locked
@@ -65,12 +64,11 @@ jobs:
           persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
-      - name: Restore Rust cache
+      - name: Restore/save Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: test-${{ matrix.target }}
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
@@ -102,12 +100,11 @@ jobs:
           persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
-      - name: Restore Rust cache
+      - name: Restore/save Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: check-${{ matrix.target }}
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check native target
         run: cargo check --workspace --exclude xtask --all-targets --locked --target "$TARGET"
 
@@ -141,7 +138,7 @@ jobs:
           persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show active-toolchain || rustup toolchain install
-      - name: Restore Rust cache
+      - name: Restore/save Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: release-${{ matrix.target }}
