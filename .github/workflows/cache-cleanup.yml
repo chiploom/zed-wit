@@ -22,23 +22,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          mapfile -t cache_ids < <(
-            gh api --paginate --method GET "repos/$GH_REPO/actions/caches" \
-              -f ref="$PR_REF" \
-              -f per_page=100 \
-              --jq '.actions_caches[].id'
-          )
-
-          if (( ${#cache_ids[@]} == 0 )); then
-            echo "No caches found for $PR_REF"
-            exit 0
-          fi
-
-          echo "Deleting ${#cache_ids[@]} cache(s) for $PR_REF"
-
-          for cache_id in "${cache_ids[@]}"; do
-            gh api --method DELETE "repos/$GH_REPO/actions/caches/$cache_id"
-          done
-
-          echo "Deleted ${#cache_ids[@]} cache(s)"
+          gh cache delete --all --ref "$PR_REF" --succeed-on-no-caches
