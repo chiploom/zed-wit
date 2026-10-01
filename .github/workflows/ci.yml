@@ -3,32 +3,24 @@ on:
   push:
     branches: [main]
     paths:
-      - ".cargo/**"
-      - ".github/workflows/**"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/**"
-      - "extension.toml"
-      - "languages/**"
-      - "rust-toolchain.toml"
-      - "snippets/**"
-      - "src/**"
-      - "tests/**"
+      - "**"
       - "!**/*.md"
+      - ".github/licenses/**"
+      - "THIRD_PARTY_NOTICES.md"
+      - "!.github/ISSUE_TEMPLATE/**"
+      - "!.github/dependabot.yml"
+      - "!.editorconfig"
+      - "!.gitignore"
   pull_request:
     paths:
-      - ".cargo/**"
-      - ".github/workflows/**"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/**"
-      - "extension.toml"
-      - "languages/**"
-      - "rust-toolchain.toml"
-      - "snippets/**"
-      - "src/**"
-      - "tests/**"
+      - "**"
       - "!**/*.md"
+      - ".github/licenses/**"
+      - "THIRD_PARTY_NOTICES.md"
+      - "!.github/ISSUE_TEMPLATE/**"
+      - "!.github/dependabot.yml"
+      - "!.editorconfig"
+      - "!.gitignore"
   workflow_dispatch:
 permissions:
   contents: read
