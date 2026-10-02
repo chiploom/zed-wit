@@ -149,3 +149,72 @@
   .
   (id) @type)
  (#eq? @keyword "get"))
+
+
+; Builtins can be recovered as ids inside accessor error nodes. These rules
+; intentionally come after the generic @type recovery so builtin styling wins.
+((ERROR
+  (id) @keyword
+  .
+  "("
+  .
+  (id) @variable.parameter
+  .
+  ":"
+  .
+  (id) @type.builtin)
+ (#eq? @keyword "set")
+ (#any-of? @type.builtin
+  "u8" "u16" "u32" "u64" "s8" "s16" "s32" "s64" "f32" "f64"
+  "bool" "char" "string" "list" "tuple" "option" "result" "borrow"
+  "map" "future" "stream"))
+
+((ERROR
+  (ty
+    (id) @keyword)
+  .
+  "("
+  .
+  (id) @variable.parameter
+  .
+  ":"
+  .
+  (id) @type.builtin)
+ (#eq? @keyword "set")
+ (#any-of? @type.builtin
+  "u8" "u16" "u32" "u64" "s8" "s16" "s32" "s64" "f32" "f64"
+  "bool" "char" "string" "list" "tuple" "option" "result" "borrow"
+  "map" "future" "stream"))
+
+((ERROR
+  (id) @keyword
+  .
+  "("
+  .
+  ")"
+  .
+  "->"
+  .
+  (id) @type.builtin)
+ (#eq? @keyword "get")
+ (#any-of? @type.builtin
+  "u8" "u16" "u32" "u64" "s8" "s16" "s32" "s64" "f32" "f64"
+  "bool" "char" "string" "list" "tuple" "option" "result" "borrow"
+  "map" "future" "stream"))
+
+((ERROR
+  (ty
+    (id) @keyword)
+  .
+  "("
+  .
+  ")"
+  .
+  "->"
+  .
+  (id) @type.builtin)
+ (#eq? @keyword "get")
+ (#any-of? @type.builtin
+  "u8" "u16" "u32" "u64" "s8" "s16" "s32" "s64" "f32" "f64"
+  "bool" "char" "string" "list" "tuple" "option" "result" "borrow"
+  "map" "future" "stream"))
