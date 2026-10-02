@@ -23,9 +23,9 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
    and should produce no parser or resolver diagnostics. The leaf packages under
    `tests/fixtures/grammar-gaps/` deliberately exercise known grammar/parser
    disagreements and are not expected to be uniformly clean.
-5. Open a disposable multi-file WIT package. Record the Zed log/server stderr and
-   screenshots in a dated evidence directory. Do not place private workspace
-   source or secrets in shared evidence.
+5. Open a disposable multi-file WIT package. Record the Zed language-server log,
+   server info and screenshots in a dated evidence directory. Do not place private
+   workspace source or secrets in shared evidence.
 
 ## Scenarios
 
@@ -43,7 +43,7 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
 | Formatting | Format comments, docs and multiline constructs twice | Comments preserved; second format produces no further change | Pending |
 | Invalid formatting input | Format incomplete/error-tree input | No destructive edit; useful refusal/error | Pending |
 | Unsupported capabilities | Inspect initialize and editor commands | No unsupported semantic navigation/rename/completion advertised | Pending |
-| Local override | Configure a trusted explicit native binary | Exact binary launches; no download needed; Zed server info reports the expected `+git.<commit>` build identity | Pending |
+| Local override | Configure a trusted explicit native binary | Exact binary launches; no download needed; Zed server info reports the expected `+git.<commit>` build identity and View Logs contains the matching startup INFO message | Pending |
 | First hosted install | Remove test install cache after assets are published, restart server | Matching platform/version downloads and checksum passes | Pending |
 | Cached install | Restart with the verified installed executable | Server starts using the validated cache behavior | Pending |
 | Missing/corrupt asset | Exercise controlled missing/checksum/cache-corruption cases | Invalid cache is discarded and a clean download is attempted; unverified executable never starts | Pending |

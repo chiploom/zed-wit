@@ -314,6 +314,15 @@ fn run() -> Result<()> {
         "documentFormattingProvider":true
     }, "serverInfo":{"name":"wit-language-server","version":build_version()}}),
     )?;
+    connection
+        .sender
+        .send(Message::Notification(Notification::new(
+            "window/logMessage".into(),
+            json!({
+                "type": 3,
+                "message": format!("wit-language-server {}", build_version())
+            }),
+        )))?;
     if watch_registration {
         connection.sender.send(Message::Request(Request::new("wit-watch-registration".to_owned().into(), "client/registerCapability".into(), json!({"registrations":[{"id":"wit-file-watch","method":"workspace/didChangeWatchedFiles","registerOptions":{"watchers":[{"globPattern":"**/*.wit","kind":7}]}}]}))))?;
     }

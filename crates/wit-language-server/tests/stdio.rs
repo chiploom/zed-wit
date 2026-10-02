@@ -73,6 +73,16 @@ impl Client {
                 .is_none()
         );
         client.notify("initialized", json!({}));
+        let startup_log = client.until(|v| v["method"] == "window/logMessage");
+        assert_eq!(startup_log["params"]["type"], 3);
+        assert_eq!(
+            startup_log["params"]["message"],
+            format!(
+                "wit-language-server {}+git.{}",
+                env!("CARGO_PKG_VERSION"),
+                env!("WIT_LANGUAGE_SERVER_BUILD_COMMIT")
+            )
+        );
         if watching {
             let registration = client.until(|v| v["method"] == "client/registerCapability");
             assert_eq!(
