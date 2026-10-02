@@ -8,6 +8,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const BUILD_GIT_COMMIT: &str = env!("WIT_LANGUAGE_SERVER_BUILD_COMMIT");
+
+fn build_version() -> String {
+    format!("{}+git.{}", env!("CARGO_PKG_VERSION"), BUILD_GIT_COMMIT)
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Encoding {
     Utf8,
@@ -272,7 +278,7 @@ fn run() -> Result<()> {
     match args.as_slice() {
         [] => {}
         [arg] if arg == "--version" => {
-            println!("wit-language-server {}", env!("CARGO_PKG_VERSION"));
+            println!("wit-language-server {}", build_version());
             return Ok(());
         }
         [arg] if arg == "--help" || arg == "-h" => {
@@ -283,6 +289,10 @@ fn run() -> Result<()> {
         }
         _ => anyhow::bail!("unknown arguments; use --help"),
     }
+    eprintln!(
+        "wit-language-server {} (git commit {BUILD_GIT_COMMIT})",
+        env!("CARGO_PKG_VERSION")
+    );
     let (connection, threads) = Connection::stdio();
     let (initialize_id, initialize) = connection.initialize_start()?;
     let watch_registration = initialize
@@ -306,7 +316,7 @@ fn run() -> Result<()> {
         "positionEncoding":match encoding {Encoding::Utf8=>"utf-8",Encoding::Utf16=>"utf-16"},
         "textDocumentSync":{"openClose":true,"change":1,"save":true},
         "documentFormattingProvider":true
-    }, "serverInfo":{"name":"wit-language-server","version":env!("CARGO_PKG_VERSION")}}),
+    }, "serverInfo":{"name":"wit-language-server","version":build_version()}}),
     )?;
     if watch_registration {
         connection.sender.send(Message::Request(Request::new("wit-watch-registration".to_owned().into(), "client/registerCapability".into(), json!({"registrations":[{"id":"wit-file-watch","method":"workspace/didChangeWatchedFiles","registerOptions":{"watchers":[{"globPattern":"**/*.wit","kind":7}]}}]}))))?;

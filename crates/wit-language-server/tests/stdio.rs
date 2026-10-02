@@ -59,6 +59,14 @@ impl Client {
             result["result"]["capabilities"]["positionEncoding"],
             encoding
         );
+        assert_eq!(
+            result["result"]["serverInfo"]["version"],
+            format!(
+                "{}+git.{}",
+                env!("CARGO_PKG_VERSION"),
+                env!("WIT_LANGUAGE_SERVER_BUILD_COMMIT")
+            )
+        );
         assert!(
             result["result"]["capabilities"]
                 .get("hoverProvider")
@@ -238,11 +246,12 @@ fn cli_help_version_and_reject_unknown_flags() {
             .output()
             .unwrap();
         assert!(result.status.success());
-        assert!(
-            String::from_utf8(result.stdout)
-                .unwrap()
-                .contains("wit-language-server")
-        );
+        let stdout = String::from_utf8(result.stdout).unwrap();
+        assert!(stdout.contains("wit-language-server"));
+        if flag == "--version" {
+            assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
+            assert!(stdout.contains(env!("WIT_LANGUAGE_SERVER_BUILD_COMMIT")));
+        }
     }
     assert!(
         !Command::new(env!("CARGO_BIN_EXE_wit-language-server"))
