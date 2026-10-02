@@ -204,7 +204,10 @@ fn getter_setter_sugar_recovers_keyword_parameter_and_type_highlighting() {
     assert!(parse(&source).root_node().has_error());
 
     for keyword in ["get", "set"] {
-        let expected: BTreeSet<_> = source.match_indices(keyword).map(|(start, _)| start).collect();
+        let expected: BTreeSet<_> = source
+            .match_indices(keyword)
+            .map(|(start, _)| start)
+            .collect();
         assert_eq!(
             capture_starts_allow_errors("highlights", &source, "keyword", keyword),
             expected,
