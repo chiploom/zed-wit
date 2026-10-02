@@ -48,6 +48,6 @@ world application {
     import log: func(message: string);
     import types;
     export api;
-    export output: interface { write: func(item: entry); }
+    export output: interface { use types.{entry}; write: func(item: entry); }
     export run: func() -> result;
 }
