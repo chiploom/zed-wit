@@ -1,4 +1,4 @@
-package example:annotations@2.0.0+build.2;
+package example:current@2.0.0+build.2;
 
 interface api {
     @unstable(feature = experimental-type)
