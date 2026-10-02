@@ -8,10 +8,11 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
 ## Setup
 
 1. Build the native server with `cargo build -p wit-language-server --release --locked`
-   and check the adapter with
-   `cargo build --target wasm32-wasip2 --locked`. This intentionally mirrors
-   Zed's package selection when it compiles a Rust dev extension from the
-   workspace root.
+   and run `./target/release/wit-language-server --version` (append `.exe` on
+   Windows). Record the reported `+git.<commit>` build identity. Check the
+   adapter with `cargo build --target wasm32-wasip2 --locked`. This intentionally
+   mirrors Zed's package selection when it compiles a Rust dev extension from
+   the workspace root.
 2. In Zed, run **zed: install dev extension** and select the repository root.
    Resolve any conflicting installed WIT extension so the dev extension is active.
 3. Configure the server override shown in the project README to the absolute
@@ -42,7 +43,7 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
 | Formatting | Format comments, docs and multiline constructs twice | Comments preserved; second format produces no further change | Pending |
 | Invalid formatting input | Format incomplete/error-tree input | No destructive edit; useful refusal/error | Pending |
 | Unsupported capabilities | Inspect initialize and editor commands | No unsupported semantic navigation/rename/completion advertised | Pending |
-| Local override | Configure a trusted explicit native binary | Exact binary launches; no download needed | Pending |
+| Local override | Configure a trusted explicit native binary | Exact binary launches; no download needed; Zed server info reports the expected `+git.<commit>` build identity | Pending |
 | First hosted install | Remove test install cache after assets are published, restart server | Matching platform/version downloads and checksum passes | Pending |
 | Cached install | Restart with the verified installed executable | Server starts using the validated cache behavior | Pending |
 | Missing/corrupt asset | Exercise controlled missing/checksum/cache-corruption cases | Invalid cache is discarded and a clean download is attempted; unverified executable never starts | Pending |

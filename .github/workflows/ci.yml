@@ -31,6 +31,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   RUSTUP_AUTO_INSTALL: "0"
+  WIT_LANGUAGE_SERVER_BUILD_COMMIT: ${{ github.sha }}
 jobs:
   quality:
     runs-on: ubuntu-24.04
