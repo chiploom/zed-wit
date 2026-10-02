@@ -1,4 +1,4 @@
-package example:editing@1.2.3;
+package example:current@2.0.0+build.2;
 
 /// Documentation with Unicode: café, 日本語, 🧩.
 interface types {
