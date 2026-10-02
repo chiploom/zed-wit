@@ -25,7 +25,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 cargo check --workspace --locked
-cargo check -p zed-wit --target wasm32-wasip2 --locked
+cargo build --target wasm32-wasip2 --locked
 ```
 
 The native server is not a Wasm package. Keep `Cargo.lock`; never edit generated
