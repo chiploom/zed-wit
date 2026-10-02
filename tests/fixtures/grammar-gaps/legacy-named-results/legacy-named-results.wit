@@ -1,0 +1,4 @@
+package example:legacy;
+interface old {
+    split: func() -> (left: u32, right: u32);
+}
