@@ -8,14 +8,17 @@ or end-to-end hosted installation.
 ## Snapshot
 
 - Date: 2026-10-01
-- Baseline commit: `9875ce49de42849f97fcb3ab2b1fed7a162fe1f9`
+- Hosted CI baseline: `9875ce49de42849f97fcb3ab2b1fed7a162fe1f9`
+- Locally validated implementation: `b0321be0c825567cdb0b65f7899967e18a1a576b`
 - Rust: 1.99.0
 - GitHub Actions CI run: [#28](https://github.com/chiploom/zed-wit/actions/runs/36940382890)
 - CI conclusion: success
 
-The `finish-zed-wit` audit branch restored this exact source tree after an
-invalidated LSP lifecycle experiment. Validation claims below therefore refer to
-the baseline tree, not to that reverted experiment.
+The hosted matrix below applies to the `main` baseline. The local Apple Silicon
+validation applies to `b0321be0c825567cdb0b65f7899967e18a1a576b`, which includes
+the closed-sibling diagnostics fix and corrupted server-cache recovery. An
+earlier LSP lifecycle experiment was fully reverted and has no effective source
+diff against `main`.
 
 ## Hosted CI evidence
 
@@ -55,18 +58,20 @@ verification job downloaded all five target artifacts together and passed
 
 ## Local Apple Silicon evidence
 
-On an `aarch64-apple-darwin` development host using Rust 1.99.0, the baseline
-tree passed:
+On an `aarch64-apple-darwin` development host using Rust 1.99.0,
+`b0321be0c825567cdb0b65f7899967e18a1a576b` passed:
 
-- dependency policy validation
-- formatting
-- clippy with warnings denied
-- the full workspace test suite with all features
-- workspace checks
-- the Zed adapter `wasm32-wasip2` check
-- direct `wit-language-server`, `wit-analysis`, and `wit-syntax` test suites
+- `cargo xtask check-no-python`
+- `cargo xtask check-dependencies`
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
+- `cargo test --workspace --all-features --locked`
+- `cargo check --workspace --locked`
+- `cargo check -p zed-wit --target wasm32-wasip2 --locked`
+- `git diff --check origin/main...HEAD`
 
-The hosted quality job is the recorded evidence for `check-no-python`.
+The run included the regression tests for closed sibling diagnostics and corrupt
+or missing native-server cache detection.
 
 ## What remains unqualified
 
