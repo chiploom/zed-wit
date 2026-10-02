@@ -9,16 +9,17 @@ or end-to-end hosted installation.
 
 - Date: 2026-10-01
 - Hosted CI baseline: `9875ce49de42849f97fcb3ab2b1fed7a162fe1f9`
-- Locally validated implementation: `b0321be0c825567cdb0b65f7899967e18a1a576b`
+- Locally validated implementation: `a4f6960a6aa20a6eec996213463c5fac82adcb6b`
 - Rust: 1.99.0
 - GitHub Actions CI run: [#28](https://github.com/chiploom/zed-wit/actions/runs/36940382890)
 - CI conclusion: success
 
 The hosted matrix below applies to the `main` baseline. The local Apple Silicon
-validation applies to `b0321be0c825567cdb0b65f7899967e18a1a576b`, which includes
-the closed-sibling diagnostics fix and corrupted server-cache recovery. An
-earlier LSP lifecycle experiment was fully reverted and has no effective source
-diff against `main`.
+validation applies to `a4f6960a6aa20a6eec996213463c5fac82adcb6b`, which includes
+the closed-sibling diagnostics fix, corrupt-cache recovery, package-isolated
+fixtures, formatter regression fixes, project-local Zed settings, and native
+server build-commit reporting. An earlier LSP lifecycle experiment was fully
+reverted and has no effective source diff against `main`.
 
 ## Hosted CI evidence
 
@@ -59,7 +60,7 @@ verification job downloaded all five target artifacts together and passed
 ## Local Apple Silicon evidence
 
 On an `aarch64-apple-darwin` development host using Rust 1.99.0,
-`b0321be0c825567cdb0b65f7899967e18a1a576b` passed:
+`a4f6960a6aa20a6eec996213463c5fac82adcb6b` passed:
 
 - `cargo xtask check-no-python`
 - `cargo xtask check-dependencies`
@@ -67,19 +68,44 @@ On an `aarch64-apple-darwin` development host using Rust 1.99.0,
 - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
 - `cargo test --workspace --all-features --locked`
 - `cargo check --workspace --locked`
-- `cargo check -p zed-wit --target wasm32-wasip2 --locked`
+- `cargo build --target wasm32-wasip2 --locked`
+- `cargo build -p wit-language-server --release --locked`
 - `git diff --check origin/main...HEAD`
 
-The run included the regression tests for closed sibling diagnostics and corrupt
-or missing native-server cache detection.
+The workspace run included 12 `wit-analysis` tests, 3 language-server unit
+tests, 4 stdio integration tests, 9 syntax/editing tests, 7 `xtask` tests, and
+6 adapter/distribution tests, all passing. The release binary reported
+`wit-language-server 0.1.0+git.a4f6960a6aa20a6eec996213463c5fac82adcb6b`,
+matching the validated Git `HEAD`.
+
+The `aarch64-apple-darwin` release packaging path also completed successfully
+and produced the native executable, SHA-256 checksum, provenance JSON, and
+target-specific license report.
+
+## Manual Zed development-extension evidence
+
+The same branch was exercised as a development extension in Zed on Apple
+Silicon. Observed behavior included:
+
+- the project-local binary override resolving the repository release server;
+- LSP `serverInfo.version` exposing the embedded `+git.<commit>` build identity;
+- clean diagnostics for the current and gated package fixtures exercised;
+- the intentional `legacy-named-results` grammar gap producing the expected
+  `wit-parser` error, `expected a type, found '('`;
+- document formatting preserving annotation spacing and upstream
+  `use`/`include ... with` spacing while leaving formatted WIT semantically
+  clean.
+
+The exact Zed editor version was not recorded in the supplied evidence, so this
+is a development-extension smoke/behavior record rather than a complete signed-off
+GUI qualification matrix.
 
 ## What remains unqualified
 
 The following remain pending and must not be inferred from the green CI matrix:
 
-- Manual Zed development-extension installation and editor behavior.
-- GUI validation of highlighting, outline, snippets, diagnostics, formatting,
-  restart behavior, and log output.
+- A complete manual GUI qualification record with the exact Zed editor version,
+  screenshots/log paths, and every checklist row marked with evidence.
 - End-to-end automatic native-server download from an actual GitHub release.
 - Corrupt/missing hosted asset behavior against a published release.
 - Execution of the protected release workflow and artifact attestations.

@@ -15,9 +15,11 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
    the workspace root.
 2. In Zed, run **zed: install dev extension** and select the repository root.
    Resolve any conflicting installed WIT extension so the dev extension is active.
-3. Configure the server override shown in the project README to the absolute
-   native executable path. This is required until matching hosted assets exist.
-   Confirm the path is trusted and executable; restart the WIT language server.
+3. Copy `.zed/settings.example.json` to the ignored
+   `.zed/settings.json`. The project-local path is relative to the repository
+   worktree; append `.exe` on Windows. This override is required until matching
+   hosted assets exist. Confirm the path is trusted and executable, then restart
+   the WIT language server.
 4. Open each leaf package under `tests/fixtures/current/` and
    `tests/fixtures/gated/`. Each leaf directory is an independent package root
    and should produce no parser or resolver diagnostics. The leaf packages under

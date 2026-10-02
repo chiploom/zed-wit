@@ -20,9 +20,16 @@ and is not published in the Zed registry.
 Install [Rust via rustup](https://rustup.rs/), clone this repository, and build:
 
 ```sh
-cargo build -p wit-language-server --locked
-./target/debug/wit-language-server --version
+cargo build -p wit-language-server --release --locked
+./target/release/wit-language-server --version
+mkdir -p .zed
+cp .zed/settings.example.json .zed/settings.json
 ```
+
+The project-local settings example points Zed at
+`target/release/wit-language-server`, relative to the repository worktree. On
+Windows, change the path in the untracked `.zed/settings.json` to
+`target/release/wit-language-server.exe`.
 
 The version output includes the Git commit captured when the binary was built,
 for example `0.1.0+git.<commit>`. The same build version is exposed through
@@ -30,20 +37,8 @@ LSP `serverInfo.version`, which Zed displays in its language-server menu, and
 is emitted once as an INFO `window/logMessage` notification so it also appears
 in Zed's language-server **View Logs** output.
 
-In Zed settings, configure the local executable. Replace the example with the
-absolute path to your checkout (`.exe` on Windows):
-
-```json
-{
-  "lsp": {
-    "wit-language-server": {
-      "binary": {
-        "path": "/absolute/path/to/zed-wit/target/debug/wit-language-server"
-      }
-    }
-  }
-}
-```
+If you configure the binary in global Zed settings instead of project settings,
+use an absolute path to the release executable.
 
 Run `zed: install dev extension` from Zed's command palette and select the
 repository root. Zed builds the root adapter package for `wasm32-wasip2` and
