@@ -48,7 +48,7 @@ fn texts(name: &str, source: &str, capture_name: &str) -> Vec<String> {
         .collect()
 }
 
-fn texts_allow_errors(name: &str, source: &str, capture_name: &str) -> Vec<String> {
+fn captures_allow_errors(name: &str, source: &str) -> Vec<(String, String, usize)> {
     let tree = parse(source);
     let query = query(name);
     let mut cursor = QueryCursor::new();
@@ -56,12 +56,27 @@ fn texts_allow_errors(name: &str, source: &str, capture_name: &str) -> Vec<Strin
     let mut found = Vec::new();
     while let Some(matched) = matches.next() {
         for capture in matched.captures {
-            if query.capture_names()[capture.index as usize] == capture_name {
-                found.push(source[capture.node.byte_range()].to_string());
-            }
+            found.push((
+                query.capture_names()[capture.index as usize].to_string(),
+                source[capture.node.byte_range()].to_string(),
+                capture.node.start_byte(),
+            ));
         }
     }
     found
+}
+
+fn capture_starts_allow_errors(
+    name: &str,
+    source: &str,
+    capture_name: &str,
+    text: &str,
+) -> BTreeSet<usize> {
+    captures_allow_errors(name, source)
+        .into_iter()
+        .filter(|(capture, found, _)| capture == capture_name && found == text)
+        .map(|(_, _, start)| start)
+        .collect()
 }
 
 #[test]
@@ -188,41 +203,46 @@ fn getter_setter_sugar_recovers_keyword_parameter_and_type_highlighting() {
     .unwrap();
     assert!(parse(&source).root_node().has_error());
 
-    let keywords = texts_allow_errors("highlights", &source, "keyword");
+    for keyword in ["get", "set"] {
+        let expected: BTreeSet<_> = source.match_indices(keyword).map(|(start, _)| start).collect();
+        assert_eq!(
+            capture_starts_allow_errors("highlights", &source, "keyword", keyword),
+            expected,
+            "every {keyword} accessor should use keyword highlighting"
+        );
+    }
+
+    let expected_parameters: BTreeSet<_> = source
+        .match_indices("(v:")
+        .map(|(start, _)| start + 1)
+        .collect();
     assert_eq!(
-        keywords
-            .into_iter()
-            .filter(|keyword| keyword == "get" || keyword == "set")
-            .collect::<Vec<_>>(),
-        ["get", "set", "get", "set"]
-    );
-    assert_eq!(
-        texts_allow_errors("highlights", &source, "variable.parameter"),
-        ["v", "v"]
+        capture_starts_allow_errors("highlights", &source, "variable.parameter", "v"),
+        expected_parameters,
+        "setter parameters should use function-parameter highlighting"
     );
 
-    let builtin_types = texts_allow_errors("highlights", &source, "type.builtin");
-    for expected in ["u64", "string"] {
-        assert!(
-            builtin_types
-                .iter()
-                .filter(|ty| ty.as_str() == expected)
-                .count()
-                >= 2,
-            "expected both getter and setter occurrences of {expected} to be highlighted: {builtin_types:?}"
+    for builtin in ["u64", "string"] {
+        let expected: BTreeSet<_> = source
+            .match_indices(builtin)
+            .map(|(start, _)| start)
+            .collect();
+        assert_eq!(
+            capture_starts_allow_errors("highlights", &source, "type.builtin", builtin),
+            expected,
+            "every accessor occurrence of {builtin} should use builtin-type highlighting"
         );
     }
 
     let custom = "package demo:properties; interface properties { type item = u32; value: set(v: item); value: get() -> item; }";
     assert!(parse(custom).root_node().has_error());
-    let recovered_types = texts_allow_errors("highlights", custom, "type");
+    let setter_type = custom.find("v: item").unwrap() + "v: ".len();
+    let getter_type = custom.find("-> item").unwrap() + "-> ".len();
+    let expected_custom = BTreeSet::from([setter_type, getter_type]);
+    let recovered_custom = capture_starts_allow_errors("highlights", custom, "type", "item");
     assert!(
-        recovered_types
-            .iter()
-            .filter(|ty| ty.as_str() == "item")
-            .count()
-            >= 2,
-        "expected accessor parameter and return custom types to be highlighted: {recovered_types:?}"
+        expected_custom.is_subset(&recovered_custom),
+        "accessor parameter and return custom types should be highlighted: {recovered_custom:?}"
     );
 }
 
