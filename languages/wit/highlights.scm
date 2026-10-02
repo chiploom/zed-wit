@@ -43,20 +43,20 @@
  (#any-of? @keyword "get" "set"))
 
 ((ERROR
-  (id) @_accessor
+  (id) @keyword
   "("
   (id) @variable.parameter
   ":"
   (id) @type)
- (#eq? @_accessor "set"))
+ (#eq? @keyword "set"))
 
 ((ERROR
-  (id) @_accessor
+  (id) @keyword
   "("
   ")"
   "->"
   (id) @type)
- (#eq? @_accessor "get"))
+ (#eq? @keyword "get"))
 
 ((ERROR
   (id) @type.builtin)
