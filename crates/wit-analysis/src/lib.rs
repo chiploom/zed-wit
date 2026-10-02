@@ -419,6 +419,16 @@ mod tests {
     }
 
     #[test]
+    fn formatter_matches_upstream_use_and_include_spacing() {
+        let source = include_str!("../../../tests/fixtures/current/core/core.wit");
+        let formatted = format(source).unwrap();
+
+        assert!(formatted.contains("\n}\n\nuse types as shared;\ninterface api"));
+        assert!(formatted.contains("include base with { base-log as model-log }"));
+        assert!(formatted.contains("use shared.{entry, status as state};"));
+    }
+
+    #[test]
     fn modern_fixture_formatting_is_idempotent() {
         for (name, source) in [
             (
