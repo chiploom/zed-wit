@@ -172,7 +172,8 @@ fn grammar_limitations_are_explicit() {
         parse(&sugar).root_node().has_error(),
         "getter/setter support changed: update qualification"
     );
-    let legacy = fs::read_to_string(gaps.join("legacy-named-results/legacy-named-results.wit")).unwrap();
+    let legacy =
+        fs::read_to_string(gaps.join("legacy-named-results/legacy-named-results.wit")).unwrap();
     assert!(
         !parse(&legacy).root_node().has_error(),
         "legacy result behavior changed: update qualification"

@@ -383,12 +383,16 @@ mod tests {
         for (name, source, expected_clean) in [
             (
                 "getters-setters.wit",
-                include_str!("../../../tests/fixtures/grammar-gaps/getters-setters/getters-setters.wit"),
+                include_str!(
+                    "../../../tests/fixtures/grammar-gaps/getters-setters/getters-setters.wit"
+                ),
                 true,
             ),
             (
                 "legacy-named-results.wit",
-                include_str!("../../../tests/fixtures/grammar-gaps/legacy-named-results/legacy-named-results.wit"),
+                include_str!(
+                    "../../../tests/fixtures/grammar-gaps/legacy-named-results/legacy-named-results.wit"
+                ),
                 false,
             ),
         ] {
