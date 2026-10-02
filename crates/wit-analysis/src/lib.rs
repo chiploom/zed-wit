@@ -373,6 +373,36 @@ mod tests {
     }
 
     #[test]
+    fn grammar_gap_fixtures_match_upstream_parser_behavior() {
+        for (name, source, expected_clean) in [
+            (
+                "getters-setters.wit",
+                include_str!("../../../tests/fixtures/grammar-gaps/getters-setters.wit"),
+                true,
+            ),
+            (
+                "legacy-named-results.wit",
+                include_str!("../../../tests/fixtures/grammar-gaps/legacy-named-results.wit"),
+                false,
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join(name), source).unwrap();
+            let diagnostics = analyze(dir.path(), &Overlays::new()).unwrap();
+            assert_eq!(
+                diagnostics.is_empty(),
+                expected_clean,
+                "{name}: {}",
+                diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
+    }
+
+    #[test]
     fn modern_fixture_formatting_is_idempotent() {
         for (name, source) in [
             (
