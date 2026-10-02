@@ -35,6 +35,13 @@
  "import" "export" "type" "resource" "record" "flags" "enum"
  "variant" "func" "static" "async"] @keyword
 
+; Getter/setter sugar is accepted by wit-parser but not yet represented by the
+; pinned Tree-sitter grammar. Highlight only the accessor words recovered inside
+; error nodes so ordinary identifiers named get/set keep their normal styling.
+((ERROR
+  (id) @keyword)
+ (#any-of? @keyword "get" "set"))
+
 ["u8" "u16" "u32" "u64" "s8" "s16" "s32" "s64" "f32" "f64"
  "bool" "char" "string" "list" "tuple" "option" "result" "borrow"
  "map" "future" "stream"] @type.builtin

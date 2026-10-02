@@ -48,6 +48,22 @@ fn texts(name: &str, source: &str, capture_name: &str) -> Vec<String> {
         .collect()
 }
 
+fn texts_allow_errors(name: &str, source: &str, capture_name: &str) -> Vec<String> {
+    let tree = parse(source);
+    let query = query(name);
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());
+    let mut found = Vec::new();
+    while let Some(matched) = matches.next() {
+        for capture in matched.captures {
+            if query.capture_names()[capture.index as usize] == capture_name {
+                found.push(source[capture.node.byte_range()].to_string());
+            }
+        }
+    }
+    found
+}
+
 #[test]
 fn all_queries_compile_with_only_zed_supported_captures() {
     let highlights = [
@@ -162,6 +178,24 @@ fn current_and_gated_corpus_parse_without_errors() {
             );
         }
     }
+}
+
+#[test]
+fn getter_setter_sugar_uses_keyword_highlighting_inside_grammar_errors() {
+    let source = fs::read_to_string(
+        root().join("tests/fixtures/grammar-gaps/getters-setters/getters-setters.wit"),
+    )
+    .unwrap();
+    assert!(parse(&source).root_node().has_error());
+
+    let keywords = texts_allow_errors("highlights", &source, "keyword");
+    assert_eq!(
+        keywords
+            .into_iter()
+            .filter(|keyword| keyword == "get" || keyword == "set")
+            .collect::<Vec<_>>(),
+        ["get", "set", "get", "set"]
+    );
 }
 
 #[test]
