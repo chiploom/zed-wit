@@ -351,6 +351,37 @@ mod tests {
         assert_eq!(format(&formatted).unwrap(), formatted);
     }
     #[test]
+    fn current_fixtures_resolve_with_upstream_parser() {
+        for (name, source) in [
+            (
+                "core.wit",
+                include_str!("../../../tests/fixtures/current/core.wit"),
+            ),
+            (
+                "async.wit",
+                include_str!("../../../tests/fixtures/current/async.wit"),
+            ),
+            (
+                "annotations.wit",
+                include_str!("../../../tests/fixtures/current/annotations.wit"),
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join(name), source).unwrap();
+            let diagnostics = analyze(dir.path(), &Overlays::new()).unwrap();
+            assert!(
+                diagnostics.is_empty(),
+                "{name}: {}",
+                diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
+    }
+
+    #[test]
     fn modern_fixture_formatting_is_idempotent() {
         for (name, source) in [
             (
