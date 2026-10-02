@@ -64,6 +64,15 @@ impl Client {
                 .get("hoverProvider")
                 .is_none()
         );
+        if watching {
+            assert!(
+                client
+                    .messages
+                    .recv_timeout(Duration::from_millis(100))
+                    .is_err(),
+                "server registered file watching before initialized"
+            );
+        }
         client.notify("initialized", json!({}));
         if watching {
             let registration = client.until(|v| v["method"] == "client/registerCapability");

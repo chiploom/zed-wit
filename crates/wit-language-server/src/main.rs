@@ -78,6 +78,8 @@ struct Server {
     published: BTreeSet<PathBuf>,
     encoding: Encoding,
     cache: BTreeMap<PathBuf, Result<Vec<wit_analysis::Diagnostic>, String>>,
+    watch_registration: bool,
+    initialized: bool,
     #[cfg(test)]
     analysis_runs: BTreeMap<PathBuf, usize>,
 }
@@ -177,6 +179,20 @@ impl Server {
     }
     fn notification(&mut self, connection: &Connection, notification: Notification) -> Result<()> {
         match notification.method.as_str() {
+            "initialized" => {
+                anyhow::ensure!(
+                    !self.initialized,
+                    "initialized notification received more than once"
+                );
+                self.initialized = true;
+                if self.watch_registration {
+                    connection.sender.send(Message::Request(Request::new(
+                        "wit-watch-registration".to_owned().into(),
+                        "client/registerCapability".into(),
+                        json!({"registrations":[{"id":"wit-file-watch","method":"workspace/didChangeWatchedFiles","registerOptions":{"watchers":[{"globPattern":"**/*.wit","kind":7}]}}]}),
+                    )))?;
+                }
+            }
             "textDocument/didOpen" => {
                 let params: lsp_types::DidOpenTextDocumentParams =
                     serde_json::from_value(notification.params)?;
@@ -310,14 +326,13 @@ fn run() -> Result<()> {
         "documentFormattingProvider":true
     }, "serverInfo":{"name":"wit-language-server","version":env!("CARGO_PKG_VERSION")}}),
     )?;
-    if watch_registration {
-        connection.sender.send(Message::Request(Request::new("wit-watch-registration".to_owned().into(), "client/registerCapability".into(), json!({"registrations":[{"id":"wit-file-watch","method":"workspace/didChangeWatchedFiles","registerOptions":{"watchers":[{"globPattern":"**/*.wit","kind":7}]}}]}))))?;
-    }
     let mut server = Server {
         documents: BTreeMap::new(),
         published: BTreeSet::new(),
         encoding,
         cache: BTreeMap::new(),
+        watch_registration,
+        initialized: false,
         #[cfg(test)]
         analysis_runs: BTreeMap::new(),
     };
@@ -408,6 +423,8 @@ mod tests {
             published: BTreeSet::new(),
             encoding: Encoding::Utf16,
             cache: BTreeMap::new(),
+            watch_registration: false,
+            initialized: false,
             analysis_runs: BTreeMap::new(),
         };
         server.publish(&connection, &[]).unwrap();
