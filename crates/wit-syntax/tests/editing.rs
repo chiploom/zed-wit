@@ -262,6 +262,41 @@ fn getter_setter_sugar_recovers_keyword_parameter_and_type_highlighting() {
 }
 
 #[test]
+fn unrelated_error_nodes_do_not_receive_accessor_recovery_captures() {
+    let source = "package demo:negative; interface i { invalid get(); invalid set(v: u32); }";
+    let tree = parse(source);
+    assert!(
+        tree.root_node().has_error(),
+        "the malformed declarations must exercise Tree-sitter ERROR recovery"
+    );
+    let error_tree = tree.root_node().to_sexp();
+    assert!(error_tree.contains("(ERROR"), "{error_tree}");
+
+    let accessor_only = [
+        "function",
+        "keyword",
+        "variable.parameter",
+        "type",
+        "type.builtin",
+    ];
+    let unrelated_tokens = ["get", "set", "v", "u32"];
+    let found = captures_allow_errors("highlights", source);
+    for token in unrelated_tokens {
+        let starts: BTreeSet<_> = source
+            .match_indices(token)
+            .filter(|(start, _)| *start > source.find("interface i").unwrap())
+            .map(|(start, _)| start)
+            .collect();
+        for capture in &found {
+            assert!(
+                !(accessor_only.contains(&capture.0.as_str()) && starts.contains(&capture.2)),
+                "unrelated {token:?} received accessor capture {capture:?}; tree: {error_tree}"
+            );
+        }
+    }
+}
+
+#[test]
 fn grammar_limitations_are_explicit() {
     let gaps = root().join("tests/fixtures/grammar-gaps");
     let sugar = fs::read_to_string(gaps.join("getters-setters/getters-setters.wit")).unwrap();

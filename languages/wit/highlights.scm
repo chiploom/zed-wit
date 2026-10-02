@@ -60,6 +60,8 @@
 ; as a bare id or as an id nested in ty. Keep these overrides last so Zed's
 ; overlapping-highlight resolution prefers accessor semantics only here.
 ((ERROR
+  [(id) (ty (id))]
+  ":"
   (id) @keyword
   .
   "("
@@ -68,6 +70,10 @@
  (#eq? @keyword "get"))
 
 ((ERROR
+  [(id) (ty (id))]
+  .
+  ":"
+  .
   (ty
     (id) @keyword)
   .
@@ -77,6 +83,8 @@
  (#eq? @keyword "get"))
 
 ((ERROR
+  [(id) (ty (id))]
+  ":"
   (id) @keyword
   .
   "("
@@ -87,6 +95,10 @@
  (#eq? @keyword "set"))
 
 ((ERROR
+  [(id) (ty (id))]
+  .
+  ":"
+  .
   (ty
     (id) @keyword)
   .
@@ -101,6 +113,8 @@
 ; bare ids inside the error node. Builtin types continue to use the normal
 ; literal captures above.
 ((ERROR
+  [(id) (ty (id))]
+  ":"
   (id) @keyword
   .
   "("
@@ -113,6 +127,10 @@
  (#eq? @keyword "set"))
 
 ((ERROR
+  [(id) (ty (id))]
+  .
+  ":"
+  .
   (ty
     (id) @keyword)
   .
@@ -126,6 +144,8 @@
  (#eq? @keyword "set"))
 
 ((ERROR
+  [(id) (ty (id))]
+  ":"
   (id) @keyword
   .
   "("
@@ -138,6 +158,10 @@
  (#eq? @keyword "get"))
 
 ((ERROR
+  [(id) (ty (id))]
+  .
+  ":"
+  .
   (ty
     (id) @keyword)
   .
@@ -154,6 +178,8 @@
 ; Builtins can be recovered as ids inside accessor error nodes. These rules
 ; intentionally come after the generic @type recovery so builtin styling wins.
 ((ERROR
+  [(id) (ty (id))]
+  ":"
   (id) @keyword
   .
   "("
@@ -170,6 +196,10 @@
   "map" "future" "stream"))
 
 ((ERROR
+  [(id) (ty (id))]
+  .
+  ":"
+  .
   (ty
     (id) @keyword)
   .
@@ -187,6 +217,8 @@
   "map" "future" "stream"))
 
 ((ERROR
+  [(id) (ty (id))]
+  ":"
   (id) @keyword
   .
   "("
