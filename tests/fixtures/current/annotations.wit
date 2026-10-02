@@ -1,6 +1,6 @@
 package example:current@2.0.0+build.2;
 
-interface api {
+interface annotations-api {
     @unstable(feature = experimental-type)
     type feature-value = u32;
 
@@ -39,7 +39,7 @@ interface api {
 }
 
 @since(version = 1.0.0)
-world application {
+world annotations-application {
     @since(version = 1.0.0)
-    import api;
+    import annotations-api;
 }
