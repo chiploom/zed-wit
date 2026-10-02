@@ -1,4 +1,4 @@
-package example:concurrency;
+package example:current@2.0.0+build.2;
 interface operations {
     type completion = future;
     type pending-value = future<string>;
