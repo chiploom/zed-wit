@@ -26,7 +26,7 @@ cargo build -p wit-language-server --locked
 
 The version output includes the Git commit captured when the binary was built,
 for example `0.1.0+git.<commit>`. The same build version is exposed through
-LSP `serverInfo.version` and logged to stderr when the server starts.
+LSP `serverInfo.version`, which Zed displays in its language-server menu.
 
 In Zed settings, configure the local executable. Replace the example with the
 absolute path to your checkout (`.exe` on Windows):

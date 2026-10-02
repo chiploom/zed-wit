@@ -289,10 +289,6 @@ fn run() -> Result<()> {
         }
         _ => anyhow::bail!("unknown arguments; use --help"),
     }
-    eprintln!(
-        "wit-language-server {} (git commit {BUILD_GIT_COMMIT})",
-        env!("CARGO_PKG_VERSION")
-    );
     let (connection, threads) = Connection::stdio();
     let (initialize_id, initialize) = connection.initialize_start()?;
     let watch_registration = initialize
