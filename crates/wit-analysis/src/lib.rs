@@ -321,7 +321,7 @@ mod tests {
         std::fs::remove_file(dep).unwrap();
         std::fs::write(
             &main,
-            include_str!("../../../tests/fixtures/gated/nested-packages.wit"),
+            include_str!("../../../tests/fixtures/gated/nested-packages/nested-packages.wit"),
         )
         .unwrap();
         assert!(analyze(dir.path(), &Overlays::new()).unwrap().is_empty());
@@ -351,14 +351,20 @@ mod tests {
         assert_eq!(format(&formatted).unwrap(), formatted);
     }
     #[test]
-    fn fixture_groups_resolve_as_upstream_packages() {
+    fn fixture_packages_resolve_with_upstream_parser() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for group in ["current", "gated"] {
-            let directory = root.join("tests/fixtures").join(group);
+        for package in [
+            "current/annotations",
+            "current/async",
+            "current/core",
+            "gated/features",
+            "gated/nested-packages",
+        ] {
+            let directory = root.join("tests/fixtures").join(package);
             let diagnostics = analyze(&directory, &Overlays::new()).unwrap();
             assert!(
                 diagnostics.is_empty(),
-                "{group}: {}",
+                "{package}: {}",
                 diagnostics
                     .iter()
                     .map(|diagnostic| format!(
@@ -377,12 +383,12 @@ mod tests {
         for (name, source, expected_clean) in [
             (
                 "getters-setters.wit",
-                include_str!("../../../tests/fixtures/grammar-gaps/getters-setters.wit"),
+                include_str!("../../../tests/fixtures/grammar-gaps/getters-setters/getters-setters.wit"),
                 true,
             ),
             (
                 "legacy-named-results.wit",
-                include_str!("../../../tests/fixtures/grammar-gaps/legacy-named-results.wit"),
+                include_str!("../../../tests/fixtures/grammar-gaps/legacy-named-results/legacy-named-results.wit"),
                 false,
             ),
         ] {
@@ -407,19 +413,19 @@ mod tests {
         for (name, source) in [
             (
                 "core",
-                include_str!("../../../tests/fixtures/current/core.wit"),
+                include_str!("../../../tests/fixtures/current/core/core.wit"),
             ),
             (
                 "async",
-                include_str!("../../../tests/fixtures/current/async.wit"),
+                include_str!("../../../tests/fixtures/current/async/async.wit"),
             ),
             (
                 "annotations",
-                include_str!("../../../tests/fixtures/current/annotations.wit"),
+                include_str!("../../../tests/fixtures/current/annotations/annotations.wit"),
             ),
             (
                 "features",
-                include_str!("../../../tests/fixtures/gated/features.wit"),
+                include_str!("../../../tests/fixtures/gated/features/features.wit"),
             ),
             (
                 "nested",
