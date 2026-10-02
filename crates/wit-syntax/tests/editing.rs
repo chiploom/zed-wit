@@ -215,6 +215,18 @@ fn getter_setter_sugar_recovers_keyword_parameter_and_type_highlighting() {
         );
     }
 
+    for function_name in ["value", "name"] {
+        let expected: BTreeSet<_> = source
+            .match_indices(function_name)
+            .map(|(start, _)| start)
+            .collect();
+        assert_eq!(
+            capture_starts_allow_errors("highlights", &source, "function", function_name),
+            expected,
+            "every accessor declaration named {function_name} should use function highlighting"
+        );
+    }
+
     let expected_parameters: BTreeSet<_> = source
         .match_indices("(v:")
         .map(|(start, _)| start + 1)

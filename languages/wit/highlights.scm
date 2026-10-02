@@ -218,3 +218,51 @@
   "u8" "u16" "u32" "u64" "s8" "s16" "s32" "s64" "f32" "f64"
   "bool" "char" "string" "list" "tuple" "option" "result" "borrow"
   "map" "future" "stream"))
+
+; Accessor declaration names can also be recovered as ids or ty(id) nodes.
+; Keep these rules last so they override generic variable/type captures and
+; match the @function styling used by ordinary WIT function declarations.
+((ERROR
+  (id) @function
+  .
+  ":"
+  .
+  (id) @keyword
+  .
+  "(")
+ (#any-of? @keyword "get" "set"))
+
+((ERROR
+  (id) @function
+  .
+  ":"
+  .
+  (ty
+    (id) @keyword)
+  .
+  "(")
+ (#any-of? @keyword "get" "set"))
+
+((ERROR
+  (ty
+    (id) @function)
+  .
+  ":"
+  .
+  (id) @keyword
+  .
+  "(")
+ (#any-of? @keyword "get" "set"))
+
+((ERROR
+  (ty
+    (id) @function)
+  .
+  ":"
+  .
+  (ty
+    (id) @keyword)
+  .
+  "(")
+ (#any-of? @keyword "get" "set"))
+
