@@ -429,7 +429,7 @@ mod tests {
             ),
             (
                 "nested",
-                include_str!("../../../tests/fixtures/gated/nested-packages.wit"),
+                include_str!("../../../tests/fixtures/gated/nested-packages/nested-packages.wit"),
             ),
         ] {
             let formatted = format(source).unwrap_or_else(|error| panic!("{name}: {error}"));
