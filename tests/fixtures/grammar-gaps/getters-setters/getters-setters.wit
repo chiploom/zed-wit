@@ -1,0 +1,9 @@
+package example:properties;
+interface properties {
+    value: get() -> u64;
+    value: set(v: u64);
+    resource object {
+        name: get() -> string;
+        name: set(v: string);
+    }
+}
