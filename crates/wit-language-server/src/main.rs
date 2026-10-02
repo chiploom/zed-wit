@@ -219,8 +219,6 @@ impl Server {
                 let p = path(params.text_document.uri.as_str())?;
                 self.documents.remove(&p);
                 self.publish(connection, std::slice::from_ref(&p))?;
-                Self::publish_one(connection, &p, None, &[])?;
-                self.published.remove(&p);
             }
             "textDocument/didSave" => {
                 let params: lsp_types::DidSaveTextDocumentParams =
@@ -380,6 +378,77 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn closing_document_preserves_disk_diagnostics_for_closed_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        let deps = dir.path().join("deps");
+        std::fs::create_dir(&deps).unwrap();
+        let main_path = dir.path().join("main.wit");
+        let dep_path = deps.join("types.wit");
+        let main_source = "package test:app; world app {}";
+        let dep_overlay = "package test:types; interface api {}";
+        std::fs::write(&main_path, main_source).unwrap();
+        std::fs::write(
+            &dep_path,
+            "package test:types; interface api { type broken = ; }",
+        )
+        .unwrap();
+
+        let (connection, client) = Connection::memory();
+        let mut server = Server {
+            documents: BTreeMap::from([
+                (
+                    main_path.clone(),
+                    Document {
+                        text: main_source.into(),
+                        version: 1,
+                    },
+                ),
+                (
+                    dep_path.clone(),
+                    Document {
+                        text: dep_overlay.into(),
+                        version: 1,
+                    },
+                ),
+            ]),
+            published: BTreeSet::new(),
+            encoding: Encoding::Utf16,
+            cache: BTreeMap::new(),
+            analysis_runs: BTreeMap::new(),
+        };
+        server.publish(&connection, &[]).unwrap();
+        while client.receiver.try_recv().is_ok() {}
+
+        let dep_uri = uri(&dep_path).unwrap();
+        server
+            .notification(
+                &connection,
+                Notification::new(
+                    "textDocument/didClose".into(),
+                    json!({"textDocument":{"uri":dep_uri}}),
+                ),
+            )
+            .unwrap();
+
+        let mut last = None;
+        for message in client.receiver.try_iter() {
+            if let Message::Notification(notification) = message
+                && notification.method == "textDocument/publishDiagnostics"
+                && notification.params["uri"].as_str() == Some(dep_uri.as_str())
+            {
+                last = Some(notification.params);
+            }
+        }
+        let params = last.expect("closed dependency diagnostics were not published");
+        assert!(params["version"].is_null());
+        assert!(
+            !params["diagnostics"].as_array().unwrap().is_empty(),
+            "on-disk errors must remain visible after closing an overlay"
+        );
+        assert!(server.published.contains(&dep_path));
+    }
+
     #[test]
     fn package_cache_reparses_only_affected_open_roots() {
         let dir = tempfile::tempdir().unwrap();
