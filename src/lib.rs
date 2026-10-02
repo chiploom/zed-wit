@@ -38,6 +38,12 @@ fn verify_cached_server(binary_path: &Path, checksum_path: &Path, asset: &str) -
     )
 }
 
+fn cache_is_valid(binary_path: &Path, checksum_path: &Path, asset: &str) -> bool {
+    binary_path.is_file()
+        && checksum_path.is_file()
+        && verify_cached_server(binary_path, checksum_path, asset).is_ok()
+}
+
 fn remove_file_if_exists(path: &Path) -> Result<(), String> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -58,10 +64,7 @@ impl WitExtension {
         let checksum_staging = Path::new(&directory).join(format!("{asset}.sha256.download"));
         fs::create_dir_all(&directory).map_err(|e| format!("Create server cache: {e}"))?;
 
-        let cache_valid = binary_path.is_file()
-            && checksum_path.is_file()
-            && verify_cached_server(&binary_path, &checksum_path, &asset).is_ok();
-        if !cache_valid {
+        if !cache_is_valid(&binary_path, &checksum_path, &asset) {
             zed::set_language_server_installation_status(
                 id,
                 &zed::LanguageServerInstallationStatus::Downloading,
@@ -201,6 +204,47 @@ mod tests {
         }
         assert!(platform_target(zed::Os::Windows, zed::Architecture::Aarch64).is_err());
         assert!(platform_target(zed::Os::Linux, zed::Architecture::X86).is_err());
+    }
+
+    #[test]
+    fn corrupted_cache_is_treated_as_missing() {
+        use sha2::{Digest, Sha256};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "zed-wit-cache-test-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+
+        let asset = "wit-language-server-test";
+        let binary_path = directory.join(asset);
+        let checksum_path = directory.join(format!("{asset}.sha256"));
+        let bytes = b"verified server";
+        let digest: String = Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+
+        fs::write(&binary_path, bytes).unwrap();
+        fs::write(&checksum_path, format!("{digest}  {asset}\n")).unwrap();
+        assert!(cache_is_valid(&binary_path, &checksum_path, asset));
+
+        fs::write(&binary_path, b"corrupted server").unwrap();
+        assert!(!cache_is_valid(&binary_path, &checksum_path, asset));
+
+        fs::write(&binary_path, bytes).unwrap();
+        fs::write(&checksum_path, format!("{digest}  other\n")).unwrap();
+        assert!(!cache_is_valid(&binary_path, &checksum_path, asset));
+
+        fs::remove_file(&checksum_path).unwrap();
+        assert!(!cache_is_valid(&binary_path, &checksum_path, asset));
+
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
