@@ -1,0 +1,53 @@
+package example:editing@1.2.3;
+
+/// Documentation with Unicode: café, 日本語, 🧩.
+interface types {
+    /* Outer block /* nested comment */ remains a comment. */
+    type octet = u8;
+    type primitives = tuple<u8, u16, u32, u64, s8, s16, s32, s64, f32, f64, bool, char, string>;
+    type bytes = list<octet>;
+    type maybe = option<string>;
+    type fallible = result<bytes, string>;
+    type only-error = result<_, string>;
+    type only-value = result<u32>;
+    type unit-result = result;
+    type pair = tuple<string, u32,>;
+    type %type = string;
+    record entry {
+        key: string,
+        value: bytes,
+    }
+    flags access { read, write, }
+    enum status { ready, pending, }
+    variant event { empty, data(entry), }
+    resource token;
+    resource connection {
+        constructor(address: string);
+        open: static func(address: string) -> connection;
+        send: func(payload: bytes) -> result;
+        close: func();
+    }
+    inspect: func(value: borrow<connection>, owned: connection, escaped: %type) -> bool;
+}
+
+use types as shared;
+interface api {
+    use shared.{entry, status as state};
+    get: func(id: u64) -> option<entry>;
+    check: func(value: state);
+}
+
+world base {
+    import types;
+}
+
+world application {
+    use types.{entry};
+    include base with { types as model }
+    import clock: interface { now: func() -> u64; }
+    import log: func(message: string);
+    import types;
+    export api;
+    export output: interface { write: func(item: entry); }
+    export run: func() -> result;
+}
