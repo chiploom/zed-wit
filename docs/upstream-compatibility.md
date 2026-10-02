@@ -33,12 +33,13 @@ overlays. It is not a dependency downloader or a recursive workspace crawler.
 Structured source spans must remain attached to the right file and converted to
 the negotiated LSP position encoding.
 
-The initial semantic surface is diagnostics and document formatting. Tree-sitter
-outline is distinct from LSP semantic navigation. Do not advertise completion,
-rename, references, or go-to-definition unless their complete implementation and
-resolution-aware regression tests are present. Formatting must preserve comments
-and file boundaries, be idempotent, and refuse syntax-error trees. New parser
-syntax does not automatically imply formatter support.
+The semantic surface is diagnostics, document formatting, completion, hover,
+definition, references and safe unresolved-type typo quick fixes. Tree-sitter
+outline remains distinct from LSP navigation; resolved identities come from
+`wit-parser`, while syntax nodes locate source tokens. Rename and workspace symbols
+are not advertised. Formatting must preserve comments and file boundaries, be
+idempotent, and refuse syntax-error trees. New parser syntax does not automatically
+imply formatter support.
 
 Historical [`Michael-F-Bryan/wit-lsp`](https://github.com/Michael-F-Bryan/wit-lsp)
 last changed in 2024 and has no audited native release assets.

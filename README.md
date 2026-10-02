@@ -13,7 +13,7 @@ and is not published in the Zed registry.
 | Diagnostics | Upstream `wit-parser` syntax, name/type and package errors; unsaved buffers |
 | Packages | Sibling multi-file packages, direct `deps/` files and package directories |
 | Formatting | Maintained Topiary engine; comment-preserving document formatting |
-| Semantic navigation | Completion, hover, definitions, references and workspace symbols are not implemented |
+| Semantic editor features | Type and declaration completion, resolved hover, go to definition and references; deterministic unresolved type typo quick fixes |
 
 ## Install locally
 

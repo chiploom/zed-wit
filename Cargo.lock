@@ -1507,6 +1507,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "topiary-core",
+ "tree-sitter",
  "wit-parser 0.260.0",
  "wit-syntax",
 ]

@@ -44,7 +44,10 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
 | Unicode positions | Put non-ASCII and astral characters before an error | Underline and edits match the negotiated position encoding | Pending |
 | Formatting | Format comments, docs and multiline constructs twice | Comments preserved; second format produces no further change | Pending |
 | Invalid formatting input | Format incomplete/error-tree input | No destructive edit; useful refusal/error | Pending |
-| Unsupported capabilities | Inspect initialize and editor commands | No unsupported semantic navigation/rename/completion advertised | Pending |
+| Semantic hover/navigation | Open a named type and a type use, request hover, definition and references | Hover shows resolved declaration; definition targets its source; references include uses and optionally declaration | Pending |
+| Context completion | Request completion after a type colon and at declaration positions | Type context offers WIT primitives and resolved types; declaration context offers declarations | Pending |
+| Type typo quick fix | Reference a uniquely similar missing named type, then an ambiguous or non-type unresolved name | Only the unique named-type typo gets a source-ranged quick fix | Pending |
+| Unsupported capabilities | Inspect initialize and editor commands | No unsupported rename or workspace symbols advertised | Pending |
 | Local override | Configure a trusted explicit native binary | Exact binary launches; no download needed; Zed server info reports the expected `+git.<commit>` build identity and View Logs contains the matching startup INFO message | Pending |
 | First hosted install | Remove test install cache after assets are published, restart server | Matching platform/version downloads and checksum passes | Pending |
 | Cached install | Restart with the verified installed executable | Server starts using the validated cache behavior | Pending |

@@ -67,10 +67,12 @@ impl Client {
                 env!("WIT_LANGUAGE_SERVER_BUILD_COMMIT")
             )
         );
-        assert!(
-            result["result"]["capabilities"]
-                .get("hoverProvider")
-                .is_none()
+        assert_eq!(result["result"]["capabilities"]["hoverProvider"], true);
+        assert_eq!(result["result"]["capabilities"]["definitionProvider"], true);
+        assert_eq!(result["result"]["capabilities"]["referencesProvider"], true);
+        assert_eq!(
+            result["result"]["capabilities"]["codeActionProvider"]["codeActionKinds"],
+            json!(["quickfix"])
         );
         client.notify("initialized", json!({}));
         let startup_log = client.until(|v| v["method"] == "window/logMessage");
@@ -294,5 +296,71 @@ fn formatting_honors_spaces_and_tabs() {
     }
     client.send(json!({"jsonrpc":"2.0","id":32,"method":"textDocument/formatting","params":{"textDocument":{"uri":uri},"options":{"tabSize":0,"insertSpaces":true}}}));
     assert_eq!(client.until(|v| v["id"] == 32)["error"]["code"], -32602);
+    client.shutdown();
+}
+
+#[test]
+fn semantic_requests_resolve_types_and_offer_a_safe_typo_fix() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package test:app; interface api { record item { value: u32 } echo: func(value: item) -> item; }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+    let reference = source.find("value: item").unwrap() + "value: ".len();
+    let position = json!({"line":0,"character":reference});
+    client.send(json!({"jsonrpc":"2.0","id":10,"method":"textDocument/hover","params":{"textDocument":{"uri":uri},"position":position}}));
+    let hover = client.until(|value| value["id"] == 10);
+    assert!(
+        hover["result"]["contents"]["value"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("record item"),
+        "{hover}"
+    );
+    assert_eq!(hover["result"]["range"]["start"]["character"], reference);
+
+    client.send(json!({"jsonrpc":"2.0","id":11,"method":"textDocument/definition","params":{"textDocument":{"uri":uri},"position":position}}));
+    let definition = client.until(|value| value["id"] == 11);
+    assert_eq!(definition["result"]["uri"], uri);
+    assert_eq!(
+        definition["result"]["range"]["start"]["character"],
+        source.find("item {").unwrap()
+    );
+
+    client.send(json!({"jsonrpc":"2.0","id":12,"method":"textDocument/references","params":{"textDocument":{"uri":uri},"position":position,"context":{"includeDeclaration":true}}}));
+    let references = client.until(|value| value["id"] == 12);
+    assert_eq!(references["result"].as_array().unwrap().len(), 3);
+
+    let completion = source.find("value: item").unwrap() + "value: ".len();
+    client.send(json!({"jsonrpc":"2.0","id":13,"method":"textDocument/completion","params":{"textDocument":{"uri":uri},"position":{"line":0,"character":completion}}}));
+    let completions = client.until(|value| value["id"] == 13);
+    assert!(
+        completions["result"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == "item")
+    );
+    client.shutdown();
+
+    let mut client = Client::start("utf-16");
+    let invalid =
+        "package test:app; interface api { record item { value: u32 } call: func(value: itme); }";
+    client.open(&uri, invalid);
+    let diagnostics = client.diagnostics(&uri, 1);
+    assert_eq!(diagnostics.as_array().unwrap().len(), 1);
+    client.send(json!({"jsonrpc":"2.0","id":14,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":diagnostics[0]["range"],"context":{"diagnostics":diagnostics}}}));
+    let actions = client.until(|value| value["id"] == 14);
+    assert_eq!(
+        actions["result"][0]["title"], "Replace with `item`",
+        "{actions}"
+    );
+    assert_eq!(
+        actions["result"][0]["edit"]["changes"][uri][0]["newText"],
+        "item"
+    );
     client.shutdown();
 }

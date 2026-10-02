@@ -74,6 +74,78 @@ fn uri(path: &Path) -> Result<String> {
         .map(String::from)
         .map_err(|()| anyhow::anyhow!("cannot represent file path as URI"))
 }
+
+fn byte_offset(text: &str, position: Position, encoding: Encoding) -> usize {
+    let line_start = text
+        .split_inclusive('\n')
+        .take(position.line as usize)
+        .map(str::len)
+        .sum::<usize>()
+        .min(text.len());
+    let line_end = text[line_start..]
+        .find('\n')
+        .map(|offset| line_start + offset)
+        .unwrap_or(text.len());
+    let line = &text[line_start..line_end];
+    let mut units = 0u32;
+    let mut bytes = 0usize;
+    for ch in line.chars() {
+        let width = match encoding {
+            Encoding::Utf8 => ch.len_utf8() as u32,
+            Encoding::Utf16 => ch.len_utf16() as u32,
+        };
+        if units + width > position.character {
+            break;
+        }
+        units += width;
+        bytes += ch.len_utf8();
+    }
+    line_start + bytes
+}
+
+fn lsp_range(text: &str, range: &std::ops::Range<usize>, encoding: Encoding) -> Range {
+    Range::new(
+        position(text, range.start, encoding),
+        position(text, range.end, encoding),
+    )
+}
+
+fn key_at(analysis: &wit_analysis::PackageAnalysis, path: &Path, offset: usize) -> Option<String> {
+    analysis
+        .items
+        .iter()
+        .find(|item| item.path == path && item.range.start <= offset && offset <= item.range.end)
+        .map(|item| item.key.clone())
+        .or_else(|| {
+            analysis
+                .references
+                .iter()
+                .find(|reference| {
+                    reference.path == path
+                        && reference.range.start <= offset
+                        && offset <= reference.range.end
+                })
+                .map(|reference| reference.key.clone())
+        })
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right: Vec<_> = right.chars().collect();
+    let mut row: Vec<usize> = (0..=right.len()).collect();
+    for (i, a) in left.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, b) in right.iter().enumerate() {
+            let previous = row[j + 1];
+            row[j + 1] = (row[j + 1] + 1)
+                .min(row[j] + 1)
+                .min(diagonal + usize::from(a != *b));
+            diagonal = previous;
+        }
+    }
+    row[right.len()]
+}
+
 #[derive(Debug)]
 struct Document {
     text: String,
@@ -83,7 +155,7 @@ struct Server {
     documents: BTreeMap<PathBuf, Document>,
     published: BTreeSet<PathBuf>,
     encoding: Encoding,
-    cache: BTreeMap<PathBuf, Result<Vec<wit_analysis::Diagnostic>, String>>,
+    cache: BTreeMap<PathBuf, Result<wit_analysis::PackageAnalysis, String>>,
     #[cfg(test)]
     analysis_runs: BTreeMap<PathBuf, usize>,
 }
@@ -115,7 +187,8 @@ impl Server {
                 }
                 self.cache.insert(
                     root.clone(),
-                    wit_analysis::analyze(&root, &overlays).map_err(|error| error.to_string()),
+                    wit_analysis::analyze_package(&root, &overlays)
+                        .map_err(|error| error.to_string()),
                 );
             }
             let result = self
@@ -123,8 +196,8 @@ impl Server {
                 .get(&root)
                 .context("open root must have cached analysis")?;
             match result {
-                Ok(errors) => {
-                    for error in errors {
+                Ok(analysis) => {
+                    for error in &analysis.diagnostics {
                         // Publish source locations even when the failing sibling is closed.
                         let text = match self.documents.get(&error.path) {
                             Some(doc) => doc.text.clone(),
@@ -269,6 +342,219 @@ impl Server {
                     json!([{"range":Range::new(Position::new(0,0), position(&document.text, document.text.len(), self.encoding)), "newText":formatted}]),
                 )
             }
+            "textDocument/hover"
+            | "textDocument/definition"
+            | "textDocument/references"
+            | "textDocument/completion"
+            | "textDocument/codeAction" => {
+                let document_uri = request
+                    .params
+                    .pointer("/textDocument/uri")
+                    .and_then(Value::as_str)
+                    .context("textDocument.uri is required")?;
+                let path = path(document_uri)?;
+                let document = self.documents.get(&path).context("document is not open")?;
+                let root = package_directory(&path).context("document has no package directory")?;
+                let analysis = self
+                    .cache
+                    .get(root)
+                    .and_then(|result| result.as_ref().ok())
+                    .context("package analysis is unavailable")?;
+                let point = request
+                    .params
+                    .pointer("/position")
+                    .and_then(|value| serde_json::from_value::<Position>(value.clone()).ok());
+                match request.method.as_str() {
+                    "textDocument/hover" => {
+                        let Some(point) = point else {
+                            return Ok(Value::Null);
+                        };
+                        let offset = byte_offset(&document.text, point, self.encoding);
+                        let Some(key) = key_at(analysis, &path, offset) else {
+                            return Ok(Value::Null);
+                        };
+                        let Some(item) = analysis.items.iter().find(|item| item.key == key) else {
+                            return Ok(Value::Null);
+                        };
+                        let hover_range = analysis
+                            .references
+                            .iter()
+                            .find(|reference| {
+                                reference.key == key
+                                    && reference.path == path
+                                    && reference.range.start <= offset
+                                    && offset <= reference.range.end
+                            })
+                            .map(|reference| reference.range.clone())
+                            .unwrap_or_else(|| item.range.clone());
+                        let docs = item
+                            .documentation
+                            .as_deref()
+                            .map(|docs| format!("\n\n{docs}"))
+                            .unwrap_or_default();
+                        Ok(
+                            json!({"contents":{"kind":"markdown","value":format!("```wit\n{} {}\n```{}", item.kind, item.name, if item.detail.is_empty() { String::new() } else { format!("\n\n{}", item.detail) }) + &docs},"range":lsp_range(&document.text, &hover_range, self.encoding)}),
+                        )
+                    }
+                    "textDocument/definition" => {
+                        let Some(point) = point else {
+                            return Ok(Value::Null);
+                        };
+                        let offset = byte_offset(&document.text, point, self.encoding);
+                        let Some(key) = key_at(analysis, &path, offset) else {
+                            return Ok(Value::Null);
+                        };
+                        let Some(item) = analysis.items.iter().find(|item| item.key == key) else {
+                            return Ok(Value::Null);
+                        };
+                        let target_text = self
+                            .documents
+                            .get(&item.path)
+                            .map(|document| document.text.clone())
+                            .or_else(|| std::fs::read_to_string(&item.path).ok())
+                            .unwrap_or_default();
+                        Ok(
+                            json!({"uri":uri(&item.path)?,"range":lsp_range(&target_text, &item.range, self.encoding)}),
+                        )
+                    }
+                    "textDocument/references" => {
+                        let Some(point) = point else {
+                            return Ok(json!([]));
+                        };
+                        let offset = byte_offset(&document.text, point, self.encoding);
+                        let Some(key) = key_at(analysis, &path, offset) else {
+                            return Ok(json!([]));
+                        };
+                        let include_declaration = request
+                            .params
+                            .pointer("/context/includeDeclaration")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true);
+                        let mut locations = Vec::new();
+                        if include_declaration
+                            && let Some(item) = analysis.items.iter().find(|item| item.key == key)
+                        {
+                            let text = self
+                                .documents
+                                .get(&item.path)
+                                .map(|document| document.text.clone())
+                                .or_else(|| std::fs::read_to_string(&item.path).ok())
+                                .unwrap_or_default();
+                            locations.push(json!({"uri":uri(&item.path)?,"range":lsp_range(&text, &item.range, self.encoding)}));
+                        }
+                        for reference in analysis
+                            .references
+                            .iter()
+                            .filter(|reference| reference.key == key)
+                        {
+                            let text = self
+                                .documents
+                                .get(&reference.path)
+                                .map(|document| document.text.clone())
+                                .or_else(|| std::fs::read_to_string(&reference.path).ok())
+                                .unwrap_or_default();
+                            locations.push(json!({"uri":uri(&reference.path)?,"range":lsp_range(&text, &reference.range, self.encoding)}));
+                        }
+                        Ok(Value::Array(locations))
+                    }
+                    "textDocument/completion" => {
+                        let Some(point) = point else {
+                            return Ok(json!({"isIncomplete":false,"items":[]}));
+                        };
+                        let offset = byte_offset(&document.text, point, self.encoding);
+                        let before = &document.text[..offset.min(document.text.len())];
+                        let type_context = [":", "->", "=", "<", ","]
+                            .iter()
+                            .any(|trigger| before.trim_end().ends_with(trigger));
+                        let mut items = Vec::new();
+                        let primitives = [
+                            "bool", "u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64",
+                            "float32", "float64", "char", "string",
+                        ];
+                        if type_context {
+                            items.extend(primitives.iter().map(|name| json!({"label":name,"kind":25,"detail":"WIT primitive type"})));
+                        }
+                        items.extend(analysis.items.iter().filter(|item| {
+                            if type_context {
+                                item.kind != "function" && item.kind != "interface" && item.kind != "world"
+                            } else {
+                                item.kind == "interface" || item.kind == "world" || item.kind == "function"
+                            }
+                        }).map(|item| json!({"label":item.name,"kind":if item.kind == "function" {3} else if item.kind == "interface" {8} else if item.kind == "world" {9} else {25},"detail":item.detail,"documentation":item.documentation})));
+                        Ok(json!({"isIncomplete":false,"items":items}))
+                    }
+                    "textDocument/codeAction" => {
+                        let mut actions = Vec::new();
+                        for diagnostic in request
+                            .params
+                            .pointer("/context/diagnostics")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                        {
+                            let message = diagnostic
+                                .get("message")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+                            if !(message.starts_with("type `") || message.starts_with("name `"))
+                                || !message.contains(" does not exist")
+                            {
+                                continue;
+                            }
+                            let Some(range) = diagnostic.get("range").cloned() else {
+                                continue;
+                            };
+                            let Some(range) = serde_json::from_value::<Range>(range).ok() else {
+                                continue;
+                            };
+                            let start = byte_offset(&document.text, range.start, self.encoding);
+                            let end = byte_offset(&document.text, range.end, self.encoding);
+                            if start > end
+                                || end > document.text.len()
+                                || !document.text.is_char_boundary(start)
+                                || !document.text.is_char_boundary(end)
+                            {
+                                continue;
+                            }
+                            if !wit_analysis::is_named_type_reference(&document.text, start..end) {
+                                continue;
+                            }
+                            let missing = &document.text[start..end];
+                            let mut names: BTreeSet<_> =
+                                wit_analysis::declared_type_names(&document.text)
+                                    .into_iter()
+                                    .collect();
+                            names.extend(
+                                analysis
+                                    .items
+                                    .iter()
+                                    .filter(|item| {
+                                        item.kind != "function"
+                                            && item.kind != "interface"
+                                            && item.kind != "world"
+                                    })
+                                    .map(|item| item.name.clone()),
+                            );
+                            let mut candidates: Vec<_> = names
+                                .iter()
+                                .map(|name| (edit_distance(missing, name), name.as_str()))
+                                .collect();
+                            candidates.sort();
+                            let Some((distance, suggestion)) = candidates.first().copied() else {
+                                continue;
+                            };
+                            if distance > 2
+                                || candidates.get(1).is_some_and(|next| next.0 == distance)
+                            {
+                                continue;
+                            }
+                            actions.push(json!({"title":format!("Replace with `{suggestion}`"),"kind":"quickfix","diagnostics":[diagnostic],"edit":{"changes":{uri(&path)?:[{"range":range,"newText":suggestion}]}}}));
+                        }
+                        Ok(Value::Array(actions))
+                    }
+                    _ => unreachable!(),
+                }
+            }
             _ => anyhow::bail!("unsupported method {}", request.method),
         }
     }
@@ -311,7 +597,12 @@ fn run() -> Result<()> {
         json!({"capabilities": {
         "positionEncoding":match encoding {Encoding::Utf8=>"utf-8",Encoding::Utf16=>"utf-16"},
         "textDocumentSync":{"openClose":true,"change":1,"save":true},
-        "documentFormattingProvider":true
+        "documentFormattingProvider":true,
+        "hoverProvider":true,
+        "completionProvider":{"triggerCharacters":[":","/","{","<",","]},
+        "definitionProvider":true,
+        "referencesProvider":true,
+        "codeActionProvider":{"codeActionKinds":["quickfix"]}
     }, "serverInfo":{"name":"wit-language-server","version":build_version()}}),
     )?;
     connection
@@ -344,7 +635,15 @@ fn run() -> Result<()> {
                     Ok(value) => Response::new_ok(request.id, value),
                     Err(error) => Response::new_err(
                         request.id,
-                        if request.method == "textDocument/formatting" {
+                        if matches!(
+                            request.method.as_str(),
+                            "textDocument/formatting"
+                                | "textDocument/hover"
+                                | "textDocument/definition"
+                                | "textDocument/references"
+                                | "textDocument/completion"
+                                | "textDocument/codeAction"
+                        ) {
                             -32602
                         } else {
                             -32601

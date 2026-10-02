@@ -6,6 +6,34 @@ use std::{
 };
 use wit_parser::{Resolve, SourceMap, UnresolvedPackageGroup};
 
+/// A named WIT declaration with its resolved identity and source location.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticItem {
+    pub key: String,
+    pub name: String,
+    pub kind: String,
+    pub detail: String,
+    pub documentation: Option<String>,
+    pub path: PathBuf,
+    pub range: Range<usize>,
+}
+
+/// A source occurrence associated with a resolved declaration identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticReference {
+    pub key: String,
+    pub path: PathBuf,
+    pub range: Range<usize>,
+}
+
+/// Semantic information for one package root, including any diagnostics.
+#[derive(Debug, Clone, Default)]
+pub struct PackageAnalysis {
+    pub diagnostics: Vec<Diagnostic>,
+    pub items: Vec<SemanticItem>,
+    pub references: Vec<SemanticReference>,
+}
+
 /// Open buffers take precedence over files on disk.
 pub type Overlays = BTreeMap<PathBuf, String>;
 
@@ -104,12 +132,11 @@ fn parse(
     }
 }
 
-/// Analyze sibling files and files/package directories immediately below `deps/`.
-/// No workspace traversal or disk mutation occurs.
+/// Analyze a package and retain its resolved declaration and reference index.
 ///
 /// # Errors
 /// Returns an IO error when a discovered source cannot be read.
-pub fn analyze(directory: &Path, overlays: &Overlays) -> Result<Vec<Diagnostic>, Error> {
+pub fn analyze_package(directory: &Path, overlays: &Overlays) -> Result<PackageAnalysis, Error> {
     let mut diagnostics = Vec::new();
     let main_paths = files(directory, overlays)?;
     let fallback = main_paths.first().cloned();
@@ -161,29 +188,358 @@ pub fn analyze(directory: &Path, overlays: &Overlays) -> Result<Vec<Diagnostic>,
             dependencies.push(group);
         }
     }
+    let mut analysis = PackageAnalysis::default();
     if diagnostics.is_empty()
         && let Some(main) = main
     {
         let mut resolve = Resolve::default();
-        if let Err(error) = resolve.push_groups(main, dependencies) {
-            if let Some(location) = resolve.source_map.resolve_span(error.kind().span()) {
-                diagnostics.push(Diagnostic {
+        match resolve.push_groups(main, dependencies) {
+            Ok(_) => {
+                analysis.items = semantic_items(&resolve);
+                analysis.references = semantic_references(&resolve, overlays);
+            }
+            Err(error) => {
+                if let Some(location) = resolve.source_map.resolve_span(error.kind().span()) {
+                    diagnostics.push(Diagnostic {
+                        path: location.path.into(),
+                        range: location.range,
+                        message: error.to_string(),
+                    });
+                } else {
+                    diagnostics.push(Diagnostic {
+                        path: fallback
+                            .clone()
+                            .ok_or_else(|| Error::Analysis(error.to_string()))?,
+                        range: 0..0,
+                        message: error.to_string(),
+                    });
+                }
+            }
+        }
+    }
+    analysis.diagnostics = diagnostics;
+    Ok(analysis)
+}
+
+/// Analyze sibling files and files/package directories immediately below `deps/`.
+///
+/// # Errors
+/// Returns an IO error when a discovered source cannot be read.
+pub fn analyze(directory: &Path, overlays: &Overlays) -> Result<Vec<Diagnostic>, Error> {
+    Ok(analyze_package(directory, overlays)?.diagnostics)
+}
+
+fn semantic_items(resolve: &Resolve) -> Vec<SemanticItem> {
+    let mut items = Vec::new();
+    let mut add = |key: String,
+                   name: String,
+                   kind: &str,
+                   detail: String,
+                   documentation: Option<String>,
+                   span| {
+        if let Some(location) = resolve.source_map.resolve_span(span) {
+            items.push(SemanticItem {
+                key,
+                name,
+                kind: kind.into(),
+                detail,
+                documentation,
+                path: location.path.into(),
+                range: location.range,
+            });
+        }
+    };
+    for (id, interface) in resolve.interfaces.iter() {
+        if let Some(name) = &interface.name {
+            add(
+                format!("interface:{}", id.index()),
+                name.clone(),
+                "interface",
+                "interface".into(),
+                interface.docs.contents.clone(),
+                interface.span,
+            );
+        }
+        for function in interface.functions.values() {
+            let params = function
+                .params
+                .iter()
+                .map(|param| format!("{}: {}", param.name, display_type(resolve, param.ty)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let result = function
+                .result
+                .map(|ty| format!(" -> {}", display_type(resolve, ty)))
+                .unwrap_or_default();
+            add(
+                format!("function:{}:{}", id.index(), function.name),
+                function.name.clone(),
+                "function",
+                format!(
+                    "{}func({params}){result}",
+                    if matches!(
+                        function.kind,
+                        wit_parser::FunctionKind::AsyncFreestanding
+                            | wit_parser::FunctionKind::AsyncMethod(_)
+                            | wit_parser::FunctionKind::AsyncStatic(_)
+                    ) {
+                        "async "
+                    } else {
+                        ""
+                    }
+                ),
+                function.docs.contents.clone(),
+                function.span,
+            );
+        }
+    }
+    for (id, world) in resolve.worlds.iter() {
+        add(
+            format!("world:{}", id.index()),
+            world.name.clone(),
+            "world",
+            "world".into(),
+            world.docs.contents.clone(),
+            world.span,
+        );
+    }
+    for (id, ty) in resolve.types.iter() {
+        if let Some(name) = &ty.name {
+            add(
+                format!("type:{}", id.index()),
+                name.clone(),
+                ty.kind.as_str(),
+                format!("{} type", ty.kind.as_str()),
+                ty.docs.contents.clone(),
+                ty.span,
+            );
+        }
+    }
+    items.sort_by(|a, b| (&a.path, a.range.start, &a.key).cmp(&(&b.path, b.range.start, &b.key)));
+    items
+}
+
+fn display_type(resolve: &Resolve, ty: wit_parser::Type) -> String {
+    match ty {
+        wit_parser::Type::Bool => "bool".into(),
+        wit_parser::Type::U8 => "u8".into(),
+        wit_parser::Type::U16 => "u16".into(),
+        wit_parser::Type::U32 => "u32".into(),
+        wit_parser::Type::U64 => "u64".into(),
+        wit_parser::Type::S8 => "s8".into(),
+        wit_parser::Type::S16 => "s16".into(),
+        wit_parser::Type::S32 => "s32".into(),
+        wit_parser::Type::S64 => "s64".into(),
+        wit_parser::Type::F32 => "float32".into(),
+        wit_parser::Type::F64 => "float64".into(),
+        wit_parser::Type::Char => "char".into(),
+        wit_parser::Type::String => "string".into(),
+        wit_parser::Type::ErrorContext => "error-context".into(),
+        wit_parser::Type::Id(id) => resolve.types[id]
+            .name
+            .clone()
+            .unwrap_or_else(|| resolve.types[id].kind.as_str().to_owned()),
+    }
+}
+
+fn semantic_references(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticReference> {
+    let mut references = Vec::new();
+    for (_, world) in resolve.worlds.iter() {
+        for item in world.imports.values().chain(world.exports.values()) {
+            if let wit_parser::WorldItem::Interface { id, span, .. } = item
+                && let Some(location) = resolve.source_map.resolve_span(*span)
+            {
+                references.push(SemanticReference {
+                    key: format!("interface:{}", id.index()),
                     path: location.path.into(),
                     range: location.range,
-                    message: error.to_string(),
                 });
-            } else {
-                diagnostics.push(Diagnostic {
-                    path: fallback
-                        .clone()
-                        .ok_or_else(|| Error::Analysis(error.to_string()))?,
-                    range: 0..0,
-                    message: error.to_string(),
+            }
+        }
+        for include in &world.includes {
+            if let Some(location) = resolve.source_map.resolve_span(include.span) {
+                references.push(SemanticReference {
+                    key: format!("world:{}", include.id.index()),
+                    path: location.path.into(),
+                    range: location.range,
                 });
             }
         }
     }
-    Ok(diagnostics)
+    for path in resolve.source_map.source_files() {
+        let source = match overlays.get(path) {
+            Some(source) => source.clone(),
+            None => match std::fs::read_to_string(path) {
+                Ok(source) => source,
+                Err(_) => continue,
+            },
+        };
+        let mut parser = tree_sitter::Parser::new();
+        if parser.set_language(&wit_syntax::language()).is_err() {
+            continue;
+        }
+        let Some(tree) = parser.parse(&source, None) else {
+            continue;
+        };
+        let mut nodes = vec![tree.root_node()];
+        while let Some(node) = nodes.pop() {
+            for index in (0..node.child_count()).rev() {
+                if let Ok(index) = u32::try_from(index)
+                    && let Some(child) = node.child(index)
+                {
+                    nodes.push(child);
+                }
+            }
+            if node.kind() != "ty" {
+                continue;
+            }
+            let name = (0..node.child_count())
+                .filter_map(|index| {
+                    u32::try_from(index)
+                        .ok()
+                        .and_then(|index| node.child(index))
+                })
+                .find(|child| child.kind() == "id");
+            let Some(name) = name else {
+                continue;
+            };
+            let start = name.start_byte();
+            let end = name.end_byte();
+            let Some(name_text) = source.get(start..end) else {
+                continue;
+            };
+            let mut ancestor = node.parent();
+            let mut interface = None;
+            let mut world = None;
+            while let Some(parent) = ancestor {
+                if parent.kind() == "interface_item"
+                    && let Some(name_node) = parent.child_by_field_name("name")
+                    && let Some(owner_name) = source.get(name_node.byte_range())
+                {
+                    interface = resolve.interfaces.iter().find_map(|(id, item)| {
+                        let location = resolve.source_map.resolve_span(item.span)?;
+                        (item.name.as_deref() == Some(owner_name)
+                            && location.path == path.to_string_lossy()
+                            && location.range == name_node.byte_range())
+                        .then_some(id)
+                    });
+                    break;
+                }
+                if parent.kind() == "world_item"
+                    && let Some(name_node) = parent.child_by_field_name("name")
+                    && let Some(owner_name) = source.get(name_node.byte_range())
+                {
+                    world = resolve.worlds.iter().find_map(|(id, item)| {
+                        let location = resolve.source_map.resolve_span(item.span)?;
+                        (item.name == owner_name
+                            && location.path == path.to_string_lossy()
+                            && location.range == name_node.byte_range())
+                        .then_some(id)
+                    });
+                    break;
+                }
+                ancestor = parent.parent();
+            }
+            let type_id = interface
+                .and_then(|id| resolve.interfaces[id].types.get(name_text).copied())
+                .or_else(|| {
+                    world.and_then(|id| {
+                        resolve.worlds[id]
+                            .imports
+                            .values()
+                            .chain(resolve.worlds[id].exports.values())
+                            .find_map(|item| match item {
+                                wit_parser::WorldItem::Type { id, .. }
+                                    if resolve.types[*id].name.as_deref() == Some(name_text) =>
+                                {
+                                    Some(*id)
+                                }
+                                _ => None,
+                            })
+                    })
+                });
+            if let Some(id) = type_id {
+                references.push(SemanticReference {
+                    key: format!("type:{}", id.index()),
+                    path: path.to_path_buf(),
+                    range: start..end,
+                });
+            }
+        }
+    }
+    references
+        .sort_by(|a, b| (&a.path, a.range.start, &a.key).cmp(&(&b.path, b.range.start, &b.key)));
+    references.dedup();
+    references
+}
+
+/// Return type declaration names even when the complete package does not resolve.
+pub fn declared_type_names(source: &str) -> Vec<String> {
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&wit_syntax::language()).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    let mut names = BTreeSet::new();
+    let mut nodes = vec![tree.root_node()];
+    while let Some(node) = nodes.pop() {
+        let field = match node.kind() {
+            "type_item" => "alias",
+            "record_item" | "flags_items" | "enum_items" | "variant_items" | "resource_item" => {
+                "name"
+            }
+            _ => "",
+        };
+        if !field.is_empty()
+            && let Some(name) = node.child_by_field_name(field)
+            && let Some(value) = source.get(name.byte_range())
+        {
+            names.insert(value.to_owned());
+        }
+        for index in (0..node.child_count()).rev() {
+            if let Ok(index) = u32::try_from(index)
+                && let Some(child) = node.child(index)
+            {
+                nodes.push(child);
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
+/// Return whether the given byte range is a named type in the syntax tree.
+pub fn is_named_type_reference(source: &str, range: Range<usize>) -> bool {
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&wit_syntax::language()).is_err() {
+        return false;
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return false;
+    };
+    let mut nodes = vec![tree.root_node()];
+    while let Some(node) = nodes.pop() {
+        if node.kind() == "ty" {
+            for index in 0..node.child_count() {
+                if let Ok(index) = u32::try_from(index)
+                    && let Some(child) = node.child(index)
+                    && child.kind() == "id"
+                    && child.byte_range() == range
+                {
+                    return true;
+                }
+            }
+        }
+        for index in (0..node.child_count()).rev() {
+            if let Ok(index) = u32::try_from(index)
+                && let Some(child) = node.child(index)
+            {
+                nodes.push(child);
+            }
+        }
+    }
+    false
 }
 
 /// Format with upstream Topiary WIT queries, rejecting syntax errors and checking idempotence.
@@ -230,6 +586,27 @@ pub fn format_with_indent(source: &str, indent: &str) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn semantic_index_tracks_named_type_uses() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main.wit");
+        let source = "package test:app; interface api { record item { value: u32 } echo: func(value: item) -> item; }";
+        let analysis =
+            analyze_package(dir.path(), &Overlays::from([(main.clone(), source.into())])).unwrap();
+        assert!(
+            analysis
+                .references
+                .iter()
+                .any(|reference| reference.key.starts_with("type:"))
+        );
+        let type_use = source.find("value: item").unwrap() + "value: ".len();
+        assert!(is_named_type_reference(source, type_use..type_use + 4));
+        let function_name = source.find("echo").unwrap();
+        assert!(!is_named_type_reference(
+            source,
+            function_name..function_name + 4
+        ));
+    }
     #[test]
     fn siblings_overlays_and_structured_ranges() {
         let dir = tempfile::tempdir().unwrap();
