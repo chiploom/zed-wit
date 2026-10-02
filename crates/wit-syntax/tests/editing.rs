@@ -181,7 +181,7 @@ fn current_and_gated_corpus_parse_without_errors() {
 }
 
 #[test]
-fn getter_setter_sugar_uses_keyword_highlighting_inside_grammar_errors() {
+fn getter_setter_sugar_recovers_keyword_parameter_and_type_highlighting() {
     let source = fs::read_to_string(
         root().join("tests/fixtures/grammar-gaps/getters-setters/getters-setters.wit"),
     )
@@ -195,6 +195,26 @@ fn getter_setter_sugar_uses_keyword_highlighting_inside_grammar_errors() {
             .filter(|keyword| keyword == "get" || keyword == "set")
             .collect::<Vec<_>>(),
         ["get", "set", "get", "set"]
+    );
+    assert_eq!(
+        texts_allow_errors("highlights", &source, "variable.parameter"),
+        ["v", "v"]
+    );
+
+    let builtin_types = texts_allow_errors("highlights", &source, "type.builtin");
+    for expected in ["u64", "string"] {
+        assert!(
+            builtin_types.iter().filter(|ty| ty.as_str() == expected).count() >= 2,
+            "expected both getter and setter occurrences of {expected} to be highlighted: {builtin_types:?}"
+        );
+    }
+
+    let custom = "package demo:properties; interface properties { type item = u32; value: set(v: item); value: get() -> item; }";
+    assert!(parse(custom).root_node().has_error());
+    let recovered_types = texts_allow_errors("highlights", custom, "type");
+    assert!(
+        recovered_types.iter().filter(|ty| ty.as_str() == "item").count() >= 2,
+        "expected accessor parameter and return custom types to be highlighted: {recovered_types:?}"
     );
 }
 
