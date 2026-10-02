@@ -29,7 +29,11 @@ fn read_checksum(path: &Path, asset: &str) -> Result<[u8; 32], String> {
     parse_checksum(&text, asset)
 }
 
-fn verify_cached_server(binary_path: &Path, checksum_path: &Path, asset: &str) -> Result<(), String> {
+fn verify_cached_server(
+    binary_path: &Path,
+    checksum_path: &Path,
+    asset: &str,
+) -> Result<(), String> {
     let expected = read_checksum(checksum_path, asset)?;
     verify_binary(
         fs::File::open(binary_path)
@@ -215,10 +219,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "zed-wit-cache-test-{}-{nonce}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("zed-wit-cache-test-{}-{nonce}", std::process::id()));
         fs::create_dir(&directory).unwrap();
 
         let asset = "wit-language-server-test";
