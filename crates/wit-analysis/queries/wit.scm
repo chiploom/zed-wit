@@ -24,6 +24,7 @@
 
 ; Allow blank line before
 [
+  (deprecated_gate)
   (enum_items)
   (external_id)
   (flags_items)
@@ -34,7 +35,9 @@
   (package_decl)
   (record_item)
   (resource_item)
+  (since_gate)
   (type_item)
+  (unstable_gate)
   (variant_items)
   (world_item)
 ] @allow_blank_line_before

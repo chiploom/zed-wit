@@ -351,6 +351,12 @@ mod tests {
         assert_eq!(format(&formatted).unwrap(), formatted);
     }
     #[test]
+    fn formatter_preserves_blank_lines_before_annotation_gates() {
+        let source = include_str!("../../../tests/fixtures/current/annotations/annotations.wit");
+        assert_eq!(format(source).unwrap(), source);
+    }
+
+    #[test]
     fn fixture_packages_resolve_with_upstream_parser() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         for package in [
