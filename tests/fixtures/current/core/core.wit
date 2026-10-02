@@ -38,12 +38,12 @@ interface api {
 }
 
 world base {
-    import types;
+    import base-log: func(message: string);
 }
 
 world application {
     use types.{entry};
-    include base with { types as model }
+    include base with { base-log as model-log }
     import clock: interface { now: func() -> u64; }
     import log: func(message: string);
     import types;
