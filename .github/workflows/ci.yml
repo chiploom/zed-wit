@@ -55,8 +55,8 @@ jobs:
       - run: cargo check --workspace --locked
       - name: Run doctests
         run: cargo test --doc --workspace --exclude xtask --locked
-      - name: Check only the Zed adapter for Wasm
-        run: cargo check -p zed-wit --target wasm32-wasip2 --locked
+      - name: Build the Zed extension as Zed does
+        run: cargo build --target wasm32-wasip2 --locked
 
   native-tests:
     name: Tests / ${{ matrix.target }}

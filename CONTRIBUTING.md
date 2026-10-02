@@ -23,7 +23,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo check --workspace --locked
 cargo test --workspace --locked
-cargo check -p zed-wit --target wasm32-wasip2 --locked
+cargo build --target wasm32-wasip2 --locked
 cargo build -p wit-language-server --release --locked
 cargo xtask package-release --target <target> --output dist
 cargo xtask collect-licenses --target <target> --output dist

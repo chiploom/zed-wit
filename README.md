@@ -39,8 +39,8 @@ absolute path to your checkout (`.exe` on Windows):
 ```
 
 Run `zed: install dev extension` from Zed's command palette and select the
-repository root. Zed builds the adapter for `wasm32-wasip2` and downloads WASI SDK
-to compile the grammar. An existing registry WIT extension will be overridden.
+repository root. Zed builds the root adapter package for `wasm32-wasip2` and downloads
+WASI SDK separately to compile the grammar. An existing registry WIT extension will be overridden.
 Open a `.wit` file, then use the outline panel and `editor: format` to exercise
 the extension. Inspect `zed: open log` for startup or build failures.
 
@@ -92,7 +92,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 cargo check --workspace --locked
-cargo check -p zed-wit --target wasm32-wasip2 --locked
+cargo build --target wasm32-wasip2 --locked
 ```
 
 Read [CONTRIBUTING](CONTRIBUTING.md) for fixtures, queries, updates and releases,
