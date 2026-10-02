@@ -39,6 +39,26 @@ record the exact Zed version, server path, scenarios and screenshots/logs. Mark
 unperformed checks pending. Preserve stdout for LSP frames; diagnostic logging
 belongs on stderr.
 
+For local Zed development, copy the committed example settings and keep the real
+project settings untracked:
+
+```sh
+mkdir -p .zed
+cp .zed/settings.example.json .zed/settings.json
+```
+
+The example points the WIT language server at the repository-local release
+binary, `target/release/wit-language-server`. Build it first with:
+
+```sh
+cargo build -p wit-language-server --release --locked
+```
+
+On Windows, change the project-local binary path to
+`target/release/wit-language-server.exe`. Do not commit `.zed/settings.json`;
+it is intentionally ignored so platform- or developer-specific Zed settings do
+not leak into the shared repository configuration.
+
 ## Changes and updates
 
 Keep changes focused, add regression coverage for behavior, and update the
