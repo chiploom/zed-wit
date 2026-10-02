@@ -10,7 +10,8 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
 1. Build the native server with `cargo build -p wit-language-server --release --locked`
    and check the adapter with
    `cargo build --target wasm32-wasip2 --locked`. This intentionally mirrors
-   Zed's package selection when it compiles a Rust dev extension from the workspace root.
+   Zed's package selection when it compiles a Rust dev extension from the
+   workspace root.
 2. In Zed, run **zed: install dev extension** and select the repository root.
    Resolve any conflicting installed WIT extension so the dev extension is active.
 3. Configure the server override shown in the project README to the absolute
