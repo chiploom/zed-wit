@@ -351,30 +351,21 @@ mod tests {
         assert_eq!(format(&formatted).unwrap(), formatted);
     }
     #[test]
-    fn current_fixtures_resolve_with_upstream_parser() {
-        for (name, source) in [
-            (
-                "core.wit",
-                include_str!("../../../tests/fixtures/current/core.wit"),
-            ),
-            (
-                "async.wit",
-                include_str!("../../../tests/fixtures/current/async.wit"),
-            ),
-            (
-                "annotations.wit",
-                include_str!("../../../tests/fixtures/current/annotations.wit"),
-            ),
-        ] {
-            let dir = tempfile::tempdir().unwrap();
-            std::fs::write(dir.path().join(name), source).unwrap();
-            let diagnostics = analyze(dir.path(), &Overlays::new()).unwrap();
+    fn fixture_groups_resolve_as_upstream_packages() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for group in ["current", "gated"] {
+            let directory = root.join("tests/fixtures").join(group);
+            let diagnostics = analyze(&directory, &Overlays::new()).unwrap();
             assert!(
                 diagnostics.is_empty(),
-                "{name}: {}",
+                "{group}: {}",
                 diagnostics
                     .iter()
-                    .map(|diagnostic| diagnostic.message.as_str())
+                    .map(|diagnostic| format!(
+                        "{}: {}",
+                        diagnostic.path.display(),
+                        diagnostic.message
+                    ))
                     .collect::<Vec<_>>()
                     .join("; ")
             );
