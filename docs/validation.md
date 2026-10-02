@@ -9,13 +9,13 @@ or end-to-end hosted installation.
 
 - Date: 2026-10-01
 - Hosted CI baseline: `9875ce49de42849f97fcb3ab2b1fed7a162fe1f9`
-- Locally validated implementation: `a4f6960a6aa20a6eec996213463c5fac82adcb6b`
+- Locally validated implementation: `4ded40a17f2deb893af38a0c63c6ae3b5c2fef24`
 - Rust: 1.99.0
 - GitHub Actions CI run: [#28](https://github.com/chiploom/zed-wit/actions/runs/36940382890)
 - CI conclusion: success
 
 The hosted matrix below applies to the `main` baseline. The local Apple Silicon
-validation applies to `a4f6960a6aa20a6eec996213463c5fac82adcb6b`, which includes
+validation applies through `4ded40a17f2deb893af38a0c63c6ae3b5c2fef24`, which includes
 the closed-sibling diagnostics fix, corrupt-cache recovery, package-isolated
 fixtures, formatter regression fixes, project-local Zed settings, and native
 server build-commit reporting. An earlier LSP lifecycle experiment was fully
@@ -59,8 +59,13 @@ verification job downloaded all five target artifacts together and passed
 
 ## Local Apple Silicon evidence
 
-On an `aarch64-apple-darwin` development host using Rust 1.99.0,
-`a4f6960a6aa20a6eec996213463c5fac82adcb6b` passed:
+On an `aarch64-apple-darwin` development host using Rust 1.99.0, the full
+repository gate passed on `4ad1e9ba198c64b6f69ae1aa26a1c4ce8e86bd73`. The only
+failure was `git diff --check`, which found one trailing blank line in
+`languages/wit/highlights.scm`. Commit
+`4ded40a17f2deb893af38a0c63c6ae3b5c2fef24` removed only that blank line, after
+which `cargo fmt --all -- --check`, `cargo test -p wit-syntax --locked`, and
+`git diff --check origin/main...HEAD` all passed.
 
 - `cargo xtask check-no-python`
 - `cargo xtask check-dependencies`
@@ -73,10 +78,9 @@ On an `aarch64-apple-darwin` development host using Rust 1.99.0,
 - `git diff --check origin/main...HEAD`
 
 The workspace run included 12 `wit-analysis` tests, 3 language-server unit
-tests, 4 stdio integration tests, 9 syntax/editing tests, 7 `xtask` tests, and
-6 adapter/distribution tests, all passing. The release binary reported
-`wit-language-server 0.1.0+git.a4f6960a6aa20a6eec996213463c5fac82adcb6b`,
-matching the validated Git `HEAD`.
+tests, 4 stdio integration tests, 10 syntax/editing tests, 7 `xtask` tests, and
+6 adapter/distribution tests, all passing. The release language-server build
+also completed successfully.
 
 The `aarch64-apple-darwin` release packaging path also completed successfully
 and produced the native executable, SHA-256 checksum, provenance JSON, and
@@ -94,7 +98,9 @@ Silicon. Observed behavior included:
   `wit-parser` error, `expected a type, found '('`;
 - document formatting preserving annotation spacing and upstream
   `use`/`include ... with` spacing while leaving formatted WIT semantically
-  clean.
+  clean;
+- getter/setter grammar-gap highlighting recovering accessor names, `get`/`set`
+  keywords, setter parameters, and builtin/user-defined accessor types.
 
 The exact Zed editor version was not recorded in the supplied evidence, so this
 is a development-extension smoke/behavior record rather than a complete signed-off
