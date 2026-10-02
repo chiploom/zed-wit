@@ -58,7 +58,7 @@ pub fn verify_binary(mut reader: impl Read, expected: &[u8; 32]) -> Result<(), S
     }
     if total == 0 || hash.finalize().as_slice() != expected {
         return Err(
-            "WIT server SHA-256 verification failed; remove its extension cache and retry".into(),
+            "WIT server SHA-256 verification failed".into(),
         );
     }
     Ok(())

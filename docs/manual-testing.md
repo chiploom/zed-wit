@@ -38,7 +38,7 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
 | Local override | Configure a trusted explicit native binary | Exact binary launches; no download needed | Pending |
 | First hosted install | Remove test install cache after assets are published, restart server | Matching platform/version downloads and checksum passes | Pending |
 | Cached install | Restart with the verified installed executable | Server starts using the validated cache behavior | Pending |
-| Missing/corrupt asset | Exercise controlled missing/checksum mismatch cases | Actionable failure; unverified executable never starts | Pending |
+| Missing/corrupt asset | Exercise controlled missing/checksum/cache-corruption cases | Invalid cache is discarded and a clean download is attempted; unverified executable never starts | Pending |
 | Editor restart | Restart Zed with an open WIT package | Language server reconnects and recomputes diagnostics | Pending |
 
 Run the install/download rows separately on macOS ARM64, macOS Intel, Linux ARM64
