@@ -112,14 +112,23 @@ fn all_queries_compile_with_only_zed_supported_captures() {
     assert_eq!(wit_syntax::language().abi_version(), 15);
 }
 
+fn collect_wit_files(directory: &std::path::Path, paths: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            collect_wit_files(&path, paths);
+        } else if path.extension().is_some_and(|extension| extension == "wit") {
+            paths.push(path);
+        }
+    }
+}
+
 #[test]
 fn current_and_gated_corpus_parse_without_errors() {
     for group in ["current", "gated"] {
         let dir = root().join("tests/fixtures").join(group);
-        let mut paths: Vec<_> = fs::read_dir(dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect();
+        let mut paths = Vec::new();
+        collect_wit_files(&dir, &mut paths);
         paths.sort();
         assert!(!paths.is_empty());
         for path in paths {
@@ -145,8 +154,10 @@ fn current_and_gated_corpus_parse_without_errors() {
                 }
             }
             println!(
-                "error-free {group}/{} ({} bytes)",
-                path.file_name().unwrap().to_string_lossy(),
+                "error-free {} ({} bytes)",
+                path.strip_prefix(root().join("tests/fixtures"))
+                    .unwrap()
+                    .display(),
                 source.len()
             );
         }
@@ -156,12 +167,12 @@ fn current_and_gated_corpus_parse_without_errors() {
 #[test]
 fn grammar_limitations_are_explicit() {
     let gaps = root().join("tests/fixtures/grammar-gaps");
-    let sugar = fs::read_to_string(gaps.join("getters-setters.wit")).unwrap();
+    let sugar = fs::read_to_string(gaps.join("getters-setters/getters-setters.wit")).unwrap();
     assert!(
         parse(&sugar).root_node().has_error(),
         "getter/setter support changed: update qualification"
     );
-    let legacy = fs::read_to_string(gaps.join("legacy-named-results.wit")).unwrap();
+    let legacy = fs::read_to_string(gaps.join("legacy-named-results/legacy-named-results.wit")).unwrap();
     assert!(
         !parse(&legacy).root_node().has_error(),
         "legacy result behavior changed: update qualification"
