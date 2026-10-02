@@ -204,7 +204,11 @@ fn getter_setter_sugar_recovers_keyword_parameter_and_type_highlighting() {
     let builtin_types = texts_allow_errors("highlights", &source, "type.builtin");
     for expected in ["u64", "string"] {
         assert!(
-            builtin_types.iter().filter(|ty| ty.as_str() == expected).count() >= 2,
+            builtin_types
+                .iter()
+                .filter(|ty| ty.as_str() == expected)
+                .count()
+                >= 2,
             "expected both getter and setter occurrences of {expected} to be highlighted: {builtin_types:?}"
         );
     }
@@ -213,7 +217,11 @@ fn getter_setter_sugar_recovers_keyword_parameter_and_type_highlighting() {
     assert!(parse(custom).root_node().has_error());
     let recovered_types = texts_allow_errors("highlights", custom, "type");
     assert!(
-        recovered_types.iter().filter(|ty| ty.as_str() == "item").count() >= 2,
+        recovered_types
+            .iter()
+            .filter(|ty| ty.as_str() == "item")
+            .count()
+            >= 2,
         "expected accessor parameter and return custom types to be highlighted: {recovered_types:?}"
     );
 }
