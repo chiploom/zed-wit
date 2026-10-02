@@ -17,9 +17,13 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
 3. Configure the server override shown in the project README to the absolute
    native executable path. This is required until matching hosted assets exist.
    Confirm the path is trusted and executable; restart the WIT language server.
-4. Open the repository's WIT fixtures and a disposable multi-file WIT package.
-   Record the Zed log/server stderr and screenshots in a dated evidence directory.
-   Do not place private workspace source or secrets in shared evidence.
+4. Open all files under `tests/fixtures/current/` and `tests/fixtures/gated/`.
+   They are package-coherent sibling groups and should produce no parser or
+   resolver diagnostics. Files under `tests/fixtures/grammar-gaps/` deliberately
+   exercise known grammar/parser disagreements and are not expected to be clean.
+5. Open a disposable multi-file WIT package. Record the Zed log/server stderr and
+   screenshots in a dated evidence directory. Do not place private workspace
+   source or secrets in shared evidence.
 
 ## Scenarios
 
