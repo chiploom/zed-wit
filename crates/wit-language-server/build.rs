@@ -55,12 +55,11 @@ fn main() {
         Err(env::VarError::NotUnicode(_)) => {
             panic!("{BUILD_COMMIT_ENV} must contain valid Unicode")
         }
-        Err(env::VarError::NotPresent) => command_output(
-            &repository_root,
-            &["rev-parse", "--verify", "HEAD"],
-        )
-        .and_then(|value| normalize_commit(&value))
-        .unwrap_or_else(|| "unknown".to_owned()),
+        Err(env::VarError::NotPresent) => {
+            command_output(&repository_root, &["rev-parse", "--verify", "HEAD"])
+                .and_then(|value| normalize_commit(&value))
+                .unwrap_or_else(|| "unknown".to_owned())
+        }
     };
 
     println!("cargo::rustc-env={BUILD_COMMIT_ENV}={commit}");
