@@ -71,9 +71,13 @@ This command first builds and probes the selected synthetic-input backend. If
 the host has not granted the required permission or the Linux desktop protocol is
 unavailable, it fails before running the expensive editor qualification. After a
 successful preflight it runs `cargo xtask test-zed`, then stages a second
-disposable stateless Zed profile with an isolated keymap and drives only that Zed
-instance through synthetic keyboard input. It verifies the saved disposable files
-rather than relying on screenshots:
+disposable stateless Zed profile and drives only that Zed instance through
+synthetic keyboard input. The interaction deliberately uses Zed's shipped default
+keybindings instead of a test-only keymap: Enter accepts the exact snippet match,
+Tab/Shift-Tab traverse snippet placeholders, the platform-default outline and file
+finder shortcuts navigate structure/files, and the platform-default save shortcut
+persists evidence. It verifies the saved disposable files rather than relying on
+screenshots:
 
 - WIT snippet completion is invoked in real Zed;
 - forward and reverse snippet tab-stop navigation replaces the expected
@@ -102,8 +106,9 @@ levels so UIPI does not block synthetic input.
 Because this command sends real keyboard events, it requires the explicit
 `--allow-input-injection true` acknowledgement. Save or close unrelated
 foreground applications and do not interact with the desktop while it runs.
-All Zed settings/keybindings and edited WIT files used by this gate live under
-the disposable `target/zed-gui/` profile/workspace.
+All Zed settings and edited WIT files used by this gate live under the
+disposable `target/zed-gui/` profile/workspace; the test does not install or
+override user keybindings.
 
 The test intentionally does not compare theme-specific rendered pixel colors.
 Semantic highlight capture correctness remains asserted deterministically by the
