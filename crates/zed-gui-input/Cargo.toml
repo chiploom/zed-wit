@@ -1,0 +1,23 @@
+[package]
+name = "zed-gui-input"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[features]
+default = []
+native = ["dep:enigo"]
+linux-x11 = ["dep:enigo", "enigo/x11rb"]
+linux-wayland = ["dep:enigo", "enigo/wayland"]
+linux-libei = ["dep:enigo", "enigo/libei_smol"]
+
+[dependencies]
+enigo = { version = "=0.6.1", default-features = false, optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"

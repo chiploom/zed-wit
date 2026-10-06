@@ -24,6 +24,7 @@
 
 ; Allow blank line before
 [
+  (deprecated_gate)
   (enum_items)
   (external_id)
   (flags_items)
@@ -34,7 +35,10 @@
   (package_decl)
   (record_item)
   (resource_item)
+  (since_gate)
+  (toplevel_use_item)
   (type_item)
+  (unstable_gate)
   (variant_items)
   (world_item)
 ] @allow_blank_line_before
@@ -129,11 +133,21 @@
   .
 )
 
+; Keep imported names compact (`use foo.{bar}`) while matching the
+; Component Model's spaced include-renaming style (`with { a as b }`).
 (definitions
   .
   "{" @append_empty_softline @append_indent_start
-  _
+  (use_names_item)
   "}" @prepend_empty_softline @prepend_indent_end
+  .
+)
+
+(definitions
+  .
+  "{" @append_spaced_softline @append_indent_start
+  (include_names_item)
+  "}" @prepend_spaced_softline @prepend_indent_end
   .
 )
 

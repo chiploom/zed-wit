@@ -1,0 +1,5 @@
+package manual:types;
+
+interface api {
+    type item = u32;
+}

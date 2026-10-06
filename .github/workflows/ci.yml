@@ -31,6 +31,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   RUSTUP_AUTO_INSTALL: "0"
+  WIT_LANGUAGE_SERVER_BUILD_COMMIT: ${{ github.sha }}
 jobs:
   quality:
     runs-on: ubuntu-24.04
@@ -55,8 +56,8 @@ jobs:
       - run: cargo check --workspace --locked
       - name: Run doctests
         run: cargo test --doc --workspace --exclude xtask --locked
-      - name: Check only the Zed adapter for Wasm
-        run: cargo check -p zed-wit --target wasm32-wasip2 --locked
+      - name: Build the Zed extension as Zed does
+        run: cargo build --target wasm32-wasip2 --locked
 
   native-tests:
     name: Tests / ${{ matrix.target }}
@@ -66,10 +67,13 @@ jobs:
         include:
           - runner: macos-15
             target: aarch64-apple-darwin
+            gui_feature: native
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+            gui_feature: linux-x11
           - runner: windows-2025
             target: x86_64-pc-windows-msvc
+            gui_feature: native
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     defaults:
@@ -89,10 +93,19 @@ jobs:
           shared-key: test-${{ matrix.target }}
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest@0.9.146
           fallback: none
+      - name: Check platform-specific xtask
+        run: cargo check -p xtask --all-targets --locked --target "$TARGET"
+      - name: Clippy platform GUI input backend
+        run: cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui_feature }}" --target "$TARGET" -- -D warnings
+      - name: Clippy Linux Wayland GUI input backends
+        if: runner.os == 'Linux'
+        run: |
+          cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-wayland --target "$TARGET" -- -D warnings
+          cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-libei --target "$TARGET" -- -D warnings
       - name: Run native tests
         run: cargo nextest run --workspace --exclude xtask --locked --target "$TARGET"
 
@@ -104,8 +117,10 @@ jobs:
         include:
           - runner: macos-15-intel
             target: x86_64-apple-darwin
+            gui_feature: native
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            gui_feature: linux-x11
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     defaults:
@@ -126,6 +141,15 @@ jobs:
           cache-bin: false
       - name: Check native target
         run: cargo check --workspace --exclude xtask --all-targets --locked --target "$TARGET"
+      - name: Check platform-specific xtask
+        run: cargo check -p xtask --all-targets --locked --target "$TARGET"
+      - name: Clippy platform GUI input backend
+        run: cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui_feature }}" --target "$TARGET" -- -D warnings
+      - name: Clippy Linux Wayland GUI input backends
+        if: runner.os == 'Linux'
+        run: |
+          cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-wayland --target "$TARGET" -- -D warnings
+          cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-libei --target "$TARGET" -- -D warnings
 
   native-artifacts:
     name: Artifact / ${{ matrix.target }}

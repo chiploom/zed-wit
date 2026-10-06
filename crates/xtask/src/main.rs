@@ -3,8 +3,10 @@ mod licenses;
 mod release;
 mod repository_policy;
 mod util;
+mod zed_gui;
+mod zed_smoke;
 
-use std::{env, path::PathBuf, process::ExitCode};
+use std::{env, path::PathBuf, process::ExitCode, time::Duration};
 
 fn main() -> ExitCode {
     match run() {
@@ -88,6 +90,93 @@ fn run() -> Result<(), String> {
             }
             repository_policy::check_no_python()
         }
+        "test-zed-gui" => {
+            let mut options = util::parse_options(
+                rest,
+                &[
+                    "zed",
+                    "profile",
+                    "timeout-seconds",
+                    "settle-milliseconds",
+                    "allow-input-injection",
+                    "linux-input-backend",
+                ],
+            )?;
+            let zed = options.remove("zed").unwrap_or_else(|| "zed".into());
+            let profile = util::root_relative(
+                options
+                    .remove("profile")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("target/zed-gui")),
+            );
+            let timeout = options
+                .remove("timeout-seconds")
+                .map(|value| {
+                    value
+                        .parse::<u64>()
+                        .map_err(|error| format!("invalid --timeout-seconds {value:?}: {error}"))
+                })
+                .transpose()?
+                .unwrap_or(60);
+            if !(5..=180).contains(&timeout) {
+                return Err("--timeout-seconds must be between 5 and 180".into());
+            }
+            let settle = options
+                .remove("settle-milliseconds")
+                .map(|value| {
+                    value.parse::<u64>().map_err(|error| {
+                        format!("invalid --settle-milliseconds {value:?}: {error}")
+                    })
+                })
+                .transpose()?
+                .unwrap_or(750);
+            if !(100..=5000).contains(&settle) {
+                return Err("--settle-milliseconds must be between 100 and 5000".into());
+            }
+            let allow_input = options
+                .remove("allow-input-injection")
+                .as_deref()
+                .map(str::parse::<bool>)
+                .transpose()
+                .map_err(|error| format!("invalid --allow-input-injection value: {error}"))?
+                .unwrap_or(false);
+            let linux_backend = options
+                .remove("linux-input-backend")
+                .unwrap_or_else(|| "auto".into());
+            util::ensure_empty_options(options)?;
+            zed_gui::run(
+                &zed,
+                &profile,
+                Duration::from_secs(timeout),
+                Duration::from_millis(settle),
+                allow_input,
+                &linux_backend,
+            )
+        }
+        "test-zed" => {
+            let mut options = util::parse_options(rest, &["zed", "profile", "timeout-seconds"])?;
+            let zed = options.remove("zed").unwrap_or_else(|| "zed".into());
+            let profile = util::root_relative(
+                options
+                    .remove("profile")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("target/zed-smoke/profile")),
+            );
+            let timeout = options
+                .remove("timeout-seconds")
+                .map(|value| {
+                    value
+                        .parse::<u64>()
+                        .map_err(|error| format!("invalid --timeout-seconds {value:?}: {error}"))
+                })
+                .transpose()?
+                .unwrap_or(60);
+            if !(5..=180).contains(&timeout) {
+                return Err("--timeout-seconds must be between 5 and 180".into());
+            }
+            util::ensure_empty_options(options)?;
+            zed_smoke::run(&zed, &profile, Duration::from_secs(timeout))
+        }
         other => Err(format!(
             "unknown xtask command {other:?}; run `cargo xtask help`"
         )),
@@ -104,6 +193,8 @@ Usage:
   cargo xtask package-release --target <target> [--output <dir>]
   cargo xtask validate-release --tag <vX.Y.Z>
   cargo xtask verify-release-assets [--input <dir>]
-  cargo xtask check-no-python"
+  cargo xtask check-no-python
+  cargo xtask test-zed [--zed <binary>] [--profile <dir>] [--timeout-seconds <5-180>]
+  cargo xtask test-zed-gui [--zed <binary>] [--profile <dir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] [--linux-input-backend <auto|x11|wayland|libei>] --allow-input-injection true"
     );
 }

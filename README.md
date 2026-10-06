@@ -4,43 +4,46 @@ Modern editing support for WebAssembly Interface Types, maintained by Chiploom
 and useful independently of any Chiploom project. This extension is **unreleased**
 and is not published in the Zed registry.
 
-| Feature | Implemented behavior |
-| --- | --- |
-| File recognition | `.wit` files, WIT Markdown code fences |
-| Syntax | Canonical Bytecode Alliance Tree-sitter grammar, immutable revision |
-| Editing | Highlighting, doc/comments, brackets, indentation, outline, Vim text objects |
-| Snippets | Package, interface, world, types, functions, imports, exports and use |
-| Diagnostics | Upstream `wit-parser` syntax, name/type and package errors; unsaved buffers |
-| Packages | Sibling multi-file packages, direct `deps/` files and package directories |
-| Formatting | Maintained Topiary engine; comment-preserving document formatting |
-| Semantic navigation | Completion, hover, definitions, references and workspace symbols are not implemented |
+| Feature                  | Implemented behavior                                                                                                         |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| File recognition         | `.wit` files, WIT Markdown code fences                                                                                       |
+| Syntax                   | Canonical Bytecode Alliance Tree-sitter grammar, immutable revision                                                          |
+| Editing                  | Highlighting, doc/comments, brackets, indentation, outline, Vim text objects                                                 |
+| Snippets                 | Package, interface, world, types, functions, imports, exports and use                                                        |
+| Diagnostics              | Upstream `wit-parser` syntax, name/type and package errors; unsaved buffers                                                  |
+| Packages                 | Sibling multi-file packages, direct `deps/` files and package directories                                                    |
+| Formatting               | Maintained Topiary engine; comment-preserving document formatting                                                            |
+| Semantic editor features | Scope-aware type completion, resolved hover, go to definition and references; deterministic unresolved type typo quick fixes |
 
 ## Install locally
 
 Install [Rust via rustup](https://rustup.rs/), clone this repository, and build:
 
 ```sh
-cargo build -p wit-language-server --locked
+cargo build -p wit-language-server --release --locked
+./target/release/wit-language-server --version
+mkdir -p .zed
+cp .zed/settings.example.json .zed/settings.json
 ```
 
-In Zed settings, configure the local executable. Replace the example with the
-absolute path to your checkout (`.exe` on Windows):
+The project-local settings example points Zed at
+`target/release/wit-language-server`, relative to the repository worktree. On
+Windows, change the path in the untracked `.zed/settings.json` to
+`target/release/wit-language-server.exe`.
 
-```json
-{
-  "lsp": {
-    "wit-language-server": {
-      "binary": {
-        "path": "/absolute/path/to/zed-wit/target/debug/wit-language-server"
-      }
-    }
-  }
-}
-```
+The version output includes the Git commit captured when the binary was built,
+for example `0.1.0+git.<commit>`. The same build version is exposed through
+LSP `serverInfo.version`, which Zed displays in its language-server menu, and
+is emitted once as an INFO `window/logMessage` notification so it also appears
+in Zed's language-server **View Logs** output.
+
+If you configure the binary in global Zed settings instead of project settings,
+use an absolute path to the release executable.
 
 Run `zed: install dev extension` from Zed's command palette and select the
-repository root. Zed builds the adapter for `wasm32-wasip2` and downloads WASI SDK
-to compile the grammar. An existing registry WIT extension will be overridden.
+repository root. Zed builds the root adapter package for `wasm32-wasip2` and
+downloads WASI SDK separately to compile the grammar. An existing registry WIT
+extension will be overridden.
 Open a `.wit` file, then use the outline panel and `editor: format` to exercise
 the extension. Inspect `zed: open log` for startup or build failures.
 
@@ -53,8 +56,9 @@ Configured paths, arguments and environment use Zed's normal `lsp` binary settin
 
 ## Compatibility
 
-The audit snapshot is dated 2026-10-01: Rust 1.99.0, Zed extension API 0.7.0,
-Tree-sitter ABI 15 and `wit-parser` 0.260.0. See
+The architecture baseline was established 2026-10-01; upstream compatibility was
+last re-audited 2026-10-06. The compatibility snapshot records Rust 1.99.0, Zed
+extension API 0.7.0, Tree-sitter ABI 15 and `wit-parser` 0.260.0. See
 [upstream compatibility](docs/upstream-compatibility.md) for revisions and sources.
 The adapter/native release workflow targets macOS ARM64/x86_64, Linux GNU
 ARM64/x86_64 and Windows x86_64 MSVC. Local qualification and remaining platform
@@ -92,7 +96,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 cargo check --workspace --locked
-cargo check -p zed-wit --target wasm32-wasip2 --locked
+cargo build --target wasm32-wasip2 --locked
 ```
 
 Read [CONTRIBUTING](CONTRIBUTING.md) for fixtures, queries, updates and releases,

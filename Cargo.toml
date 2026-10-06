@@ -11,8 +11,8 @@ repository = "https://github.com/chiploom/zed-wit"
 crate-type = ["cdylib", "rlib"]
 
 [workspace]
-members = ["crates/wit-syntax", "crates/wit-analysis", "crates/wit-language-server", "crates/xtask"]
-default-members = [".", "crates/wit-syntax", "crates/wit-analysis", "crates/wit-language-server"]
+members = ["crates/wit-syntax", "crates/wit-analysis", "crates/wit-language-server", "crates/xtask", "crates/zed-gui-input"]
+default-members = ["."]
 resolver = "3"
 
 [dependencies]

@@ -48,6 +48,37 @@ fn texts(name: &str, source: &str, capture_name: &str) -> Vec<String> {
         .collect()
 }
 
+fn captures_allow_errors(name: &str, source: &str) -> Vec<(String, String, usize)> {
+    let tree = parse(source);
+    let query = query(name);
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());
+    let mut found = Vec::new();
+    while let Some(matched) = matches.next() {
+        for capture in matched.captures {
+            found.push((
+                query.capture_names()[capture.index as usize].to_string(),
+                source[capture.node.byte_range()].to_string(),
+                capture.node.start_byte(),
+            ));
+        }
+    }
+    found
+}
+
+fn capture_starts_allow_errors(
+    name: &str,
+    source: &str,
+    capture_name: &str,
+    text: &str,
+) -> BTreeSet<usize> {
+    captures_allow_errors(name, source)
+        .into_iter()
+        .filter(|(capture, found, _)| capture == capture_name && found == text)
+        .map(|(_, _, start)| start)
+        .collect()
+}
+
 #[test]
 fn all_queries_compile_with_only_zed_supported_captures() {
     let highlights = [
@@ -112,14 +143,23 @@ fn all_queries_compile_with_only_zed_supported_captures() {
     assert_eq!(wit_syntax::language().abi_version(), 15);
 }
 
+fn collect_wit_files(directory: &std::path::Path, paths: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            collect_wit_files(&path, paths);
+        } else if path.extension().is_some_and(|extension| extension == "wit") {
+            paths.push(path);
+        }
+    }
+}
+
 #[test]
 fn current_and_gated_corpus_parse_without_errors() {
     for group in ["current", "gated"] {
         let dir = root().join("tests/fixtures").join(group);
-        let mut paths: Vec<_> = fs::read_dir(dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect();
+        let mut paths = Vec::new();
+        collect_wit_files(&dir, &mut paths);
         paths.sort();
         assert!(!paths.is_empty());
         for path in paths {
@@ -145,8 +185,10 @@ fn current_and_gated_corpus_parse_without_errors() {
                 }
             }
             println!(
-                "error-free {group}/{} ({} bytes)",
-                path.file_name().unwrap().to_string_lossy(),
+                "error-free {} ({} bytes)",
+                path.strip_prefix(root().join("tests/fixtures"))
+                    .unwrap()
+                    .display(),
                 source.len()
             );
         }
@@ -154,14 +196,132 @@ fn current_and_gated_corpus_parse_without_errors() {
 }
 
 #[test]
+fn getter_setter_sugar_recovers_keyword_parameter_and_type_highlighting() {
+    let source = fs::read_to_string(
+        root().join("tests/fixtures/grammar-gaps/getters-setters/getters-setters.wit"),
+    )
+    .unwrap();
+    assert!(parse(&source).root_node().has_error());
+
+    for keyword in ["get", "set"] {
+        let expected: BTreeSet<_> = source
+            .match_indices(keyword)
+            .map(|(start, _)| start)
+            .collect();
+        assert_eq!(
+            capture_starts_allow_errors("highlights", &source, "keyword", keyword),
+            expected,
+            "every {keyword} accessor should use keyword highlighting"
+        );
+    }
+
+    for function_name in ["value", "name"] {
+        let expected: BTreeSet<_> = source
+            .match_indices(function_name)
+            .map(|(start, _)| start)
+            .collect();
+        assert_eq!(
+            capture_starts_allow_errors("highlights", &source, "function", function_name),
+            expected,
+            "every accessor declaration named {function_name} should use function highlighting"
+        );
+    }
+
+    let expected_parameters: BTreeSet<_> = source
+        .match_indices("(v:")
+        .map(|(start, _)| start + 1)
+        .collect();
+    assert_eq!(
+        capture_starts_allow_errors("highlights", &source, "variable.parameter", "v"),
+        expected_parameters,
+        "setter parameters should use function-parameter highlighting"
+    );
+
+    for builtin in ["u64", "string"] {
+        let expected: BTreeSet<_> = source
+            .match_indices(builtin)
+            .map(|(start, _)| start)
+            .collect();
+        assert_eq!(
+            capture_starts_allow_errors("highlights", &source, "type.builtin", builtin),
+            expected,
+            "every accessor occurrence of {builtin} should use builtin-type highlighting"
+        );
+    }
+
+    let custom = "package demo:properties; interface properties { type item = u32; value: set(v: item); value: get() -> item; }";
+    assert!(parse(custom).root_node().has_error());
+    let setter_type = custom.find("v: item").unwrap() + "v: ".len();
+    let getter_type = custom.find("-> item").unwrap() + "-> ".len();
+    let expected_custom = BTreeSet::from([setter_type, getter_type]);
+    let recovered_custom = capture_starts_allow_errors("highlights", custom, "type", "item");
+    assert!(
+        expected_custom.is_subset(&recovered_custom),
+        "accessor parameter and return custom types should be highlighted: {recovered_custom:?}"
+    );
+}
+
+#[test]
+fn unrelated_error_nodes_do_not_receive_accessor_recovery_captures() {
+    let source = "package demo:negative; interface i { invalid get(); invalid set(v: u32); }";
+    let tree = parse(source);
+    assert!(
+        tree.root_node().has_error(),
+        "the malformed declarations must exercise Tree-sitter ERROR recovery"
+    );
+    let error_tree = tree.root_node().to_sexp();
+    assert!(error_tree.contains("(ERROR"), "{error_tree}");
+
+    let accessor_only = [
+        "function",
+        "keyword",
+        "variable.parameter",
+        "type",
+        "type.builtin",
+    ];
+    let unrelated_tokens = ["get", "set", "v", "u32"];
+    let found = captures_allow_errors("highlights", source);
+    for token in unrelated_tokens {
+        let starts: BTreeSet<_> = source
+            .match_indices(token)
+            .filter(|(start, _)| *start > source.find("interface i").unwrap())
+            .map(|(start, _)| start)
+            .collect();
+        for capture in &found {
+            assert!(
+                !(accessor_only.contains(&capture.0.as_str()) && starts.contains(&capture.2)),
+                "unrelated {token:?} received accessor capture {capture:?}; tree: {error_tree}"
+            );
+        }
+    }
+
+    let malformed = "package demo:negative; interface i { call: func(value: get() -> u32); }";
+    let tree = parse(malformed);
+    assert!(
+        tree.root_node().has_error(),
+        "{}",
+        tree.root_node().to_sexp()
+    );
+    let get = malformed.find("get()").unwrap();
+    for (capture, _, start) in captures_allow_errors("highlights", malformed) {
+        assert!(
+            !(matches!(capture.as_str(), "keyword" | "type.builtin") && start == get),
+            "non-accessor get received accessor highlighting at {start}: {}",
+            tree.root_node().to_sexp()
+        );
+    }
+}
+
+#[test]
 fn grammar_limitations_are_explicit() {
     let gaps = root().join("tests/fixtures/grammar-gaps");
-    let sugar = fs::read_to_string(gaps.join("getters-setters.wit")).unwrap();
+    let sugar = fs::read_to_string(gaps.join("getters-setters/getters-setters.wit")).unwrap();
     assert!(
         parse(&sugar).root_node().has_error(),
         "getter/setter support changed: update qualification"
     );
-    let legacy = fs::read_to_string(gaps.join("legacy-named-results.wit")).unwrap();
+    let legacy =
+        fs::read_to_string(gaps.join("legacy-named-results/legacy-named-results.wit")).unwrap();
     assert!(
         !parse(&legacy).root_node().has_error(),
         "legacy result behavior changed: update qualification"
@@ -364,6 +524,32 @@ fn expand_defaults(input: &str) -> String {
     output
 }
 
+fn snippet_tabstops(input: &str) -> Vec<u32> {
+    let mut indices = Vec::new();
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '$' {
+            continue;
+        }
+        if chars.peek() == Some(&'{') {
+            chars.next();
+            let placeholder: String = chars.by_ref().take_while(|ch| *ch != '}').collect();
+            let index = placeholder
+                .split_once(':')
+                .map(|(index, _)| index)
+                .unwrap_or(placeholder.as_str());
+            indices.push(index.parse().expect("snippet tabstop index"));
+        } else {
+            let index: String =
+                std::iter::from_fn(|| chars.next_if(|ch| ch.is_ascii_digit())).collect();
+            if !index.is_empty() {
+                indices.push(index.parse().expect("snippet tabstop index"));
+            }
+        }
+    }
+    indices
+}
+
 #[test]
 fn every_snippet_default_expands_into_valid_wit_in_its_context() {
     let snippets: serde_json::Value =
@@ -383,6 +569,25 @@ fn every_snippet_default_expands_into_valid_wit_in_its_context() {
             .map(|line| line.as_str().unwrap())
             .collect::<Vec<_>>()
             .join("\n");
+        let tabstops = snippet_tabstops(&body);
+        let non_final = tabstops
+            .iter()
+            .copied()
+            .filter(|index| *index != 0)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            non_final,
+            (1..=u32::try_from(non_final.len()).unwrap()).collect::<Vec<_>>(),
+            "snippet {name} must expose sequential tab stops"
+        );
+        if let Some(final_index) = tabstops.iter().position(|index| *index == 0) {
+            assert_eq!(
+                final_index + 1,
+                tabstops.len(),
+                "snippet {name} final $0 tab stop must be last"
+            );
+        }
+
         let expanded = expand_defaults(&body);
         let source = match name.as_str() {
             "Package" | "Interface" | "World" => expanded,

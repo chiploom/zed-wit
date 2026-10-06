@@ -29,10 +29,13 @@ Formatting must be idempotent and refuse syntax-error trees. Compatibility of
 the upstream formatting queries with newer grammar constructs is a test gate.
 
 The Zed Wasm adapter only discovers or installs the server and builds its command.
-The native server owns document lifecycle and position encoding. Analysis owns
-package resolution, diagnostics and formatting, with no Zed or LSP types.
-Capabilities are advertised only when implemented and tested. Semantic navigation
-must not infer symbol identity through regexes or workspace-wide name matches.
+The native server owns document lifecycle, position encoding and LSP requests.
+Analysis owns package resolution, diagnostics, formatting and an index of symbols
+and source references, with no Zed or LSP types. Capabilities are advertised only
+when implemented and tested. Semantic navigation follows resolved parser identities;
+Tree-sitter syntax nodes locate type-use tokens without becoming a second resolver.
+Completion and quick fixes use syntax context, and typo fixes are offered only for
+an unresolved named type with a unique close declaration.
 
 ```mermaid
 flowchart LR

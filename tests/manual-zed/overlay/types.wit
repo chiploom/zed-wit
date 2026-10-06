@@ -1,0 +1,5 @@
+interface types {
+    record item {
+        value: u32,
+    }
+}

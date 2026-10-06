@@ -25,6 +25,7 @@ pub fn metadata(target: Option<&str>) -> Result<Value, String> {
     let mut args = vec![
         "metadata".to_owned(),
         "--locked".to_owned(),
+        "--all-features".to_owned(),
         "--format-version".to_owned(),
         "1".to_owned(),
     ];
@@ -59,6 +60,13 @@ pub fn license_choice(package: &Value) -> Result<&'static str, String> {
 
     if name == "backtrace-ext" && version == "0.2.1" {
         return Ok("Apache-2.0");
+    }
+
+    let alternatives = expression.split(" OR ").collect::<BTreeSet<_>>();
+    if alternatives == BTreeSet::from(["Apache-2.0", "MIT", "Zlib"])
+        || alternatives == BTreeSet::from(["Apache-2.0", "BSD-2-Clause", "MIT"])
+    {
+        return Ok("MIT");
     }
 
     match expression {
@@ -266,4 +274,41 @@ pub fn run(target: Option<&str>) -> Result<(), String> {
         .map_err(|error| format!("serialize dependency report: {error}"))?
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn approved_mit_apache_zlib_alternatives_are_order_independent() {
+        for expression in [
+            "MIT OR Zlib OR Apache-2.0",
+            "Zlib OR Apache-2.0 OR MIT",
+            "Apache-2.0 OR MIT OR Zlib",
+        ] {
+            let package = json!({
+                "name": "license-order-fixture",
+                "version": "1.0.0",
+                "license": expression,
+            });
+            assert_eq!(license_choice(&package).unwrap(), "MIT");
+        }
+    }
+
+    #[test]
+    fn approved_mit_apache_bsd2_alternatives_are_order_independent() {
+        for expression in [
+            "BSD-2-Clause OR Apache-2.0 OR MIT",
+            "MIT OR BSD-2-Clause OR Apache-2.0",
+            "Apache-2.0 OR MIT OR BSD-2-Clause",
+        ] {
+            let package = json!({
+                "name": "license-order-fixture",
+                "version": "1.0.0",
+                "license": expression,
+            });
+            assert_eq!(license_choice(&package).unwrap(), "MIT");
+        }
+    }
 }

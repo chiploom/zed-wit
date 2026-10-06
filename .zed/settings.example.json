@@ -1,0 +1,9 @@
+{
+  "lsp": {
+    "wit-language-server": {
+      "binary": {
+        "path": "target/release/wit-language-server"
+      }
+    }
+  }
+}

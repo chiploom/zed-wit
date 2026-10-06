@@ -19,5 +19,5 @@ world application {
     @external-id("https://example.test/module")
     import module: interface { run: func(); }
     @external-id("output")
-    export result: func() -> string;
+    export %result: func() -> string;
 }

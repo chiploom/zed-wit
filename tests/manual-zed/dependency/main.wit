@@ -1,0 +1,5 @@
+package manual:dependency;
+
+world app {
+    import manual:types/api;
+}

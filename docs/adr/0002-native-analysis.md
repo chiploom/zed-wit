@@ -11,6 +11,8 @@ The audited historical WIT servers offer neither the maintained parser contract
 nor the required release assets. A printer for resolved packages cannot preserve
 source files and comments. Regex semantics cannot establish symbol identity.
 
-Advertise only implemented, tested capabilities. The initial supported semantic
-surface is diagnostics and document formatting. Navigation, rename and completion
-need separate resolution-aware work and must not be implied by highlighting.
+Advertise only implemented, tested capabilities. The supported semantic surface
+is diagnostics, document formatting, completion, hover, definition, references and
+safe unresolved-type typo quick fixes. Symbol identity comes from `wit-parser`
+resolution; syntax nodes supply source token ranges. Rename and workspace symbols
+are not advertised.

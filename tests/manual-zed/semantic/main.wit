@@ -1,0 +1,9 @@
+package manual:semantic;
+
+interface api {
+    record item {
+        value: u32,
+    }
+
+    echo: func(value: item) -> item;
+}

@@ -10,6 +10,8 @@
 - Add canonical grammar queries and parser-backed diagnostics with open-buffer
   overlays and bounded package dependency discovery.
 - Add Topiary document formatting and regression coverage.
+- Add WIT semantic completion, hover, definition, references and safe unresolved
+  type typo quick fixes through the native language server.
 - Define five-platform native CI and a protected manual release workflow with
   SHA-256 sidecars, verified per-target redistribution notices and artifact
   attestations.
