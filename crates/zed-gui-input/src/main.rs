@@ -77,6 +77,7 @@ fn run_all(settle: Duration) -> Result<(), String> {
     settings.open_prompt_to_get_permissions = false;
     let mut input = Enigo::new(&settings)
         .map_err(|error| format!("initialize input backend: {error}"))?;
+    #[cfg(target_os = "linux")]
     input.set_delay(20);
 
     press(&mut input, Key::End, settle)?;
