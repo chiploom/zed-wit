@@ -1,23 +1,33 @@
-use std::{
-    path::Path,
-    time::Duration,
-};
+use std::{path::Path, time::Duration};
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod supported {
     use crate::{util, zed_smoke};
-    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     use serde_json::json;
     use std::{
         env, fs,
         path::{Path, PathBuf},
-        process::Command,
+        process::{Command, Stdio},
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     const SNIPPET_FILE: &str = "gui/snippet.wit";
     const OUTLINE_FILE: &str = "gui/outline.wit";
+
+    struct InputDriver {
+        backend: &'static str,
+        executable: PathBuf,
+    }
+
+    struct SessionEvidence {
+        backend: &'static str,
+        server_pid: u32,
+        stdout: PathBuf,
+        stderr: PathBuf,
+        snippet: PathBuf,
+        outline: PathBuf,
+    }
 
     pub(super) fn run(
         zed: &str,
@@ -25,147 +35,101 @@ mod supported {
         timeout: Duration,
         settle: Duration,
         allow_input: bool,
+        linux_backend: &str,
     ) -> Result<(), String> {
         if !allow_input {
             return Err(
-                "test-zed-gui injects real keyboard input; rerun with --allow-input-injection true after closing or saving unrelated foreground applications".into(),
+                "test-zed-gui injects real keyboard input; rerun with --allow-input-injection true after saving or closing unrelated foreground applications".into(),
             );
         }
 
+        validate_linux_backend_option(linux_backend)?;
         let root = util::repo_root();
         let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
-        let smoke_profile = profile.join("smoke");
+
         eprintln!("[test-zed-gui] running deterministic and real-Zed qualification first");
-        zed_smoke::run(zed, &smoke_profile, timeout)?;
+        zed_smoke::run(zed, &profile.join("smoke"), timeout)?;
 
         let zed_path = zed_smoke::resolve_executable(zed)?;
         let server = zed_smoke::native_server(&root);
-        let gui_profile = profile.join("interactive");
-        let staged = zed_smoke::stage(&root, &gui_profile, &server)?;
+        let drivers = prepare_input_drivers(&root, profile, linux_backend)?;
+        let mut failures = Vec::new();
+
+        for (attempt, driver) in drivers.iter().enumerate() {
+            eprintln!(
+                "[test-zed-gui] GUI attempt {} using {} input backend",
+                attempt + 1,
+                driver.backend
+            );
+            match run_gui_attempt(
+                &root,
+                &zed_path,
+                &server,
+                profile,
+                driver,
+                attempt,
+                timeout,
+                settle,
+            ) {
+                Ok(evidence) => {
+                    write_report(
+                        profile,
+                        &head,
+                        command_version(&zed_path)?,
+                        &evidence,
+                    )?;
+                    return Ok(());
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[test-zed-gui] {} backend failed: {error}",
+                        driver.backend
+                    );
+                    failures.push(format!("{}: {error}", driver.backend));
+                }
+            }
+        }
+
+        Err(format!(
+            "all GUI input backends failed{}:\n{}",
+            input_permission_hint(),
+            failures.join("\n")
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_gui_attempt(
+        root: &Path,
+        zed: &Path,
+        server: &Path,
+        profile: &Path,
+        driver: &InputDriver,
+        attempt: usize,
+        timeout: Duration,
+        settle: Duration,
+    ) -> Result<SessionEvidence, String> {
+        let gui_profile = profile.join(format!("interactive-{attempt}-{}", driver.backend));
+        let staged = zed_smoke::stage(root, &gui_profile, server)?;
         write_isolated_config(&gui_profile)?;
 
         let gui_dir = staged.workspace_dir.join("gui");
         fs::create_dir_all(&gui_dir)
             .map_err(|error| format!("create {}: {error}", gui_dir.display()))?;
-        let snippet_path = staged.workspace_dir.join(SNIPPET_FILE);
-        let outline_path = staged.workspace_dir.join(OUTLINE_FILE);
-        fs::write(&snippet_path, "wit-package")
-            .map_err(|error| format!("write {}: {error}", snippet_path.display()))?;
-        fs::write(&outline_path, outline_fixture())
-            .map_err(|error| format!("write {}: {error}", outline_path.display()))?;
+        let snippet = staged.workspace_dir.join(SNIPPET_FILE);
+        let outline = staged.workspace_dir.join(OUTLINE_FILE);
+        fs::write(&snippet, "wit-package")
+            .map_err(|error| format!("write {}: {error}", snippet.display()))?;
+        fs::write(&outline, outline_fixture())
+            .map_err(|error| format!("write {}: {error}", outline.display()))?;
 
-        eprintln!("[test-zed-gui] qualifying snippet completion and tab-stop traversal");
-        let snippet_evidence = run_session(
-            &zed_path,
-            &gui_profile,
-            &staged.workspace_dir,
-            &server,
-            &snippet_path,
-            "snippet",
-            timeout,
-            settle,
-            |input| exercise_snippet(input, settle),
-        )?;
-        verify_snippet(&snippet_path)?;
-
-        eprintln!("[test-zed-gui] qualifying outline navigation and structure");
-        let outline_evidence = run_session(
-            &zed_path,
-            &gui_profile,
-            &staged.workspace_dir,
-            &server,
-            &outline_path,
-            "outline",
-            timeout,
-            settle,
-            |input| exercise_outline(input, settle),
-        )?;
-        verify_outline(&outline_path)?;
-
-        let zed_version = command_version(&zed_path)?;
-        let report = json!({
-            "result": "passed",
-            "head": head,
-            "os": env::consts::OS,
-            "arch": env::consts::ARCH,
-            "linux_session_type": env::var("XDG_SESSION_TYPE").ok(),
-            "wayland_display": env::var("WAYLAND_DISPLAY").ok(),
-            "x11_display": env::var("DISPLAY").ok(),
-            "zed_version": zed_version,
-            "profile": gui_profile,
-            "input_injection": {
-                "library": "enigo",
-                "version": "0.6.1",
-                "explicitly_allowed": true,
-            },
-            "scenarios": [
-                {
-                    "scenario": "snippets",
-                    "result": "passed",
-                    "evidence": "real Zed completion expanded the WIT package snippet; forward and reverse snippet-tab actions changed the expected placeholders; the final cursor accepted a sentinel and the disposable file was saved and verified",
-                    "file": snippet_path,
-                    "server_pid": snippet_evidence.server_pid,
-                    "stdout": snippet_evidence.stdout,
-                    "stderr": snippet_evidence.stderr,
-                },
-                {
-                    "scenario": "highlighting_and_structure",
-                    "result": "passed",
-                    "evidence": "real Zed outline UI located record, variant, and resource symbols in the WIT fixture; each navigation target was marked and saved; deterministic query tests remain the source of truth for semantic highlight captures",
-                    "file": outline_path,
-                    "server_pid": outline_evidence.server_pid,
-                    "stdout": outline_evidence.stdout,
-                    "stderr": outline_evidence.stderr,
-                }
-            ],
-            "presentation_note": "Theme-specific pixel colors are intentionally not screenshot-compared; semantic capture correctness is deterministic and the real GUI qualification verifies Zed language activation, snippet interaction, and outline navigation.",
-        });
-        let report_path = profile.join("zed-gui-report.json");
-        fs::create_dir_all(profile)
-            .map_err(|error| format!("create {}: {error}", profile.display()))?;
-        fs::write(
-            &report_path,
-            serde_json::to_vec_pretty(&report)
-                .map_err(|error| format!("encode GUI report: {error}"))?,
-        )
-        .map_err(|error| format!("write {}: {error}", report_path.display()))?;
-
-        eprintln!("[test-zed-gui] report: {}", report_path.display());
-        eprintln!("[test-zed-gui] PASS: snippet interaction and outline navigation passed in real Zed");
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report)
-                .map_err(|error| format!("encode GUI report: {error}"))?
-        );
-        Ok(())
-    }
-
-    struct SessionEvidence {
-        server_pid: u32,
-        stdout: PathBuf,
-        stderr: PathBuf,
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn run_session(
-        zed: &Path,
-        profile: &Path,
-        workspace: &Path,
-        server: &Path,
-        file: &Path,
-        name: &str,
-        timeout: Duration,
-        settle: Duration,
-        action: impl FnOnce(&mut Enigo) -> Result<(), String>,
-    ) -> Result<SessionEvidence, String> {
-        let stdout = profile.join(format!("zed-gui-{name}.stdout.log"));
-        let stderr = profile.join(format!("zed-gui-{name}.stderr.log"));
+        let stdout = gui_profile.join("zed-gui.stdout.log");
+        let stderr = gui_profile.join("zed-gui.stderr.log");
         let before = zed_smoke::matching_processes(server)?;
         let mut child = zed_smoke::launch(
             zed,
-            profile,
-            workspace,
-            &[file.to_path_buf()],
+            &gui_profile,
+            &staged.workspace_dir,
+            &[snippet.clone()],
             &stdout,
             &stderr,
         )?;
@@ -174,7 +138,7 @@ mod supported {
             &mut child,
             server,
             &before,
-            profile,
+            &gui_profile,
             timeout,
         ) {
             Ok(pid) => pid,
@@ -185,91 +149,194 @@ mod supported {
         };
 
         thread::sleep(settle);
-        let action_result = input_device().and_then(|mut input| action(&mut input));
+        let input_result = run_input_driver(driver, settle, timeout);
         let stop_result = zed_smoke::stop_zed(&mut child);
         let server_stop_result =
             zed_smoke::ensure_server_stopped(server_pid, server, Duration::from_secs(3));
-        let log_result = zed_smoke::scan_logs(profile, &stdout, &stderr);
+        let log_result = zed_smoke::scan_logs(&gui_profile, &stdout, &stderr);
 
-        if let Err(error) = action_result {
-            return Err(format!(
-                "{name} GUI input failed: {error}{}",
-                input_permission_hint()
-            ));
-        }
+        input_result?;
         stop_result?;
         server_stop_result?;
         log_result?;
+        verify_snippet(&snippet)?;
+        verify_outline(&outline)?;
 
         Ok(SessionEvidence {
+            backend: driver.backend,
             server_pid,
             stdout,
             stderr,
+            snippet,
+            outline,
         })
     }
 
-    fn input_device() -> Result<Enigo, String> {
-        let mut settings = Settings::default();
-        settings.open_prompt_to_get_permissions = false;
-        let mut input = Enigo::new(&settings).map_err(|error| {
-            format!(
-                "initialize cross-platform input injection: {error}{}",
-                input_permission_hint()
-            )
-        })?;
-        input.set_delay(20);
-        Ok(input)
+    fn prepare_input_drivers(
+        root: &Path,
+        profile: &Path,
+        linux_backend: &str,
+    ) -> Result<Vec<InputDriver>, String> {
+        let backends = selected_backend_features(linux_backend)?;
+        backends
+            .into_iter()
+            .map(|(backend, feature)| {
+                let target_dir = profile.join("input-drivers").join(backend);
+                if target_dir.exists() {
+                    fs::remove_dir_all(&target_dir)
+                        .map_err(|error| format!("remove {}: {error}", target_dir.display()))?;
+                }
+                fs::create_dir_all(&target_dir)
+                    .map_err(|error| format!("create {}: {error}", target_dir.display()))?;
+
+                eprintln!(
+                    "[test-zed-gui] building {backend} input helper with feature {feature}"
+                );
+                let status = Command::new("cargo")
+                    .args([
+                        "build",
+                        "-p",
+                        "zed-gui-input",
+                        "--locked",
+                        "--features",
+                        feature,
+                        "--target-dir",
+                    ])
+                    .arg(&target_dir)
+                    .current_dir(root)
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .status()
+                    .map_err(|error| format!("build {backend} input helper: {error}"))?;
+                if !status.success() {
+                    return Err(format!(
+                        "building {backend} input helper exited with {status}"
+                    ));
+                }
+
+                let executable = target_dir.join("debug").join(if cfg!(windows) {
+                    "zed-gui-input.exe"
+                } else {
+                    "zed-gui-input"
+                });
+                if !executable.is_file() {
+                    return Err(format!(
+                        "{backend} input helper was not produced at {}",
+                        executable.display()
+                    ));
+                }
+                Ok(InputDriver {
+                    backend,
+                    executable,
+                })
+            })
+            .collect()
     }
 
-    fn press(input: &mut Enigo, key: Key, settle: Duration) -> Result<(), String> {
-        input
-            .key(key, Direction::Click)
-            .map_err(|error| format!("press {key:?}: {error}"))?;
-        thread::sleep(settle);
-        Ok(())
-    }
-
-    fn type_text(input: &mut Enigo, text: &str, settle: Duration) -> Result<(), String> {
-        input
-            .text(text)
-            .map_err(|error| format!("type {text:?}: {error}"))?;
-        thread::sleep(settle);
-        Ok(())
-    }
-
-    fn exercise_snippet(input: &mut Enigo, settle: Duration) -> Result<(), String> {
-        press(input, Key::End, settle)?;
-        press(input, Key::F14, settle)?;
-        press(input, Key::F15, settle)?;
-        type_text(input, "gui", settle)?;
-        press(input, Key::F16, settle)?;
-        type_text(input, "snippet", settle)?;
-        press(input, Key::F16, settle)?;
-        type_text(input, "1.2.3", settle)?;
-        press(input, Key::F17, settle)?;
-        type_text(input, "reverse", settle)?;
-        press(input, Key::F16, settle)?;
-        type_text(input, "2.0.0", settle)?;
-        press(input, Key::F16, settle)?;
-        type_text(input, "\n// GUI_SNIPPET_FINAL", settle)?;
-        press(input, Key::F18, settle.saturating_mul(2))?;
-        Ok(())
-    }
-
-    fn exercise_outline(input: &mut Enigo, settle: Duration) -> Result<(), String> {
-        for (symbol, marker) in [
-            ("alpha", "GUI_OUTLINE_ALPHA"),
-            ("beta", "GUI_OUTLINE_BETA"),
-            ("gamma", "GUI_OUTLINE_GAMMA"),
-        ] {
-            press(input, Key::F13, settle)?;
-            type_text(input, symbol, settle)?;
-            press(input, Key::Return, settle)?;
-            press(input, Key::End, settle)?;
-            type_text(input, &format!(" // {marker}"), settle)?;
-            press(input, Key::F18, settle)?;
+    fn selected_backend_features(
+        linux_backend: &str,
+    ) -> Result<Vec<(&'static str, &'static str)>, String> {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            if linux_backend != "auto" {
+                return Err("--linux-input-backend is only valid on Linux".into());
+            }
+            return Ok(vec![("native", "native")]);
         }
-        Ok(())
+
+        #[cfg(target_os = "linux")]
+        {
+            return match linux_backend {
+                "x11" => Ok(vec![("x11", "linux-x11")]),
+                "wayland" => Ok(vec![("wayland", "linux-wayland")]),
+                "libei" => Ok(vec![("libei", "linux-libei")]),
+                "auto" => {
+                    let session = env::var("XDG_SESSION_TYPE")
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    if session == "x11"
+                        || (session.is_empty()
+                            && env::var_os("WAYLAND_DISPLAY").is_none()
+                            && env::var_os("DISPLAY").is_some())
+                    {
+                        Ok(vec![("x11", "linux-x11")])
+                    } else if session == "wayland" || env::var_os("WAYLAND_DISPLAY").is_some() {
+                        Ok(vec![
+                            ("libei", "linux-libei"),
+                            ("wayland", "linux-wayland"),
+                        ])
+                    } else {
+                        Err(
+                            "cannot infer Linux desktop input backend; set XDG_SESSION_TYPE/DISPLAY/WAYLAND_DISPLAY or pass --linux-input-backend x11|wayland|libei"
+                                .into(),
+                        )
+                    }
+                }
+                other => Err(format!(
+                    "invalid --linux-input-backend {other:?}; expected auto, x11, wayland, or libei"
+                )),
+            };
+        }
+
+        #[allow(unreachable_code)]
+        Err("GUI input backend is unsupported on this host".into())
+    }
+
+    fn validate_linux_backend_option(value: &str) -> Result<(), String> {
+        if matches!(value, "auto" | "x11" | "wayland" | "libei") {
+            Ok(())
+        } else {
+            Err(format!(
+                "invalid --linux-input-backend {value:?}; expected auto, x11, wayland, or libei"
+            ))
+        }
+    }
+
+    fn run_input_driver(
+        driver: &InputDriver,
+        settle: Duration,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        let settle_ms = u64::try_from(settle.as_millis())
+            .map_err(|_| "settle duration does not fit in u64".to_owned())?;
+        let mut child = Command::new(&driver.executable)
+            .args(["all", &settle_ms.to_string()])
+            .spawn()
+            .map_err(|error| {
+                format!(
+                    "launch {} input helper {}: {error}",
+                    driver.backend,
+                    driver.executable.display()
+                )
+            })?;
+
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| format!("poll {} input helper: {error}", driver.backend))?
+            {
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "{} input helper exited with {status}",
+                        driver.backend
+                    ))
+                };
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        child
+            .kill()
+            .map_err(|error| format!("kill timed-out {} input helper: {error}", driver.backend))?;
+        let _ = child.wait();
+        Err(format!(
+            "{} input helper timed out after {}s",
+            driver.backend,
+            timeout.as_secs()
+        ))
     }
 
     fn verify_snippet(path: &Path) -> Result<(), String> {
@@ -342,7 +409,6 @@ mod supported {
                 "bindings": {
                     "f13": "outline::Toggle",
                     "f14": "editor::ShowCompletions",
-                    "f18": "workspace::Save",
                 }
             },
             {
@@ -362,6 +428,13 @@ mod supported {
                 "bindings": {
                     "f17": "editor::PreviousSnippetTabstop",
                 }
+            },
+            {
+                "context": "Workspace",
+                "bindings": {
+                    "f18": "workspace::Save",
+                    "f19": "file_finder::Toggle",
+                }
             }
         ]);
         fs::write(
@@ -370,6 +443,64 @@ mod supported {
                 .map_err(|error| format!("encode isolated GUI keymap: {error}"))?,
         )
         .map_err(|error| format!("write isolated GUI keymap: {error}"))?;
+        Ok(())
+    }
+
+    fn write_report(
+        profile: &Path,
+        head: &str,
+        zed_version: String,
+        evidence: &SessionEvidence,
+    ) -> Result<(), String> {
+        let report = json!({
+            "result": "passed",
+            "head": head,
+            "os": env::consts::OS,
+            "arch": env::consts::ARCH,
+            "linux_session_type": env::var("XDG_SESSION_TYPE").ok(),
+            "wayland_display": env::var("WAYLAND_DISPLAY").ok(),
+            "x11_display": env::var("DISPLAY").ok(),
+            "zed_version": zed_version,
+            "input_backend": evidence.backend,
+            "server_pid": evidence.server_pid,
+            "stdout": evidence.stdout,
+            "stderr": evidence.stderr,
+            "scenarios": [
+                {
+                    "scenario": "snippets",
+                    "result": "passed",
+                    "evidence": "real Zed completion expanded the WIT package snippet; forward and reverse snippet-tab actions replaced the expected placeholders; the final cursor accepted a sentinel and the disposable file was saved and verified",
+                    "file": evidence.snippet,
+                },
+                {
+                    "scenario": "highlighting_and_structure",
+                    "result": "passed",
+                    "evidence": "real Zed outline UI located record, variant, and resource symbols; each navigation target was marked and saved; deterministic query tests remain the source of truth for semantic highlight captures",
+                    "file": evidence.outline,
+                }
+            ],
+            "presentation_note": "Theme-specific pixel colors are intentionally not screenshot-compared; semantic capture correctness is deterministic and real GUI qualification verifies language activation, snippet interaction, and outline navigation.",
+        });
+        let report_path = profile.join("zed-gui-report.json");
+        fs::create_dir_all(profile)
+            .map_err(|error| format!("create {}: {error}", profile.display()))?;
+        fs::write(
+            &report_path,
+            serde_json::to_vec_pretty(&report)
+                .map_err(|error| format!("encode GUI report: {error}"))?,
+        )
+        .map_err(|error| format!("write {}: {error}", report_path.display()))?;
+
+        eprintln!("[test-zed-gui] report: {}", report_path.display());
+        eprintln!(
+            "[test-zed-gui] PASS: snippet interaction and outline navigation passed in real Zed using {}",
+            evidence.backend
+        );
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("encode GUI report: {error}"))?
+        );
         Ok(())
     }
 
@@ -397,9 +528,62 @@ mod supported {
         } else if cfg!(target_os = "windows") {
             "; keep Zed and xtask at the same Windows integrity level so UIPI does not block input"
         } else if cfg!(target_os = "linux") {
-            "; ensure the desktop session exposes a usable X11, Wayland virtual-keyboard, or libei input-injection backend"
+            "; ensure the desktop exposes the selected X11, Wayland virtual-keyboard, or libei/RemoteDesktop input interface"
         } else {
             ""
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn snippet_verification_requires_reverse_and_final_tabstop_evidence() {
+            let root = env::temp_dir().join(format!(
+                "zed-wit-gui-snippet-{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).unwrap();
+            let path = root.join("snippet.wit");
+            fs::write(
+                &path,
+                "package gui:reverse@2.0.0;\n// GUI_SNIPPET_FINAL\n",
+            )
+            .unwrap();
+            assert!(verify_snippet(&path).is_ok());
+            fs::write(
+                &path,
+                "package gui:snippet@1.2.3;\n// GUI_SNIPPET_FINAL\n",
+            )
+            .unwrap();
+            assert!(verify_snippet(&path).is_err());
+            fs::remove_dir_all(&root).unwrap();
+        }
+
+        #[test]
+        fn outline_verification_requires_every_navigation_marker() {
+            let root = env::temp_dir().join(format!(
+                "zed-wit-gui-outline-{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).unwrap();
+            let path = root.join("outline.wit");
+            fs::write(
+                &path,
+                "record alpha { // GUI_OUTLINE_ALPHA\n}\nvariant beta { // GUI_OUTLINE_BETA\n}\nresource gamma { // GUI_OUTLINE_GAMMA\n}\n",
+            )
+            .unwrap();
+            assert!(verify_outline(&path).is_ok());
+            fs::write(
+                &path,
+                "record alpha {\n}\nvariant beta { // GUI_OUTLINE_BETA\n}\nresource gamma { // GUI_OUTLINE_GAMMA\n}\n",
+            )
+            .unwrap();
+            assert!(verify_outline(&path).is_err());
+            fs::remove_dir_all(&root).unwrap();
         }
     }
 }
@@ -410,15 +594,30 @@ pub fn run(
     timeout: Duration,
     settle: Duration,
     allow_input: bool,
+    linux_backend: &str,
 ) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     {
-        supported::run(zed, profile, timeout, settle, allow_input)
+        supported::run(
+            zed,
+            profile,
+            timeout,
+            settle,
+            allow_input,
+            linux_backend,
+        )
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
-        let _ = (zed, profile, timeout, settle, allow_input);
+        let _ = (
+            zed,
+            profile,
+            timeout,
+            settle,
+            allow_input,
+            linux_backend,
+        );
         Err("test-zed-gui supports Zed desktop hosts: macOS, Linux, and Windows".into())
     }
 }
