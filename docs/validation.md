@@ -33,8 +33,8 @@ or end-to-end hosted installation.
   execution on final SHA**.
 
 The complete gate passed on implementation HEAD
-`31d540950b1265dbe7ed4a8f9a694776b89f9bf6`. After this evidence update is
-committed, rerun the exact gate on that documentation-inclusive HEAD. Commands:
+`31d540950b1265dbe7ed4a8f9a694776b89f9bf6` and was rerun on validation-evidence
+HEAD `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`. Commands:
 
 ```sh
 cargo xtask check-no-python
