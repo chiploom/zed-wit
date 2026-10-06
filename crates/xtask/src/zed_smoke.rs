@@ -571,8 +571,16 @@ fn stop_zed(child: &mut Child) -> Result<(), String> {
         .map_err(|error| format!("poll isolated Zed process before shutdown: {error}"))?
         .is_none();
 
-    if running {
-        signal_process_group(pid, "-TERM")?;
+    if running
+        && let Err(error) = signal_process_group(pid, "-TERM")
+        && child
+            .try_wait()
+            .map_err(|poll_error| {
+                format!("poll isolated Zed PID {pid} after failed SIGTERM ({error}): {poll_error}")
+            })?
+            .is_none()
+    {
+        return Err(error);
     }
 
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -590,7 +598,16 @@ fn stop_zed(child: &mut Child) -> Result<(), String> {
     log(format!(
         "isolated Zed process group {pid} did not exit after SIGTERM; sending SIGKILL"
     ));
-    signal_process_group(pid, "-KILL")?;
+    if let Err(error) = signal_process_group(pid, "-KILL")
+        && child
+            .try_wait()
+            .map_err(|poll_error| {
+                format!("poll isolated Zed PID {pid} after failed SIGKILL ({error}): {poll_error}")
+            })?
+            .is_none()
+    {
+        return Err(error);
+    }
     child
         .wait()
         .map_err(|error| format!("wait for isolated Zed process: {error}"))?;
@@ -707,7 +724,7 @@ fn parse_process_snapshot(snapshot: &str) -> Vec<(u32, String)> {
 }
 
 fn scan_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> Result<(), String> {
-    let logs = diagnostic_logs(profile, stdout_log, stderr_log);
+    let logs = all_logs(profile, stdout_log, stderr_log);
 
     const FAILURES: &[&str] = &[
         "failed to load extension",
@@ -725,7 +742,7 @@ fn scan_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> Result<(),
     Ok(())
 }
 
-fn diagnostic_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> String {
+fn all_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> String {
     let mut logs = String::new();
     for path in [stdout_log, stderr_log] {
         if let Ok(content) = fs::read_to_string(path) {
@@ -734,6 +751,11 @@ fn diagnostic_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> Stri
         }
     }
     let _ = collect_logs(profile, &mut logs);
+    logs
+}
+
+fn diagnostic_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> String {
+    let logs = all_logs(profile, stdout_log, stderr_log);
     let lines = logs.lines().collect::<Vec<_>>();
     let start = lines.len().saturating_sub(120);
     lines[start..].join("\n")
