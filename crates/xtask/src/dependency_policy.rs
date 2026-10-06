@@ -61,6 +61,11 @@ pub fn license_choice(package: &Value) -> Result<&'static str, String> {
         return Ok("Apache-2.0");
     }
 
+    let alternatives = expression.split(" OR ").collect::<BTreeSet<_>>();
+    if alternatives == BTreeSet::from(["Apache-2.0", "MIT", "Zlib"]) {
+        return Ok("MIT");
+    }
+
     match expression {
         "MIT OR Apache-2.0"
         | "Apache-2.0 OR MIT"
@@ -266,4 +271,26 @@ pub fn run(target: Option<&str>) -> Result<(), String> {
         .map_err(|error| format!("serialize dependency report: {error}"))?
     );
     Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn approved_mit_apache_zlib_alternatives_are_order_independent() {
+        for expression in [
+            "MIT OR Zlib OR Apache-2.0",
+            "Zlib OR Apache-2.0 OR MIT",
+            "Apache-2.0 OR MIT OR Zlib",
+        ] {
+            let package = json!({
+                "name": "license-order-fixture",
+                "version": "1.0.0",
+                "license": expression,
+            });
+            assert_eq!(license_choice(&package).unwrap(), "MIT");
+        }
+    }
 }
