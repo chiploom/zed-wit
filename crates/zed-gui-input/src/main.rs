@@ -186,10 +186,22 @@ fn shortcut(
     let mut pressed = Vec::with_capacity(modifiers.len());
     for modifier in modifiers {
         if let Err(error) = input.key(*modifier, Direction::Press) {
+            let mut cleanup_errors = Vec::new();
             for pressed_modifier in pressed.iter().rev() {
-                let _ = input.key(*pressed_modifier, Direction::Release);
+                if let Err(cleanup_error) = input.key(*pressed_modifier, Direction::Release) {
+                    cleanup_errors.push(format!(
+                        "release modifier {pressed_modifier:?}: {cleanup_error}"
+                    ));
+                }
             }
-            return Err(format!("press modifier {modifier:?}: {error}"));
+            return if cleanup_errors.is_empty() {
+                Err(format!("press modifier {modifier:?}: {error}"))
+            } else {
+                Err(format!(
+                    "press modifier {modifier:?}: {error}; cleanup failed: {}",
+                    cleanup_errors.join("; ")
+                ))
+            };
         }
         pressed.push(*modifier);
     }
