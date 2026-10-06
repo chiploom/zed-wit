@@ -122,7 +122,7 @@ mod supported {
             zed,
             &gui_profile,
             &staged.workspace_dir,
-            &[snippet.clone()],
+            std::slice::from_ref(&snippet),
             &stdout,
             &stderr,
         )?;
