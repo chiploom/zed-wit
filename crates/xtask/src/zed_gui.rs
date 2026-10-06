@@ -111,7 +111,7 @@ mod supported {
             .map_err(|error| format!("create {}: {error}", gui_dir.display()))?;
         let snippet = staged.workspace_dir.join(SNIPPET_FILE);
         let outline = staged.workspace_dir.join(OUTLINE_FILE);
-        fs::write(&snippet, "wit-package")
+        fs::write(&snippet, "")
             .map_err(|error| format!("write {}: {error}", snippet.display()))?;
         fs::write(&outline, outline_fixture())
             .map_err(|error| format!("write {}: {error}", outline.display()))?;
@@ -465,6 +465,8 @@ mod supported {
             "accessible_mode": true,
             "vim_mode": false,
             "helix_mode": false,
+            "show_completions_on_input": true,
+            "snippet_sort_order": "top",
         });
         fs::write(
             config.join("settings.json"),
@@ -473,46 +475,6 @@ mod supported {
         )
         .map_err(|error| format!("write isolated GUI settings: {error}"))?;
 
-        let keymap = json!([
-            {
-                "context": "Editor",
-                "bindings": {
-                    "f13": "outline::Toggle",
-                    "f14": "editor::ShowCompletions",
-                }
-            },
-            {
-                "context": "Editor && showing_completions",
-                "bindings": {
-                    "f15": "editor::ConfirmCompletion",
-                }
-            },
-            {
-                "context": "Editor && in_snippet && has_next_tabstop && !showing_completions",
-                "bindings": {
-                    "f16": "editor::NextSnippetTabstop",
-                }
-            },
-            {
-                "context": "Editor && in_snippet && has_previous_tabstop && !showing_completions",
-                "bindings": {
-                    "f17": "editor::PreviousSnippetTabstop",
-                }
-            },
-            {
-                "context": "Workspace",
-                "bindings": {
-                    "f18": "workspace::Save",
-                    "f19": "file_finder::Toggle",
-                }
-            }
-        ]);
-        fs::write(
-            config.join("keymap.json"),
-            serde_json::to_vec_pretty(&keymap)
-                .map_err(|error| format!("encode isolated GUI keymap: {error}"))?,
-        )
-        .map_err(|error| format!("write isolated GUI keymap: {error}"))?;
         Ok(())
     }
 
@@ -539,13 +501,13 @@ mod supported {
                 {
                     "scenario": "snippets",
                     "result": "passed",
-                    "evidence": "real Zed completion expanded the WIT package snippet; forward and reverse snippet-tab actions replaced the expected placeholders; the final cursor accepted a sentinel and the disposable file was saved and verified",
+                    "evidence": "real Zed's default completion path expanded the WIT package snippet after typing its exact prefix; default Enter, Tab and Shift-Tab bindings replaced the expected placeholders; the final cursor accepted a sentinel and the disposable file was saved and verified",
                     "file": evidence.snippet,
                 },
                 {
                     "scenario": "highlighting_and_structure",
                     "result": "passed",
-                    "evidence": "real Zed outline UI located record, variant, and resource symbols; each navigation target was marked and saved; deterministic query tests remain the source of truth for semantic highlight captures",
+                    "evidence": "real Zed's default outline shortcut located record, variant, and resource symbols; each navigation target was marked and saved; deterministic query tests remain the source of truth for semantic highlight captures",
                     "file": evidence.outline,
                 }
             ],
