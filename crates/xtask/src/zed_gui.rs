@@ -111,8 +111,7 @@ mod supported {
             .map_err(|error| format!("create {}: {error}", gui_dir.display()))?;
         let snippet = staged.workspace_dir.join(SNIPPET_FILE);
         let outline = staged.workspace_dir.join(OUTLINE_FILE);
-        fs::write(&snippet, "")
-            .map_err(|error| format!("write {}: {error}", snippet.display()))?;
+        fs::write(&snippet, "").map_err(|error| format!("write {}: {error}", snippet.display()))?;
         fs::write(&outline, outline_fixture())
             .map_err(|error| format!("write {}: {error}", outline.display()))?;
 
