@@ -16,6 +16,12 @@ or end-to-end hosted installation.
   `cargo xtask check-no-python`, `cargo xtask check-dependencies`, formatting,
   workspace clippy, workspace tests, workspace check, Wasm build, native
   release build, and `git diff --check origin/main...HEAD`.
+- Validation-evidence HEAD: `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`;
+  the same complete gate was rerun after the evidence update.
+- Later commits after `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`
+  only update validation/evidence documentation. They do not change executable
+  code, so the validated executable implementation remains
+  `31d540950b1265dbe7ed4a8f9a694776b89f9bf6`.
 - Workspace tests: 67 passed (22 `wit-analysis`, 4 language-server unit, 17
   stdio protocol, 11 syntax/editing, 7 `xtask`, 6 adapter/distribution); no
   doctests were present.
@@ -29,14 +35,17 @@ or end-to-end hosted installation.
   server build identity or a retained artifact path, so it is partial smoke
   evidence rather than exact-candidate GUI signoff. Semantic/editor checks remain
   pending; see [manual testing](manual-testing.md).
-- Hosted CI: no check runs were reported for this candidate. The only listed
-  branch run was an older failed run on `67b43f00d38af20d4ceafe085b6086c452096b6f`;
-  it is not a result for this candidate. Status: **BLOCKED — no hosted runner
-  execution on final SHA**.
+- Hosted CI: no check runs were reported for the current PR candidate. The only
+  listed branch run was an older failed run on
+  `67b43f00d38af20d4ceafe085b6086c452096b6f`; it is not evidence for the
+  current implementation. Status: **BLOCKED — no hosted runner execution on the
+  current PR head**.
 
 The complete gate passed on implementation HEAD
-`31d540950b1265dbe7ed4a8f9a694776b89f9bf6` and was rerun on validation-evidence
-HEAD `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`. Commands:
+`31d540950b1265dbe7ed4a8f9a694776b89f9bf6` and was rerun on
+validation-evidence HEAD `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`.
+Subsequent documentation-only commits do not change that executable validation
+provenance. Commands:
 
 ```sh
 cargo xtask check-no-python
