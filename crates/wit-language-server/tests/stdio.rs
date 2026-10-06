@@ -1481,3 +1481,22 @@ fn manual_parser_diagnostic_clears_after_repair() {
     client.shutdown();
 }
 
+#[test]
+fn manual_restart_recomputes_diagnostics_in_fresh_server_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let invalid = "package manual:restart; interface api { type broken = missing; }";
+    std::fs::write(&path, invalid).unwrap();
+
+    let mut messages = Vec::new();
+    for _ in 0..2 {
+        let mut client = Client::start("utf-16");
+        client.open(&uri, invalid);
+        let diagnostics = client.diagnostics(&uri, 1);
+        assert_eq!(diagnostics.as_array().unwrap().len(), 1);
+        messages.push(diagnostics[0]["message"].as_str().unwrap().to_owned());
+        client.shutdown();
+    }
+    assert_eq!(messages[0], messages[1]);
+}
