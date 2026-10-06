@@ -8,17 +8,14 @@ use std::{
 
 const MANUAL_SEMANTIC: &str = include_str!("../../../tests/manual-zed/semantic/main.wit");
 const MANUAL_ESCAPED: &str = include_str!("../../../tests/manual-zed/escaped/main.wit");
-const MANUAL_ESCAPED_ALIAS: &str =
-    include_str!("../../../tests/manual-zed/escaped-alias/main.wit");
+const MANUAL_ESCAPED_ALIAS: &str = include_str!("../../../tests/manual-zed/escaped-alias/main.wit");
 const MANUAL_OVERLAY_MAIN: &str = include_str!("../../../tests/manual-zed/overlay/main.wit");
 const MANUAL_OVERLAY_TYPES: &str = include_str!("../../../tests/manual-zed/overlay/types.wit");
-const MANUAL_DEPENDENCY_MAIN: &str =
-    include_str!("../../../tests/manual-zed/dependency/main.wit");
+const MANUAL_DEPENDENCY_MAIN: &str = include_str!("../../../tests/manual-zed/dependency/main.wit");
 const MANUAL_DEPENDENCY_TYPES: &str =
     include_str!("../../../tests/manual-zed/dependency/deps/types.wit");
 const MANUAL_UNICODE: &str = include_str!("../../../tests/manual-zed/unicode/main.wit");
-const MANUAL_FORMATTING_MAIN: &str =
-    include_str!("../../../tests/manual-zed/formatting/main.wit");
+const MANUAL_FORMATTING_MAIN: &str = include_str!("../../../tests/manual-zed/formatting/main.wit");
 const MANUAL_FORMATTING_COMMENTS: &str =
     include_str!("../../../tests/manual-zed/formatting/comments.wit");
 
@@ -1246,7 +1243,11 @@ fn manual_escaped_fixtures_preserve_explicit_identifier_spelling() {
         client.open(&uri, source);
         assert_eq!(client.diagnostics(&uri, 1), json!([]));
 
-        let token = if source.contains("%alias") { "%alias" } else { "%type" };
+        let token = if source.contains("%alias") {
+            "%alias"
+        } else {
+            "%type"
+        };
         let use_offset = source.rfind(token).unwrap();
         let point = position_at(source, use_offset, "utf-16");
         let completion = request(
@@ -1255,7 +1256,10 @@ fn manual_escaped_fixtures_preserve_explicit_identifier_spelling() {
             "textDocument/completion",
             json!({"textDocument":{"uri":uri},"position":point}),
         );
-        assert!(completion_labels(&completion).contains(&token), "{completion}");
+        assert!(
+            completion_labels(&completion).contains(&token),
+            "{completion}"
+        );
 
         let hover = request(
             &mut client,
@@ -1316,13 +1320,25 @@ fn manual_overlay_fixture_runs_unsaved_change_undo_close_and_reopen() {
 
     let renamed = MANUAL_OVERLAY_TYPES.replace("record item", "record thing");
     client.change(&types_uri, &renamed, 2);
-    assert!(!client.diagnostics(&main_uri, 1).as_array().unwrap().is_empty());
+    assert!(
+        !client
+            .diagnostics(&main_uri, 1)
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     client.change(&types_uri, MANUAL_OVERLAY_TYPES, 3);
     assert_eq!(client.diagnostics(&main_uri, 1), json!([]));
 
     client.change(&types_uri, &renamed, 4);
-    assert!(!client.diagnostics(&main_uri, 1).as_array().unwrap().is_empty());
+    assert!(
+        !client
+            .diagnostics(&main_uri, 1)
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     client.notify(
         "textDocument/didClose",
         json!({"textDocument":{"uri":types_uri}}),
@@ -1419,7 +1435,10 @@ fn manual_formatting_fixtures_are_idempotent_preserve_comments_and_refuse_invali
             "textDocument/formatting",
             json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
         );
-        let formatted = if first["result"].as_array().is_some_and(|edits| edits.is_empty()) {
+        let formatted = if first["result"]
+            .as_array()
+            .is_some_and(|edits| edits.is_empty())
+        {
             source.to_owned()
         } else {
             first["result"][0]["newText"].as_str().unwrap().to_owned()
