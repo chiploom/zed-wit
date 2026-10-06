@@ -1,9 +1,51 @@
 # Validation evidence
 
-This document records evidence for the current unreleased implementation. It is
+This document records local evidence for the unreleased implementation. It is
 not a substitute for the manual Zed qualification checklist in
 [manual testing](manual-testing.md), and it does not claim registry publication
 or end-to-end hosted installation.
+
+## PR #6 semantic editor candidate
+
+- Validation date: 2026-10-06
+- Validated source HEAD: `2727e9df8af83ee42b78e8bce19ed01d8bd4a0ef`
+- Host: macOS ARM64 (`aarch64-apple-darwin`)
+- Rust: `rustc 1.99.0 (b940084d7 2026-09-28)`
+- Exact local gate: passed
+- Workspace tests: 59 passed (18 analysis, 4 language-server unit, 13 stdio
+  protocol, 11 syntax/editing, 7 xtask, 6 adapter/distribution); doctest suites
+  had no doctests.
+- Build identity: passed; release server reported
+  `wit-language-server 0.1.0+git.2727e9df8af83ee42b78e8bce19ed01d8bd4a0ef`.
+- Host packaging: passed for `aarch64-apple-darwin`; package and 116-package
+  license report were produced. The packaged binary reported the same build
+  identity. Provenance recorded `source_dirty: false` and SHA-256
+  `60122f7479e86892023dbb7bfa3d7eebdb57a91009937f65f949b2939a389ef5`.
+- Zed GUI qualification: not performed for this candidate; exact Zed version is
+  unavailable. See [manual testing](manual-testing.md).
+- Hosted CI: no run on this candidate was verified. Earlier hosted results below
+  are for the stated historical baseline only.
+
+Commands passed on that source HEAD:
+
+```sh
+cargo xtask check-no-python
+cargo xtask check-dependencies
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-features --locked
+cargo check --workspace --locked
+cargo build --target wasm32-wasip2 --locked
+cargo build -p wit-language-server --release --locked
+git diff --check origin/main...HEAD
+cargo build -p wit-language-server --release --locked --target aarch64-apple-darwin
+cargo xtask package-release --target aarch64-apple-darwin --output dist-validation
+cargo xtask collect-licenses --target aarch64-apple-darwin --output dist-validation
+```
+
+The default `dist/` already contained artifacts, so packaging was run to the
+fresh `dist-validation/` directory without overwriting them. Temporary package
+artifacts were removed after recording the evidence.
 
 ## Snapshot
 
@@ -25,20 +67,20 @@ reverted and has no effective source diff against `main`.
 
 Run #28 completed successfully on the baseline commit with the following jobs:
 
-| Scope | Platform / target | Result |
-| --- | --- | --- |
-| Quality | Ubuntu 24.04 | Passed |
-| Native tests | macOS 15 / aarch64-apple-darwin | Passed |
-| Native tests | Ubuntu 24.04 / x86_64-unknown-linux-gnu | Passed |
-| Native tests | Windows 2025 / x86_64-pc-windows-msvc | Passed |
-| Portability check | macOS 15 Intel / x86_64-apple-darwin | Passed |
-| Portability check | Ubuntu 24.04 ARM / aarch64-unknown-linux-gnu | Passed |
-| Release artifact build | aarch64-apple-darwin | Passed |
-| Release artifact build | x86_64-apple-darwin | Passed |
-| Release artifact build | aarch64-unknown-linux-gnu | Passed |
-| Release artifact build | x86_64-unknown-linux-gnu | Passed |
-| Release artifact build | x86_64-pc-windows-msvc | Passed |
-| Combined artifact verification | Ubuntu 24.04 | Passed |
+| Scope                          | Platform / target                            | Result |
+| ------------------------------ | -------------------------------------------- | ------ |
+| Quality                        | Ubuntu 24.04                                 | Passed |
+| Native tests                   | macOS 15 / aarch64-apple-darwin              | Passed |
+| Native tests                   | Ubuntu 24.04 / x86_64-unknown-linux-gnu      | Passed |
+| Native tests                   | Windows 2025 / x86_64-pc-windows-msvc        | Passed |
+| Portability check              | macOS 15 Intel / x86_64-apple-darwin         | Passed |
+| Portability check              | Ubuntu 24.04 ARM / aarch64-unknown-linux-gnu | Passed |
+| Release artifact build         | aarch64-apple-darwin                         | Passed |
+| Release artifact build         | x86_64-apple-darwin                          | Passed |
+| Release artifact build         | aarch64-unknown-linux-gnu                    | Passed |
+| Release artifact build         | x86_64-unknown-linux-gnu                     | Passed |
+| Release artifact build         | x86_64-pc-windows-msvc                       | Passed |
+| Combined artifact verification | Ubuntu 24.04                                 | Passed |
 
 The quality job passed:
 
