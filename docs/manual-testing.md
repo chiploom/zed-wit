@@ -17,10 +17,13 @@ The command combines deterministic protocol coverage with a real Zed process
 smoke test. It runs the syntax/query/snippet editing suite and stdio LSP suite,
 builds the Wasm adapter and exact native server, compiles the pinned WIT grammar,
 stages an isolated Zed profile, then launches Zed with `ZED_STATELESS=1`,
-`--foreground`, `--new` and `--user-data-dir`. Stateless mode bypasses
-Zed's stable-build single-instance guard and keeps its databases in memory, so
-the smoke can coexist with your normal running Zed session. The run passes only
-after Zed starts a
+`--foreground`, `--new` and `--user-data-dir`. The exact release-built
+server directory is prepended to the spawned editor's `PATH`, which exercises
+the extension's supported `worktree.which("wit-language-server")` fallback
+without relying on project settings/trust in a fresh stateless worktree.
+Stateless mode bypasses Zed's stable-build single-instance guard and keeps its
+databases in memory, so the smoke can coexist with your normal running Zed
+session. The run passes only after Zed starts a
 new instance of the exact `target/release/wit-language-server` binary and the
 isolated logs contain no WIT extension, grammar, query or language-server startup
 failure.

@@ -96,9 +96,16 @@ passed the formatting, `xtask` unit, clippy, syntax/editing and stdio protocol
 stages, but the real-Zed phase again timed out. The captured foreground log
 contained only `zed is already running`, proving the remaining blocker was
 Zed's stable-channel global single-instance guard rather than extension/server
-startup. Zed's own `ZED_STATELESS` mode bypasses that guard and uses in-memory
-databases, so the next harness revision launches the isolated editor with
-`ZED_STATELESS=1` instead of requiring the user's normal Zed session to stop.
+startup.
+
+A third smoke run on `29ee20e4efbc2ef05af87362fa878f790d3e214d`
+successfully launched the isolated stateless Zed instance and loaded the WIT
+extension, but Zed reported the expected unreleased-server 404. That proves the
+fresh stateless worktree did not apply the project-local LSP binary override
+before the adapter selected a server. The next harness revision prepends the
+exact `target/release` directory to the spawned Zed process's `PATH`, using
+the adapter's supported `worktree.which("wit-language-server")` fallback
+instead of depending on trust-sensitive project settings.
 
 ## Exact local validation run at `1ab100abe7aa5a278828345bdc2283295b201fa4`
 

@@ -69,7 +69,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         ));
     }
 
-    let staged = stage(&root, profile, &server)?;
+    let staged = stage(&root, profile)?;
     let stdout_log = profile.join("zed-foreground.stdout.log");
     let stderr_log = profile.join("zed-foreground.stderr.log");
     let before = matching_processes(&server)?;
@@ -77,6 +77,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         zed,
         profile,
         &staged.workspace_file,
+        &server,
         &stdout_log,
         &stderr_log,
     )?;
@@ -129,7 +130,7 @@ struct Staged {
     workspace_file: PathBuf,
 }
 
-fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
+fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
     if profile.exists() {
         fs::remove_dir_all(profile)
             .map_err(|error| format!("remove {}: {error}", profile.display()))?;
@@ -171,21 +172,6 @@ fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
         &root.join("tests/manual-zed/semantic/main.wit"),
         &workspace_file,
     )?;
-
-    let settings = json!({
-        "lsp": {
-            "wit-language-server": {
-                "binary": { "path": server }
-            }
-        }
-    });
-    let settings_path = workspace.join(".zed/settings.json");
-    fs::write(
-        &settings_path,
-        serde_json::to_vec_pretty(&settings)
-            .map_err(|error| format!("encode {}: {error}", settings_path.display()))?,
-    )
-    .map_err(|error| format!("write {}: {error}", settings_path.display()))?;
 
     Ok(Staged {
         extension_dir,
@@ -304,6 +290,7 @@ fn launch(
     zed: &str,
     profile: &Path,
     workspace_file: &Path,
+    server: &Path,
     stdout_log: &Path,
     stderr_log: &Path,
 ) -> Result<Child, String> {
@@ -311,8 +298,19 @@ fn launch(
         .map_err(|error| format!("create {}: {error}", stdout_log.display()))?;
     let stderr = File::create(stderr_log)
         .map_err(|error| format!("create {}: {error}", stderr_log.display()))?;
+    let server_dir = server
+        .parent()
+        .ok_or_else(|| format!("{} has no parent", server.display()))?;
+    let inherited_path = env::var_os("PATH").unwrap_or_default();
+    let path = env::join_paths(
+        std::iter::once(server_dir.to_path_buf())
+            .chain(env::split_paths(&inherited_path)),
+    )
+    .map_err(|error| format!("construct Zed PATH: {error}"))?;
+
     Command::new(zed)
         .env("ZED_STATELESS", "1")
+        .env("PATH", path)
         .arg("--foreground")
         .arg("--new")
         .arg("--user-data-dir")
