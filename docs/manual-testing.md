@@ -14,13 +14,16 @@ cargo xtask test-zed
 ```
 
 The command combines deterministic protocol coverage with a real Zed process
-smoke test. It runs the syntax/query/snippet editing suite and stdio LSP suite,
-builds the Wasm adapter and exact native server, compiles the pinned WIT grammar,
-stages an isolated Zed profile, then launches Zed with `ZED_STATELESS=1`,
-`--foreground`, `--new` and `--user-data-dir`. The exact release-built
-server directory is prepended to the spawned editor's `PATH`, which exercises
-the extension's supported `worktree.which("wit-language-server")` fallback
-without relying on project settings/trust in a fresh stateless worktree.
+smoke test. It runs the complete workspace unit/integration suite plus workspace
+doctests, builds the Wasm adapter and exact native server, compiles the pinned WIT
+grammar, copies the complete repository `tests/` tree into an isolated workspace,
+verifies that every source `.wit` fixture was staged, and asks Zed to open the
+workspace plus every staged WIT fixture. It then launches Zed with
+`ZED_STATELESS=1`, `--foreground`, `--new` and `--user-data-dir`. The exact
+release-built server directory is prepended to the spawned editor's `PATH`,
+which exercises the extension's supported
+`worktree.which("wit-language-server")` fallback without relying on project
+settings/trust in a fresh stateless worktree.
 Stateless mode bypasses Zed's stable-build single-instance guard and keeps its
 databases in memory, so the smoke can coexist with your normal running Zed
 session. The run passes only after Zed starts a
@@ -29,8 +32,12 @@ isolated logs contain no WIT extension, grammar, query or language-server startu
 failure.
 
 A successful run writes
-`target/zed-smoke/profile/zed-smoke-report.json` plus foreground logs. Override
-the executable/profile/timeout with `--zed`, `--profile` and
+`target/zed-smoke/profile/zed-smoke-report.json` plus foreground logs. The report
+records the exact fixture count and relative paths passed to Zed. Intentionally
+negative fixtures may still produce their expected parser diagnostics; the real
+editor gate is checking activation, loading, server lifecycle and integration
+failures, while semantic expectations remain asserted by the deterministic test
+suite. Override the executable/profile/timeout with `--zed`, `--profile` and
 `--timeout-seconds` when needed.
 
 The real-editor smoke currently supports macOS and Linux. Grammar compilation
