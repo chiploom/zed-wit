@@ -838,8 +838,8 @@ fn relative_paths(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>, String
 fn manual_scenarios(head: &str) -> Value {
     json!([
         {"scenario":"development_install","result":"passed","evidence":"isolated Zed loaded the staged development extension"},
-        {"scenario":"highlighting_and_structure","result":"passed","evidence":"all WIT fixtures opened in real Zed; syntax/query/outline/bracket tests passed; no query errors logged"},
-        {"scenario":"snippets","result":"passed","evidence":"snippet expansion/validity tests passed; interactive tab-stop presentation remains a GUI-only spot check"},
+        {"scenario":"highlighting_and_structure","result":"passed-with-gui-spot-check","gui_spot_check_required":true,"evidence":"all WIT fixtures opened in real Zed; syntax/query/outline/bracket tests passed; no query errors logged"},
+        {"scenario":"snippets","result":"passed-with-gui-spot-check","gui_spot_check_required":true,"evidence":"snippet expansion, validity, sequential tab-stop indices and final cursor placement passed; interactive tab-key presentation remains GUI-only"},
         {"scenario":"parser_diagnostic","result":"passed","evidence":"manual fixture mutation test creates parser error then repairs and clears it"},
         {"scenario":"resolver_diagnostic","result":"passed","evidence":"manual semantic/dependency mutation tests assert parser-backed unresolved-name diagnostics"},
         {"scenario":"unsaved_sibling_overlay","result":"passed","evidence":"manual overlay fixture uses didChange without save and propagates/clears diagnostics"},
@@ -891,15 +891,6 @@ fn run_status(
     } else {
         Err(format!("{program} exited with {status}"))
     }
-}
-
-fn output(program: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
-    let result = Command::new(program)
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|error| format!("run {program}: {error}"))?;
-    output_result(program, result)
 }
 
 fn output_path(program: &Path, args: &[&str], cwd: &Path) -> Result<String, String> {
