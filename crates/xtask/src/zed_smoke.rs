@@ -265,8 +265,7 @@ pub(crate) fn write_isolated_settings(
     );
 
     let config = profile.join("config");
-    fs::create_dir_all(&config)
-        .map_err(|error| format!("create {}: {error}", config.display()))?;
+    fs::create_dir_all(&config).map_err(|error| format!("create {}: {error}", config.display()))?;
     let settings_path = config.join("settings.json");
     fs::write(
         &settings_path,
@@ -1119,8 +1118,7 @@ mod tests {
             }),
         )
         .unwrap();
-        let settings: Value =
-            serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+        let settings: Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
 
         assert_eq!(settings["session"]["trust_all_worktrees"], json!(true));
         assert_eq!(settings["accessible_mode"], json!(true));
