@@ -151,7 +151,10 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     scan_logs(profile, &stdout_log, &stderr_log)?;
     log("no WIT extension, grammar, query, or language-server startup failures found");
 
-    phase(8, "restarting isolated Zed and requalifying server lifecycle");
+    phase(
+        8,
+        "restarting isolated Zed and requalifying server lifecycle",
+    );
     let restart_stdout_log = profile.join("zed-restart.stdout.log");
     let restart_stderr_log = profile.join("zed-restart.stderr.log");
     let restart_before = matching_processes(&server)?;
@@ -163,8 +166,13 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         &restart_stdout_log,
         &restart_stderr_log,
     )?;
-    let restart_smoke =
-        wait_for_server(&mut restart_child, &server, &restart_before, profile, timeout);
+    let restart_smoke = wait_for_server(
+        &mut restart_child,
+        &server,
+        &restart_before,
+        profile,
+        timeout,
+    );
     stop_zed(&mut restart_child)?;
     let restart_server_pid = match restart_smoke {
         Ok(pid) => pid,
