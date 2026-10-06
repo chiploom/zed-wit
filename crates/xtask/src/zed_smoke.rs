@@ -12,6 +12,15 @@ use std::{
 
 const EXTENSION_ID: &str = "wit";
 const WASM_TARGET: &str = "wasm32-wasip2";
+const PHASES: usize = 8;
+
+fn log(message: impl std::fmt::Display) {
+    eprintln!("[test-zed] {message}");
+}
+
+fn phase(number: usize, message: impl std::fmt::Display) {
+    eprintln!("[test-zed] [{number}/{PHASES}] {message}");
+}
 
 pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     if !cfg!(any(target_os = "macos", target_os = "linux")) {
@@ -22,12 +31,19 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     let zed_version = output(zed, &["--version"], &root)?;
 
+    log(format!("repository: {}", root.display()));
+    log(format!("HEAD: {head}"));
+    log(format!("Zed: {zed_version}"));
+    log(format!("isolated profile: {}", profile.display()));
+
+    phase(1, "running syntax, query, snippet, and editing tests");
     run_status(
         "cargo",
         &["test", "-p", "wit-syntax", "--test", "editing", "--locked"],
         &root,
         &[],
     )?;
+    phase(2, "running native language-server stdio protocol tests");
     run_status(
         "cargo",
         &[
@@ -41,12 +57,14 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         &root,
         &[],
     )?;
+    phase(3, format!("building Zed extension for {WASM_TARGET}"));
     run_status(
         "cargo",
         &["build", "--target", WASM_TARGET, "--locked"],
         &root,
         &[],
     )?;
+    phase(4, "building exact native language server");
     run_status(
         "cargo",
         &[
@@ -63,16 +81,27 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     let server = native_server(&root);
     let server_version = output_path(&server, &["--version"], &root)?;
     let expected = format!("+git.{head}");
+    log(format!("native server: {}", server.display()));
+    log(format!("native server identity: {server_version}"));
     if !server_version.contains(&expected) {
         return Err(format!(
             "native server identity mismatch: expected {expected}, got {server_version:?}"
         ));
     }
 
+    phase(5, "staging isolated runtime extension, grammar, and workspace");
     let staged = stage(&root, profile)?;
+    log(format!(
+        "runtime extension: {}",
+        staged.extension_dir.display()
+    ));
+    log(format!("workspace: {}", staged.workspace_file.display()));
+
     let stdout_log = profile.join("zed-foreground.stdout.log");
     let stderr_log = profile.join("zed-foreground.stderr.log");
     let before = matching_processes(&server)?;
+    phase(6, "launching isolated stateless Zed");
+    log("Zed will use a fresh profile and the exact native server from target/release");
     let mut child = launch(
         zed,
         profile,
@@ -82,8 +111,14 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         &stderr_log,
     )?;
 
+    log(format!(
+        "waiting up to {}s for Zed to start {}",
+        timeout.as_secs(),
+        server.display()
+    ));
     let smoke = wait_for_server(&mut child, &server, &before, profile, timeout);
     stop_zed(&mut child, profile);
+    log("isolated Zed process stopped");
     let server_pid = match smoke {
         Ok(pid) => pid,
         Err(error) => {
@@ -95,8 +130,11 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
             });
         }
     };
+    phase(7, "scanning isolated Zed logs for integration failures");
     scan_logs(profile, &stdout_log, &stderr_log)?;
+    log("no WIT extension, grammar, query, or language-server startup failures found");
 
+    phase(8, "writing smoke-test evidence");
     let report = json!({
         "result": "passed",
         "head": head,
@@ -117,6 +155,8 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     )
     .map_err(|error| format!("write {}: {error}", report_path.display()))?;
 
+    log(format!("report: {}", report_path.display()));
+    log("PASS: real Zed loaded the extension and started the exact native server");
     println!(
         "{}",
         serde_json::to_string_pretty(&report)
@@ -132,6 +172,7 @@ struct Staged {
 
 fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
     if profile.exists() {
+        log(format!("resetting existing smoke profile: {}", profile.display()));
         fs::remove_dir_all(profile)
             .map_err(|error| format!("remove {}: {error}", profile.display()))?;
     }
@@ -140,6 +181,7 @@ fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
     fs::create_dir_all(&extension_dir)
         .map_err(|error| format!("create {}: {error}", extension_dir.display()))?;
 
+    log("copying extension manifest, languages, snippets, and Wasm adapter");
     copy_file(
         &root.join("extension.toml"),
         &extension_dir.join("extension.toml"),
@@ -162,6 +204,7 @@ fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
     let grammar_dir = extension_dir.join("grammars");
     fs::create_dir_all(&grammar_dir)
         .map_err(|error| format!("create {}: {error}", grammar_dir.display()))?;
+    log("compiling pinned Tree-sitter WIT grammar to Wasm");
     compile_grammar(root, &grammar_dir.join("wit.wasm"))?;
 
     let workspace = profile.join("workspace");
@@ -204,6 +247,7 @@ fn compile_grammar(root: &Path, output_path: &Path) -> Result<(), String> {
         "wasi-sdk clang not found; set WASI_SDK_PATH or install/rebuild a dev extension once in Zed so Zed downloads its wasi-sdk cache".to_owned()
     })?;
 
+    log(format!("wasi-sdk clang: {}", clang.display()));
     let mut command = Command::new(&clang);
     command
         .arg("-fPIC")
@@ -328,14 +372,23 @@ fn wait_for_server(
     profile: &Path,
     timeout: Duration,
 ) -> Result<u32, String> {
-    let deadline = Instant::now() + timeout;
+    let started = Instant::now();
+    let deadline = started + timeout;
+    let mut next_progress = Duration::from_secs(5);
     while Instant::now() < deadline {
         let current = matching_processes(server)?;
         if let Some(pid) = current.difference(before).next().copied() {
+            log(format!(
+                "detected language-server PID {pid}; verifying it remains alive"
+            ));
             thread::sleep(Duration::from_millis(750));
             if matching_processes(server)?.contains(&pid) {
+                log(format!("language server is running (PID {pid})"));
                 return Ok(pid);
             }
+            log(format!(
+                "candidate language-server PID {pid} exited before verification; continuing to wait"
+            ));
         }
 
         if let Some(status) = child
@@ -348,6 +401,16 @@ fn wait_for_server(
                 server.display(),
                 profile.display()
             ));
+        }
+        let elapsed = started.elapsed();
+        if elapsed >= next_progress {
+            let remaining = timeout.saturating_sub(elapsed);
+            log(format!(
+                "still waiting for language server: {}s elapsed, {}s remaining",
+                elapsed.as_secs(),
+                remaining.as_secs()
+            ));
+            next_progress += Duration::from_secs(5);
         }
         thread::sleep(Duration::from_millis(250));
     }
