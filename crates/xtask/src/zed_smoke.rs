@@ -1,5 +1,6 @@
 use crate::util;
 use serde_json::{Value, json};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use std::{
     collections::BTreeSet,
     env,
@@ -23,8 +24,8 @@ fn phase(number: usize, message: impl std::fmt::Display) {
 }
 
 pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
-    if !cfg!(any(target_os = "macos", target_os = "linux")) {
-        return Err("test-zed currently supports macOS and Linux hosts".into());
+    if !cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")) {
+        return Err("test-zed supports Zed desktop hosts: macOS, Linux, and Windows".into());
     }
 
     let root = util::repo_root();
@@ -238,13 +239,13 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     Ok(())
 }
 
-struct Staged {
-    extension_dir: PathBuf,
-    workspace_dir: PathBuf,
-    wit_files: Vec<PathBuf>,
+pub(crate) struct Staged {
+    pub(crate) extension_dir: PathBuf,
+    pub(crate) workspace_dir: PathBuf,
+    pub(crate) wit_files: Vec<PathBuf>,
 }
 
-fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
+pub(crate) fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
     if profile.exists() {
         log(format!(
             "resetting existing smoke profile: {}",
@@ -344,9 +345,28 @@ fn link_dev_extension(source: &Path, destination: &Path) -> Result<(), String> {
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn link_dev_extension(source: &Path, destination: &Path) -> Result<(), String> {
+    let status = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(destination)
+        .arg(source)
+        .status()
+        .map_err(|error| format!("create dev-extension junction: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "create dev-extension junction {} to {} exited with {status}",
+            destination.display(),
+            source.display()
+        ))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn link_dev_extension(_source: &Path, _destination: &Path) -> Result<(), String> {
-    Err("test-zed currently requires Unix symlink support".into())
+    Err("test-zed supports dev-extension staging on macOS, Linux, and Windows".into())
 }
 
 fn compile_grammar(root: &Path, output_path: &Path) -> Result<(), String> {
@@ -434,6 +454,11 @@ fn find_wasi_clang() -> Option<PathBuf> {
             roots.push(home.join(".local/share/zed/extensions/build/wasi-sdk"));
         }
     }
+    if cfg!(target_os = "windows")
+        && let Some(local_app_data) = env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    {
+        roots.push(local_app_data.join("Zed/extensions/build/wasi-sdk"));
+    }
 
     roots
         .into_iter()
@@ -441,7 +466,7 @@ fn find_wasi_clang() -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-fn launch(
+pub(crate) fn launch(
     zed: &Path,
     profile: &Path,
     workspace_dir: &Path,
@@ -478,7 +503,7 @@ fn launch(
         .map_err(|error| format!("launch {}: {error}", zed.display()))
 }
 
-fn wait_for_server(
+pub(crate) fn wait_for_server(
     child: &mut Child,
     server: &Path,
     before: &BTreeSet<u32>,
@@ -536,7 +561,7 @@ fn wait_for_server(
     ))
 }
 
-fn resolve_executable(program: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_executable(program: &str) -> Result<PathBuf, String> {
     let candidate = PathBuf::from(program);
     if candidate.components().count() > 1 {
         return candidate
@@ -546,8 +571,16 @@ fn resolve_executable(program: &str) -> Result<PathBuf, String> {
     }
 
     let inherited = env::var_os("PATH").unwrap_or_default();
-    env::split_paths(&inherited)
-        .map(|directory| directory.join(program))
+    let candidates = env::split_paths(&inherited).flat_map(|directory| {
+        let plain = directory.join(program);
+        if cfg!(windows) && Path::new(program).extension().is_none() {
+            vec![plain, directory.join(format!("{program}.exe"))]
+        } else {
+            vec![plain]
+        }
+    });
+    candidates
+        .into_iter()
         .find(|path| path.is_file())
         .ok_or_else(|| format!("could not resolve {program:?} from PATH"))
 }
@@ -564,7 +597,8 @@ fn path_without_language_server() -> Result<std::ffi::OsString, String> {
         .map_err(|error| format!("construct Zed PATH without WIT language server: {error}"))
 }
 
-fn stop_zed(child: &mut Child) -> Result<(), String> {
+#[cfg(unix)]
+pub(crate) fn stop_zed(child: &mut Child) -> Result<(), String> {
     let pid = child.id();
     let running = child
         .try_wait()
@@ -614,6 +648,43 @@ fn stop_zed(child: &mut Child) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+pub(crate) fn stop_zed(child: &mut Child) -> Result<(), String> {
+    let pid = child.id();
+    if child
+        .try_wait()
+        .map_err(|error| format!("poll isolated Zed PID {pid}: {error}"))?
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .status()
+        .map_err(|error| format!("terminate isolated Zed process tree {pid}: {error}"))?;
+    if !status.success()
+        && child
+            .try_wait()
+            .map_err(|error| format!("poll isolated Zed PID {pid}: {error}"))?
+            .is_none()
+    {
+        child
+            .kill()
+            .map_err(|error| format!("kill isolated Zed PID {pid}: {error}"))?;
+    }
+    child
+        .wait()
+        .map_err(|error| format!("wait for isolated Zed PID {pid}: {error}"))?;
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn stop_zed(_child: &mut Child) -> Result<(), String> {
+    Err("test-zed process shutdown is unsupported on this host".into())
+}
+
+#[cfg(unix)]
 fn signal_process_group(pgid: u32, signal: &str) -> Result<(), String> {
     let target = format!("-{pgid}");
     let status = Command::new("kill")
@@ -636,6 +707,7 @@ fn process_matches(pid: u32, executable: &Path) -> Result<bool, String> {
         .any(|(candidate, command)| candidate == pid && command.contains(expected.as_ref())))
 }
 
+#[cfg(unix)]
 fn signal_process(pid: u32, signal: &str) -> Result<(), String> {
     let status = Command::new("kill")
         .args([signal, &pid.to_string()])
@@ -648,7 +720,18 @@ fn signal_process(pid: u32, signal: &str) -> Result<(), String> {
     }
 }
 
-fn ensure_server_stopped(pid: u32, server: &Path, timeout: Duration) -> Result<(), String> {
+#[cfg(windows)]
+fn signal_process(pid: u32, _signal: &str) -> Result<(), String> {
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    match system.process(sysinfo::Pid::from_u32(pid)) {
+        Some(process) if process.kill() => Ok(()),
+        Some(_) => Err(format!("failed to terminate PID {pid}")),
+        None => Ok(()),
+    }
+}
+
+pub(crate) fn ensure_server_stopped(pid: u32, server: &Path, timeout: Duration) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if !process_matches(pid, server)? {
@@ -689,7 +772,7 @@ fn ensure_server_stopped(pid: u32, server: &Path, timeout: Duration) -> Result<(
     }
 }
 
-fn matching_processes(server: &Path) -> Result<BTreeSet<u32>, String> {
+pub(crate) fn matching_processes(server: &Path) -> Result<BTreeSet<u32>, String> {
     let expected = server.to_string_lossy();
     Ok(process_snapshot()?
         .into_iter()
@@ -698,18 +781,37 @@ fn matching_processes(server: &Path) -> Result<BTreeSet<u32>, String> {
 }
 
 fn process_snapshot() -> Result<Vec<(u32, String)>, String> {
-    let result = Command::new("ps")
-        .args(["-axo", "pid=,command="])
-        .output()
-        .map_err(|error| format!("run ps: {error}"))?;
-    if !result.status.success() {
-        return Err(format!("ps exited with {}", result.status));
+    if !sysinfo::IS_SUPPORTED_SYSTEM {
+        return Err("process inspection is unsupported on this host".into());
     }
-    let stdout =
-        String::from_utf8(result.stdout).map_err(|error| format!("decode ps output: {error}"))?;
-    Ok(parse_process_snapshot(&stdout))
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing()
+            .with_exe(UpdateKind::Always)
+            .with_cmd(UpdateKind::Always),
+    );
+    Ok(system
+        .processes()
+        .iter()
+        .map(|(pid, process)| {
+            let exe = process
+                .exe()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let command = process
+                .cmd()
+                .iter()
+                .map(|part| part.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ");
+            (pid.as_u32(), format!("{exe} {command}"))
+        })
+        .collect())
 }
 
+#[cfg(test)]
 fn parse_process_snapshot(snapshot: &str) -> Vec<(u32, String)> {
     snapshot
         .lines()
@@ -723,7 +825,7 @@ fn parse_process_snapshot(snapshot: &str) -> Vec<(u32, String)> {
         .collect()
 }
 
-fn scan_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> Result<(), String> {
+pub(crate) fn scan_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> Result<(), String> {
     let logs = all_logs(profile, stdout_log, stderr_log);
 
     const FAILURES: &[&str] = &[
@@ -890,7 +992,7 @@ fn manual_scenarios(head: &str) -> Value {
     ])
 }
 
-fn native_server(root: &Path) -> PathBuf {
+pub(crate) fn native_server(root: &Path) -> PathBuf {
     root.join("target").join("release").join(if cfg!(windows) {
         "wit-language-server.exe"
     } else {
