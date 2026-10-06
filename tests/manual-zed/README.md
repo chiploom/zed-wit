@@ -23,9 +23,11 @@ verifies that every `.wit` fixture was staged, opens all of those fixtures in a
 real stateless Zed instance, and combines that editor qualification with the
 complete workspace unit/integration and doctest suites. The native LSP integration
 suite performs the temporary mutations below against these exact committed
-fixtures, including unsaved overlay and close/reopen behavior. The steps remain
-useful for targeted manual reproduction when an automated assertion fails or for
-GUI presentation spot checks.
+fixtures, including unsaved overlay and close/reopen behavior. The separate
+`cargo xtask test-zed-gui --allow-input-injection true` gate automates real-Zed
+snippet tab-stop interaction and outline navigation on macOS, Linux and Windows.
+The steps below remain useful for targeted reproduction when an automated
+assertion fails.
 
 ## Semantic editor
 
