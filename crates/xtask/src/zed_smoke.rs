@@ -1,6 +1,5 @@
 use crate::util;
 use serde_json::{Value, json};
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use std::{
     collections::BTreeSet,
     env,
@@ -10,6 +9,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 const EXTENSION_ID: &str = "wit";
 const WASM_TARGET: &str = "wasm32-wasip2";
@@ -24,7 +24,11 @@ fn phase(number: usize, message: impl std::fmt::Display) {
 }
 
 pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
-    if !cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows")) {
+    if !cfg!(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    )) {
         return Err("test-zed supports Zed desktop hosts: macOS, Linux, and Windows".into());
     }
 
@@ -732,7 +736,11 @@ fn signal_process(pid: u32, _signal: &str) -> Result<(), String> {
     }
 }
 
-pub(crate) fn ensure_server_stopped(pid: u32, server: &Path, timeout: Duration) -> Result<(), String> {
+pub(crate) fn ensure_server_stopped(
+    pid: u32,
+    server: &Path,
+    timeout: Duration,
+) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if !process_matches(pid, server)? {
@@ -826,7 +834,11 @@ fn parse_process_snapshot(snapshot: &str) -> Vec<(u32, String)> {
         .collect()
 }
 
-pub(crate) fn scan_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> Result<(), String> {
+pub(crate) fn scan_logs(
+    profile: &Path,
+    stdout_log: &Path,
+    stderr_log: &Path,
+) -> Result<(), String> {
     let logs = all_logs(profile, stdout_log, stderr_log);
 
     const FAILURES: &[&str] = &[
@@ -1114,10 +1126,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let profile = std::env::temp_dir().join(format!(
-            "zed-wit-smoke-logs-{}-{nonce}",
-            std::process::id()
-        ));
+        let profile =
+            std::env::temp_dir().join(format!("zed-wit-smoke-logs-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&profile).unwrap();
         let stdout = profile.join("zed-foreground.stdout.log");
         let stderr = profile.join("zed-foreground.stderr.log");

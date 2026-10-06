@@ -124,9 +124,9 @@ fn run() -> Result<(), String> {
             let settle = options
                 .remove("settle-milliseconds")
                 .map(|value| {
-                    value
-                        .parse::<u64>()
-                        .map_err(|error| format!("invalid --settle-milliseconds {value:?}: {error}"))
+                    value.parse::<u64>().map_err(|error| {
+                        format!("invalid --settle-milliseconds {value:?}: {error}")
+                    })
                 })
                 .transpose()?
                 .unwrap_or(750);

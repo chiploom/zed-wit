@@ -83,8 +83,8 @@ fn validate_backend_selection() -> Result<(), String> {
 fn input_device() -> Result<Enigo, String> {
     let mut settings = Settings::default();
     settings.open_prompt_to_get_permissions = false;
-    let mut input = Enigo::new(&settings)
-        .map_err(|error| format!("initialize input backend: {error}"))?;
+    let mut input =
+        Enigo::new(&settings).map_err(|error| format!("initialize input backend: {error}"))?;
     #[cfg(target_os = "linux")]
     input.set_delay(20);
     Ok(input)

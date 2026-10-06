@@ -273,7 +273,6 @@ pub fn run(target: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

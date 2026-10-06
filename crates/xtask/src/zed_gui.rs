@@ -55,7 +55,9 @@ mod supported {
             ));
         }
 
-        eprintln!("[test-zed-gui] input backend preflight passed; running deterministic and real-Zed qualification");
+        eprintln!(
+            "[test-zed-gui] input backend preflight passed; running deterministic and real-Zed qualification"
+        );
         zed_smoke::run(zed, &profile.join("smoke"), timeout)?;
 
         let zed_path = zed_smoke::resolve_executable(zed)?;
@@ -69,29 +71,14 @@ mod supported {
                 driver.backend
             );
             match run_gui_attempt(
-                &root,
-                &zed_path,
-                &server,
-                profile,
-                driver,
-                attempt,
-                timeout,
-                settle,
+                &root, &zed_path, &server, profile, driver, attempt, timeout, settle,
             ) {
                 Ok(evidence) => {
-                    write_report(
-                        profile,
-                        &head,
-                        command_version(&zed_path)?,
-                        &evidence,
-                    )?;
+                    write_report(profile, &head, command_version(&zed_path)?, &evidence)?;
                     return Ok(());
                 }
                 Err(error) => {
-                    eprintln!(
-                        "[test-zed-gui] {} backend failed: {error}",
-                        driver.backend
-                    );
+                    eprintln!("[test-zed-gui] {} backend failed: {error}", driver.backend);
                     failures.push(format!("{}: {error}", driver.backend));
                 }
             }
@@ -141,19 +128,14 @@ mod supported {
             &stderr,
         )?;
 
-        let server_pid = match zed_smoke::wait_for_server(
-            &mut child,
-            server,
-            &before,
-            &gui_profile,
-            timeout,
-        ) {
-            Ok(pid) => pid,
-            Err(error) => {
-                let _ = zed_smoke::stop_zed(&mut child);
-                return Err(error);
-            }
-        };
+        let server_pid =
+            match zed_smoke::wait_for_server(&mut child, server, &before, &gui_profile, timeout) {
+                Ok(pid) => pid,
+                Err(error) => {
+                    let _ = zed_smoke::stop_zed(&mut child);
+                    return Err(error);
+                }
+            };
 
         thread::sleep(settle);
         let input_result = run_input_driver(driver, settle, timeout);
@@ -219,9 +201,7 @@ mod supported {
                 fs::create_dir_all(&target_dir)
                     .map_err(|error| format!("create {}: {error}", target_dir.display()))?;
 
-                eprintln!(
-                    "[test-zed-gui] building {backend} input helper with feature {feature}"
-                );
+                eprintln!("[test-zed-gui] building {backend} input helper with feature {feature}");
                 let status = Command::new("cargo")
                     .args([
                         "build",
@@ -351,10 +331,7 @@ mod supported {
                     {
                         Ok(vec![("x11", "linux-x11")])
                     } else if session == "wayland" || env::var_os("WAYLAND_DISPLAY").is_some() {
-                        Ok(vec![
-                            ("libei", "linux-libei"),
-                            ("wayland", "linux-wayland"),
-                        ])
+                        Ok(vec![("libei", "linux-libei"), ("wayland", "linux-wayland")])
                     } else {
                         Err(
                             "cannot infer Linux desktop input backend; set XDG_SESSION_TYPE/DISPLAY/WAYLAND_DISPLAY or pass --linux-input-backend x11|wayland|libei"
@@ -440,7 +417,9 @@ mod supported {
             ));
         }
         if !source.contains("// GUI_SNIPPET_FINAL") {
-            return Err(format!("snippet final tab stop was not reached: {source:?}"));
+            return Err(format!(
+                "snippet final tab stop was not reached: {source:?}"
+            ));
         }
         for unexpected in ["wit-package", "example", "snippet", "1.2.3"] {
             if source.contains(unexpected) {
@@ -631,34 +610,20 @@ mod supported {
 
         #[test]
         fn snippet_verification_requires_reverse_and_final_tabstop_evidence() {
-            let root = env::temp_dir().join(format!(
-                "zed-wit-gui-snippet-{}",
-                std::process::id()
-            ));
+            let root = env::temp_dir().join(format!("zed-wit-gui-snippet-{}", std::process::id()));
             let _ = fs::remove_dir_all(&root);
             fs::create_dir_all(&root).unwrap();
             let path = root.join("snippet.wit");
-            fs::write(
-                &path,
-                "package gui:reverse@2.0.0;\n// GUI_SNIPPET_FINAL\n",
-            )
-            .unwrap();
+            fs::write(&path, "package gui:reverse@2.0.0;\n// GUI_SNIPPET_FINAL\n").unwrap();
             assert!(verify_snippet(&path).is_ok());
-            fs::write(
-                &path,
-                "package gui:snippet@1.2.3;\n// GUI_SNIPPET_FINAL\n",
-            )
-            .unwrap();
+            fs::write(&path, "package gui:snippet@1.2.3;\n// GUI_SNIPPET_FINAL\n").unwrap();
             assert!(verify_snippet(&path).is_err());
             fs::remove_dir_all(&root).unwrap();
         }
 
         #[test]
         fn outline_verification_requires_every_navigation_marker() {
-            let root = env::temp_dir().join(format!(
-                "zed-wit-gui-outline-{}",
-                std::process::id()
-            ));
+            let root = env::temp_dir().join(format!("zed-wit-gui-outline-{}", std::process::id()));
             let _ = fs::remove_dir_all(&root);
             fs::create_dir_all(&root).unwrap();
             let path = root.join("outline.wit");
@@ -689,26 +654,12 @@ pub fn run(
 ) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     {
-        supported::run(
-            zed,
-            profile,
-            timeout,
-            settle,
-            allow_input,
-            linux_backend,
-        )
+        supported::run(zed, profile, timeout, settle, allow_input, linux_backend)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
-        let _ = (
-            zed,
-            profile,
-            timeout,
-            settle,
-            allow_input,
-            linux_backend,
-        );
+        let _ = (zed, profile, timeout, settle, allow_input, linux_backend);
         Err("test-zed-gui supports Zed desktop hosts: macOS, Linux, and Windows".into())
     }
 }
