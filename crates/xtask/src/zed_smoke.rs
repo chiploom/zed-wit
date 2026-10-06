@@ -440,33 +440,105 @@ fn stop_zed(child: &mut Child) -> Result<(), String> {
         .map_err(|error| format!("poll isolated Zed process before shutdown: {error}"))?
         .is_none()
     {
+        let pid = child.id();
+        let status = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status()
+            .map_err(|error| format!("send SIGTERM to isolated Zed PID {pid}: {error}"))?;
+        if !status.success()
+            && child
+                .try_wait()
+                .map_err(|error| format!("recheck isolated Zed PID {pid}: {error}"))?
+                .is_none()
+        {
+            return Err(format!(
+                "failed to send SIGTERM to isolated Zed PID {pid}: {status}"
+            ));
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            if child
+                .try_wait()
+                .map_err(|error| format!("wait for isolated Zed PID {pid}: {error}"))?
+                .is_some()
+            {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        log(format!(
+            "isolated Zed PID {pid} did not exit after SIGTERM; sending hard kill"
+        ));
         child
             .kill()
-            .map_err(|error| format!("stop isolated Zed process: {error}"))?;
+            .map_err(|error| format!("hard-kill isolated Zed PID {pid}: {error}"))?;
     }
+
     child
         .wait()
         .map_err(|error| format!("wait for isolated Zed process: {error}"))?;
     Ok(())
 }
 
+fn process_matches(pid: u32, executable: &Path) -> Result<bool, String> {
+    let expected = executable.to_string_lossy();
+    Ok(process_snapshot()?
+        .into_iter()
+        .any(|(candidate, command)| candidate == pid && command.contains(expected.as_ref())))
+}
+
+fn signal_process(pid: u32, signal: &str) -> Result<(), String> {
+    let status = Command::new("kill")
+        .args([signal, &pid.to_string()])
+        .status()
+        .map_err(|error| format!("send {signal} to PID {pid}: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("send {signal} to PID {pid} exited with {status}"))
+    }
+}
+
 fn ensure_server_stopped(pid: u32, server: &Path, timeout: Duration) -> Result<(), String> {
-    let expected = server.to_string_lossy();
     let deadline = Instant::now() + timeout;
-    loop {
-        let still_running = process_snapshot()?
-            .into_iter()
-            .any(|(candidate, command)| candidate == pid && command.contains(expected.as_ref()));
-        if !still_running {
+    while Instant::now() < deadline {
+        if !process_matches(pid, server)? {
             return Ok(());
         }
-        if Instant::now() >= deadline {
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    if !process_matches(pid, server)? {
+        return Ok(());
+    }
+
+    let cleanup = signal_process(pid, "-TERM");
+    let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < cleanup_deadline {
+        if !process_matches(pid, server)? {
             return Err(format!(
-                "language-server PID {pid} remained alive after isolated Zed shutdown: {}",
+                "language-server PID {pid} required explicit cleanup after isolated Zed shutdown: {}",
                 server.display()
             ));
         }
         thread::sleep(Duration::from_millis(100));
+    }
+
+    if process_matches(pid, server)? {
+        let _ = signal_process(pid, "-KILL");
+    }
+
+    match cleanup {
+        Ok(()) => Err(format!(
+            "language-server PID {pid} remained alive after isolated Zed shutdown and required explicit cleanup: {}",
+            server.display()
+        )),
+        Err(error) => Err(format!(
+            "language-server PID {pid} remained alive after isolated Zed shutdown and cleanup failed ({error}): {}",
+            server.display()
+        )),
     }
 }
 
