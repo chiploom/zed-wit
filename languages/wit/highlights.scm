@@ -235,6 +235,10 @@
   "map" "future" "stream"))
 
 ((ERROR
+  [(id) (ty (id))]
+  .
+  ":"
+  .
   (ty
     (id) @keyword)
   .

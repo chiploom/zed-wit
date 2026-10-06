@@ -114,7 +114,7 @@ fn key_at(analysis: &wit_analysis::PackageAnalysis, path: &Path, offset: usize) 
     analysis
         .items
         .iter()
-        .find(|item| item.path == path && item.range.start <= offset && offset <= item.range.end)
+        .find(|item| item.path == path && item.range.start <= offset && offset < item.range.end)
         .map(|item| item.key.clone())
         .or_else(|| {
             analysis
@@ -123,7 +123,7 @@ fn key_at(analysis: &wit_analysis::PackageAnalysis, path: &Path, offset: usize) 
                 .find(|reference| {
                     reference.path == path
                         && reference.range.start <= offset
-                        && offset <= reference.range.end
+                        && offset < reference.range.end
                 })
                 .map(|reference| reference.key.clone())
         })
@@ -161,6 +161,13 @@ struct Server {
 }
 
 impl Server {
+    fn source_text(&self, path: &Path) -> Option<String> {
+        self.documents
+            .get(path)
+            .map(|document| document.text.clone())
+            .or_else(|| std::fs::read_to_string(path).ok())
+    }
+
     fn publish(&mut self, connection: &Connection, changed: &[PathBuf]) -> Result<()> {
         let overlays = self
             .documents
@@ -199,9 +206,8 @@ impl Server {
                 Ok(analysis) => {
                     for error in &analysis.diagnostics {
                         // Publish source locations even when the failing sibling is closed.
-                        let text = match self.documents.get(&error.path) {
-                            Some(doc) => doc.text.clone(),
-                            None => std::fs::read_to_string(&error.path).unwrap_or_default(),
+                        let Some(text) = self.source_text(&error.path) else {
+                            continue;
                         };
                         let range = Range::new(
                             position(&text, error.range.start, self.encoding),
@@ -383,7 +389,7 @@ impl Server {
                                 reference.key == key
                                     && reference.path == path
                                     && reference.range.start <= offset
-                                    && offset <= reference.range.end
+                                    && offset < reference.range.end
                             })
                             .map(|reference| reference.range.clone())
                             .unwrap_or_else(|| item.range.clone());
@@ -392,8 +398,18 @@ impl Server {
                             .as_deref()
                             .map(|docs| format!("\n\n{docs}"))
                             .unwrap_or_default();
+                        let declaration = item
+                            .signature
+                            .as_deref()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| format!("{} {}", item.kind, item.name));
+                        let detail = if item.signature.is_some() || item.detail.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\n\n{}", item.detail)
+                        };
                         Ok(
-                            json!({"contents":{"kind":"markdown","value":format!("```wit\n{} {}\n```{}", item.kind, item.name, if item.detail.is_empty() { String::new() } else { format!("\n\n{}", item.detail) }) + &docs},"range":lsp_range(&document.text, &hover_range, self.encoding)}),
+                            json!({"contents":{"kind":"markdown","value":format!("```wit\n{declaration}\n```{detail}{docs}")},"range":lsp_range(&document.text, &hover_range, self.encoding)}),
                         )
                     }
                     "textDocument/definition" => {
@@ -407,12 +423,9 @@ impl Server {
                         let Some(item) = analysis.items.iter().find(|item| item.key == key) else {
                             return Ok(Value::Null);
                         };
-                        let target_text = self
-                            .documents
-                            .get(&item.path)
-                            .map(|document| document.text.clone())
-                            .or_else(|| std::fs::read_to_string(&item.path).ok())
-                            .unwrap_or_default();
+                        let Some(target_text) = self.source_text(&item.path) else {
+                            return Ok(Value::Null);
+                        };
                         Ok(
                             json!({"uri":uri(&item.path)?,"range":lsp_range(&target_text, &item.range, self.encoding)}),
                         )
@@ -434,26 +447,18 @@ impl Server {
                         if include_declaration
                             && let Some(item) = analysis.items.iter().find(|item| item.key == key)
                         {
-                            let text = self
-                                .documents
-                                .get(&item.path)
-                                .map(|document| document.text.clone())
-                                .or_else(|| std::fs::read_to_string(&item.path).ok())
-                                .unwrap_or_default();
-                            locations.push(json!({"uri":uri(&item.path)?,"range":lsp_range(&text, &item.range, self.encoding)}));
+                            if let Some(text) = self.source_text(&item.path) {
+                                locations.push(json!({"uri":uri(&item.path)?,"range":lsp_range(&text, &item.range, self.encoding)}));
+                            }
                         }
                         for reference in analysis
                             .references
                             .iter()
                             .filter(|reference| reference.key == key)
                         {
-                            let text = self
-                                .documents
-                                .get(&reference.path)
-                                .map(|document| document.text.clone())
-                                .or_else(|| std::fs::read_to_string(&reference.path).ok())
-                                .unwrap_or_default();
-                            locations.push(json!({"uri":uri(&reference.path)?,"range":lsp_range(&text, &reference.range, self.encoding)}));
+                            if let Some(text) = self.source_text(&reference.path) {
+                                locations.push(json!({"uri":uri(&reference.path)?,"range":lsp_range(&text, &reference.range, self.encoding)}));
+                            }
                         }
                         Ok(Value::Array(locations))
                     }
@@ -468,19 +473,21 @@ impl Server {
                             .any(|trigger| before.trim_end().ends_with(trigger));
                         let mut items = Vec::new();
                         let primitives = [
-                            "bool", "u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64",
-                            "float32", "float64", "char", "string",
+                            "bool", "u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64", "f32",
+                            "f64", "char", "string",
                         ];
                         if type_context {
                             items.extend(primitives.iter().map(|name| json!({"label":name,"kind":25,"detail":"WIT primitive type"})));
-                        }
-                        items.extend(analysis.items.iter().filter(|item| {
-                            if type_context {
-                                item.kind != "function" && item.kind != "interface" && item.kind != "world"
-                            } else {
+                            items.extend(
+                                analysis.visible_types_at(&path, offset).iter().map(
+                                    |ty| json!({"label":ty.name,"kind":25,"detail":ty.detail}),
+                                ),
+                            );
+                        } else {
+                            items.extend(analysis.items.iter().filter(|item| {
                                 item.kind == "interface" || item.kind == "world" || item.kind == "function"
-                            }
-                        }).map(|item| json!({"label":item.name,"kind":if item.kind == "function" {3} else if item.kind == "interface" {8} else if item.kind == "world" {9} else {25},"detail":item.detail,"documentation":item.documentation})));
+                            }).map(|item| json!({"label":item.insertion_name,"kind":if item.kind == "function" {3} else if item.kind == "interface" {8} else {9},"detail":item.detail,"documentation":item.documentation})));
+                        }
                         Ok(json!({"isIncomplete":false,"items":items}))
                     }
                     "textDocument/codeAction" => {
@@ -520,21 +527,17 @@ impl Server {
                                 continue;
                             }
                             let missing = &document.text[start..end];
-                            let mut names: BTreeSet<_> =
-                                wit_analysis::declared_type_names(&document.text)
-                                    .into_iter()
-                                    .collect();
-                            names.extend(
-                                analysis
-                                    .items
-                                    .iter()
-                                    .filter(|item| {
-                                        item.kind != "function"
-                                            && item.kind != "interface"
-                                            && item.kind != "world"
-                                    })
-                                    .map(|item| item.name.clone()),
-                            );
+                            let mut names: BTreeSet<_> = analysis
+                                .visible_types_at(&path, start)
+                                .iter()
+                                .map(|ty| ty.name.clone())
+                                .collect();
+                            if analysis.scopes.is_empty() {
+                                names.extend(wit_analysis::declared_type_names_at(
+                                    &document.text,
+                                    start,
+                                ));
+                            }
                             let mut candidates: Vec<_> = names
                                 .iter()
                                 .map(|name| (edit_distance(missing, name), name.as_str()))
@@ -823,6 +826,36 @@ mod tests {
         assert!(server.cache.contains_key(&b));
         assert_eq!(server.analysis_runs[&b], 1);
     }
+    #[test]
+    fn symbol_lookup_uses_half_open_ranges_at_adjacent_boundaries() {
+        let path = PathBuf::from("/tmp/main.wit");
+        let item = |key: &str, range| wit_analysis::SemanticItem {
+            key: key.into(),
+            name: key.into(),
+            insertion_name: key.into(),
+            kind: "record".into(),
+            detail: "record type".into(),
+            signature: None,
+            documentation: None,
+            path: path.clone(),
+            range,
+        };
+        let analysis = wit_analysis::PackageAnalysis {
+            items: vec![item("first", 2..5), item("second", 5..8)],
+            references: vec![wit_analysis::SemanticReference {
+                key: "type:2".into(),
+                path: path.clone(),
+                range: 10..12,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(key_at(&analysis, &path, 2).as_deref(), Some("first"));
+        assert_eq!(key_at(&analysis, &path, 4).as_deref(), Some("first"));
+        assert_eq!(key_at(&analysis, &path, 5).as_deref(), Some("second"));
+        assert_eq!(key_at(&analysis, &path, 11).as_deref(), Some("type:2"));
+        assert_eq!(key_at(&analysis, &path, 12), None);
+    }
+
     #[test]
     fn unicode_positions_clamp_inside_codepoints_and_count_surrogates() {
         let text = "a🦀é\r\nx";

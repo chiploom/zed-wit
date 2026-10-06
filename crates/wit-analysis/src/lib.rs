@@ -11,11 +11,29 @@ use wit_parser::{Resolve, SourceMap, UnresolvedPackageGroup};
 pub struct SemanticItem {
     pub key: String,
     pub name: String,
+    pub insertion_name: String,
     pub kind: String,
     pub detail: String,
+    pub signature: Option<String>,
     pub documentation: Option<String>,
     pub path: PathBuf,
     pub range: Range<usize>,
+}
+
+/// A type visible at a source location, with its resolved identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleType {
+    pub name: String,
+    pub key: String,
+    pub detail: String,
+}
+
+/// A resolved WIT namespace and the source region it owns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticScope {
+    pub path: PathBuf,
+    pub range: Range<usize>,
+    pub types: Vec<VisibleType>,
 }
 
 /// A source occurrence associated with a resolved declaration identity.
@@ -32,6 +50,16 @@ pub struct PackageAnalysis {
     pub diagnostics: Vec<Diagnostic>,
     pub items: Vec<SemanticItem>,
     pub references: Vec<SemanticReference>,
+    pub scopes: Vec<SemanticScope>,
+}
+
+impl PackageAnalysis {
+    /// Return type names visible at a source position in its resolved WIT scope.
+    pub fn visible_types_at(&self, path: &Path, offset: usize) -> &[VisibleType] {
+        scope_at(&self.scopes, path, offset)
+            .map(|scope| scope.types.as_slice())
+            .unwrap_or_default()
+    }
 }
 
 /// Open buffers take precedence over files on disk.
@@ -195,8 +223,9 @@ pub fn analyze_package(directory: &Path, overlays: &Overlays) -> Result<PackageA
         let mut resolve = Resolve::default();
         match resolve.push_groups(main, dependencies) {
             Ok(_) => {
-                analysis.items = semantic_items(&resolve);
-                analysis.references = semantic_references(&resolve, overlays);
+                analysis.items = semantic_items(&resolve, overlays);
+                analysis.scopes = semantic_scopes(&resolve, overlays);
+                analysis.references = semantic_references(&resolve, overlays, &analysis.scopes);
             }
             Err(error) => {
                 if let Some(location) = resolve.source_map.resolve_span(error.kind().span()) {
@@ -229,20 +258,76 @@ pub fn analyze(directory: &Path, overlays: &Overlays) -> Result<Vec<Diagnostic>,
     Ok(analyze_package(directory, overlays)?.diagnostics)
 }
 
-fn semantic_items(resolve: &Resolve) -> Vec<SemanticItem> {
+fn type_description(resolve: &Resolve, id: wit_parser::TypeId) -> String {
+    match &resolve.types[id].kind {
+        wit_parser::TypeDefKind::Type(wit_parser::Type::Id(inner)) => {
+            format!("{} type", resolve.types[*inner].kind.as_str())
+        }
+        kind => format!("{} type", kind.as_str()),
+    }
+}
+
+fn use_alias_source(
+    resolve: &Resolve,
+    span: wit_parser::Span,
+    path: &Path,
+    overlays: &Overlays,
+) -> Option<Range<usize>> {
+    let location = resolve.source_map.resolve_span(span)?;
+    if !same_source_path(location.path, path) {
+        return None;
+    }
+    let source = source_text(path, overlays)?;
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&wit_syntax::language()).ok()?;
+    let tree = parser.parse(&source, None)?;
+    let mut nodes = vec![tree.root_node()];
+    while let Some(node) = nodes.pop() {
+        if node.kind() == "use_names_item" {
+            let mut descendants = vec![node];
+            while let Some(current) = descendants.pop() {
+                if current.kind() == "id" && current.byte_range() == location.range {
+                    let alias = child_kind(node, "alias_item")
+                        .and_then(|alias_item| alias_item.child_by_field_name("alias"));
+                    return Some(alias.map_or(location.range, |alias| alias.byte_range()));
+                }
+                for index in (0..current.child_count()).rev() {
+                    if let Ok(index) = u32::try_from(index)
+                        && let Some(child) = current.child(index)
+                    {
+                        descendants.push(child);
+                    }
+                }
+            }
+        }
+        for index in (0..node.child_count()).rev() {
+            if let Ok(index) = u32::try_from(index)
+                && let Some(child) = node.child(index)
+            {
+                nodes.push(child);
+            }
+        }
+    }
+    None
+}
+
+fn semantic_items(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticItem> {
     let mut items = Vec::new();
     let mut add = |key: String,
                    name: String,
                    kind: &str,
                    detail: String,
+                   signature: Option<String>,
                    documentation: Option<String>,
                    span| {
         if let Some(location) = resolve.source_map.resolve_span(span) {
             items.push(SemanticItem {
                 key,
+                insertion_name: name.clone(),
                 name,
                 kind: kind.into(),
                 detail,
+                signature,
                 documentation,
                 path: location.path.into(),
                 range: location.range,
@@ -256,38 +341,25 @@ fn semantic_items(resolve: &Resolve) -> Vec<SemanticItem> {
                 name.clone(),
                 "interface",
                 "interface".into(),
+                None,
                 interface.docs.contents.clone(),
                 interface.span,
             );
         }
         for function in interface.functions.values() {
-            let params = function
-                .params
-                .iter()
-                .map(|param| format!("{}: {}", param.name, display_type(resolve, param.ty)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let result = function
-                .result
-                .map(|ty| format!(" -> {}", display_type(resolve, ty)))
-                .unwrap_or_default();
+            let name = function.item_name().to_owned();
+            let signature = interface_function_signature(resolve, function);
+            let declaration = if matches!(function.kind, wit_parser::FunctionKind::Constructor(_)) {
+                format!("{signature};")
+            } else {
+                format!("{name}: {signature};")
+            };
             add(
                 format!("function:{}:{}", id.index(), function.name),
-                function.name.clone(),
+                name.clone(),
                 "function",
-                format!(
-                    "{}func({params}){result}",
-                    if matches!(
-                        function.kind,
-                        wit_parser::FunctionKind::AsyncFreestanding
-                            | wit_parser::FunctionKind::AsyncMethod(_)
-                            | wit_parser::FunctionKind::AsyncStatic(_)
-                    ) {
-                        "async "
-                    } else {
-                        ""
-                    }
-                ),
+                signature.clone(),
+                Some(declaration),
                 function.docs.contents.clone(),
                 function.span,
             );
@@ -299,50 +371,429 @@ fn semantic_items(resolve: &Resolve) -> Vec<SemanticItem> {
             world.name.clone(),
             "world",
             "world".into(),
+            None,
             world.docs.contents.clone(),
             world.span,
         );
+        for (direction, entries) in [("import", &world.imports), ("export", &world.exports)] {
+            for item in entries.values() {
+                let wit_parser::WorldItem::Function(function) = item else {
+                    continue;
+                };
+                let name = function.item_name().to_owned();
+                let signature = interface_function_signature(resolve, function);
+                add(
+                    format!(
+                        "function:world:{}:{direction}:{}",
+                        id.index(),
+                        function.name
+                    ),
+                    name.clone(),
+                    "function",
+                    signature.clone(),
+                    Some(format!("{direction} {name}: {signature};")),
+                    function.docs.contents.clone(),
+                    function.span,
+                );
+            }
+        }
     }
+    drop(add);
     for (id, ty) in resolve.types.iter() {
         if let Some(name) = &ty.name {
-            add(
-                format!("type:{}", id.index()),
-                name.clone(),
-                ty.kind.as_str(),
-                format!("{} type", ty.kind.as_str()),
-                ty.docs.contents.clone(),
-                ty.span,
-            );
+            let alias_location = resolve
+                .source_map
+                .resolve_span(ty.span)
+                .and_then(|location| {
+                    use_alias_source(resolve, ty.span, Path::new(location.path), overlays)
+                        .map(|range| (PathBuf::from(location.path), range))
+                });
+            let signature = if alias_location.is_some() {
+                None
+            } else {
+                match &ty.kind {
+                    wit_parser::TypeDefKind::Type(inner) => {
+                        Some(format!("type {name} = {};", display_type(resolve, *inner)))
+                    }
+                    _ => None,
+                }
+            };
+            if let Some((path, range)) = alias_location {
+                items.push(SemanticItem {
+                    key: format!("type:{}", id.index()),
+                    name: name.clone(),
+                    insertion_name: name.clone(),
+                    kind: ty.kind.as_str().into(),
+                    detail: type_description(resolve, id),
+                    signature,
+                    documentation: ty.docs.contents.clone(),
+                    path,
+                    range,
+                });
+            } else if let Some(location) = resolve.source_map.resolve_span(ty.span) {
+                items.push(SemanticItem {
+                    key: format!("type:{}", id.index()),
+                    name: name.clone(),
+                    insertion_name: name.clone(),
+                    kind: ty.kind.as_str().into(),
+                    detail: type_description(resolve, id),
+                    signature,
+                    documentation: ty.docs.contents.clone(),
+                    path: location.path.into(),
+                    range: location.range,
+                });
+            }
         }
     }
     items.sort_by(|a, b| (&a.path, a.range.start, &a.key).cmp(&(&b.path, b.range.start, &b.key)));
     items
 }
 
-fn display_type(resolve: &Resolve, ty: wit_parser::Type) -> String {
-    match ty {
-        wit_parser::Type::Bool => "bool".into(),
-        wit_parser::Type::U8 => "u8".into(),
-        wit_parser::Type::U16 => "u16".into(),
-        wit_parser::Type::U32 => "u32".into(),
-        wit_parser::Type::U64 => "u64".into(),
-        wit_parser::Type::S8 => "s8".into(),
-        wit_parser::Type::S16 => "s16".into(),
-        wit_parser::Type::S32 => "s32".into(),
-        wit_parser::Type::S64 => "s64".into(),
-        wit_parser::Type::F32 => "float32".into(),
-        wit_parser::Type::F64 => "float64".into(),
-        wit_parser::Type::Char => "char".into(),
-        wit_parser::Type::String => "string".into(),
-        wit_parser::Type::ErrorContext => "error-context".into(),
-        wit_parser::Type::Id(id) => resolve.types[id]
-            .name
-            .clone()
-            .unwrap_or_else(|| resolve.types[id].kind.as_str().to_owned()),
+fn interface_function_signature(resolve: &Resolve, function: &wit_parser::Function) -> String {
+    use wit_parser::FunctionKind as Kind;
+
+    let implicit_receiver = usize::from(matches!(
+        function.kind,
+        Kind::Method(_) | Kind::AsyncMethod(_) | Kind::MethodGetter(_) | Kind::MethodSetter(_)
+    ));
+    let params = function
+        .params
+        .iter()
+        .skip(implicit_receiver)
+        .map(|param| format!("{}: {}", param.name, display_type(resolve, param.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let result = function
+        .result
+        .map(|ty| format!(" -> {}", display_type(resolve, ty)))
+        .unwrap_or_default();
+    match function.kind {
+        Kind::Getter | Kind::MethodGetter(_) => format!("get(){result}"),
+        Kind::Setter | Kind::MethodSetter(_) => format!("set({params}){result}"),
+        Kind::StaticGetter(_) => format!("static get(){result}"),
+        Kind::StaticSetter(_) => format!("static set({params}){result}"),
+        Kind::Constructor(_) => format!("constructor({params})"),
+        Kind::Static(_) | Kind::AsyncStatic(_) => format!(
+            "static {}func({params}){result}",
+            if matches!(function.kind, Kind::AsyncStatic(_)) {
+                "async "
+            } else {
+                ""
+            }
+        ),
+        Kind::Freestanding | Kind::Method(_) | Kind::AsyncMethod(_) | Kind::AsyncFreestanding => {
+            format!(
+                "{}func({params}){result}",
+                if matches!(
+                    function.kind,
+                    Kind::AsyncFreestanding | Kind::AsyncMethod(_)
+                ) {
+                    "async "
+                } else {
+                    ""
+                }
+            )
+        }
     }
 }
 
-fn semantic_references(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticReference> {
+fn display_type(resolve: &Resolve, ty: wit_parser::Type) -> String {
+    fn render(resolve: &Resolve, ty: wit_parser::Type, stack: &mut BTreeSet<usize>) -> String {
+        use wit_parser::{Handle, Type, TypeDefKind};
+        match ty {
+            Type::Bool => "bool".into(),
+            Type::U8 => "u8".into(),
+            Type::U16 => "u16".into(),
+            Type::U32 => "u32".into(),
+            Type::U64 => "u64".into(),
+            Type::S8 => "s8".into(),
+            Type::S16 => "s16".into(),
+            Type::S32 => "s32".into(),
+            Type::S64 => "s64".into(),
+            Type::F32 => "f32".into(),
+            Type::F64 => "f64".into(),
+            Type::Char => "char".into(),
+            Type::String => "string".into(),
+            Type::ErrorContext => "error-context".into(),
+            Type::Id(id) => {
+                let definition = &resolve.types[id];
+                if let Some(name) = &definition.name {
+                    return name.clone();
+                }
+                if !stack.insert(id.index()) {
+                    return "_".into();
+                }
+                let rendered = match &definition.kind {
+                    TypeDefKind::Handle(Handle::Own(resource)) => {
+                        format!("own<{}>", render(resolve, Type::Id(*resource), stack))
+                    }
+                    TypeDefKind::Handle(Handle::Borrow(resource)) => {
+                        format!("borrow<{}>", render(resolve, Type::Id(*resource), stack))
+                    }
+                    TypeDefKind::Tuple(tuple) => format!(
+                        "tuple<{}>",
+                        tuple
+                            .types
+                            .iter()
+                            .map(|ty| render(resolve, *ty, stack))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    TypeDefKind::Option(inner) => {
+                        format!("option<{}>", render(resolve, *inner, stack))
+                    }
+                    TypeDefKind::Result(result) => match (result.ok, result.err) {
+                        (None, None) => "result".into(),
+                        (Some(ok), None) => {
+                            format!("result<{}>", render(resolve, ok, stack))
+                        }
+                        (None, Some(err)) => {
+                            format!("result<_, {}>", render(resolve, err, stack))
+                        }
+                        (Some(ok), Some(err)) => format!(
+                            "result<{}, {}>",
+                            render(resolve, ok, stack),
+                            render(resolve, err, stack)
+                        ),
+                    },
+                    TypeDefKind::List(inner) => {
+                        format!("list<{}>", render(resolve, *inner, stack))
+                    }
+                    TypeDefKind::Map(key, value) => format!(
+                        "map<{}, {}>",
+                        render(resolve, *key, stack),
+                        render(resolve, *value, stack)
+                    ),
+                    TypeDefKind::FixedLengthList(inner, length) => {
+                        format!("list<{}, {length}>", render(resolve, *inner, stack))
+                    }
+                    TypeDefKind::Future(inner) => format!(
+                        "future{}",
+                        inner
+                            .map(|ty| format!("<{}>", render(resolve, ty, stack)))
+                            .unwrap_or_default()
+                    ),
+                    TypeDefKind::Stream(inner) => format!(
+                        "stream{}",
+                        inner
+                            .map(|ty| format!("<{}>", render(resolve, ty, stack)))
+                            .unwrap_or_default()
+                    ),
+                    TypeDefKind::Type(inner) => render(resolve, *inner, stack),
+                    other => other.as_str().to_owned(),
+                };
+                stack.remove(&id.index());
+                rendered
+            }
+        }
+    }
+    render(resolve, ty, &mut BTreeSet::new())
+}
+
+fn child_kind<'tree>(
+    node: tree_sitter::Node<'tree>,
+    kind: &str,
+) -> Option<tree_sitter::Node<'tree>> {
+    (0..node.child_count())
+        .filter_map(|index| u32::try_from(index).ok().and_then(|i| node.child(i)))
+        .find(|child| child.kind() == kind)
+}
+
+fn interface_scope(
+    resolve: &Resolve,
+    id: wit_parser::InterfaceId,
+    path: &Path,
+    range: Range<usize>,
+) -> SemanticScope {
+    SemanticScope {
+        path: path.to_path_buf(),
+        range,
+        types: resolve.interfaces[id]
+            .types
+            .iter()
+            .map(|(name, id)| VisibleType {
+                name: name.clone(),
+                key: format!("type:{}", id.index()),
+                detail: type_description(resolve, *id),
+            })
+            .collect(),
+    }
+}
+
+fn world_scope(
+    resolve: &Resolve,
+    id: wit_parser::WorldId,
+    path: &Path,
+    range: Range<usize>,
+) -> SemanticScope {
+    let world = &resolve.worlds[id];
+    SemanticScope {
+        path: path.to_path_buf(),
+        range,
+        types: world
+            .imports
+            .values()
+            .chain(world.exports.values())
+            .filter_map(|item| match item {
+                wit_parser::WorldItem::Type { id, .. } => {
+                    resolve.types[*id].name.as_ref().map(|name| VisibleType {
+                        name: name.clone(),
+                        key: format!("type:{}", id.index()),
+                        detail: type_description(resolve, *id),
+                    })
+                }
+                _ => None,
+            })
+            .collect(),
+    }
+}
+
+fn same_source_path(source_map_path: &str, path: &Path) -> bool {
+    fn normalized(path: &Path) -> PathBuf {
+        if let Ok(path) = path.canonicalize() {
+            return path;
+        }
+        match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => parent
+                .canonicalize()
+                .map(|parent| parent.join(name))
+                .unwrap_or_else(|_| path.to_path_buf()),
+            _ => path.to_path_buf(),
+        }
+    }
+    normalized(Path::new(source_map_path)) == normalized(path)
+}
+
+fn source_text(path: &Path, overlays: &Overlays) -> Option<String> {
+    overlays
+        .get(path)
+        .or_else(|| {
+            overlays
+                .iter()
+                .find(|(overlay, _)| same_source_path(&overlay.to_string_lossy(), path))
+                .map(|(_, text)| text)
+        })
+        .cloned()
+        .or_else(|| std::fs::read_to_string(path).ok())
+}
+
+fn semantic_scopes(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticScope> {
+    let mut scopes = Vec::new();
+    for path in resolve.source_map.source_files() {
+        let Some(source) = source_text(path, overlays) else {
+            continue;
+        };
+        let mut parser = tree_sitter::Parser::new();
+        if parser.set_language(&wit_syntax::language()).is_err() {
+            continue;
+        }
+        let Some(tree) = parser.parse(&source, None) else {
+            continue;
+        };
+        let mut nodes = vec![tree.root_node()];
+        while let Some(node) = nodes.pop() {
+            match node.kind() {
+                "interface_item" => {
+                    if let (Some(name_node), Some(body)) =
+                        (node.child_by_field_name("name"), child_kind(node, "body"))
+                    {
+                        for (id, interface) in resolve.interfaces.iter() {
+                            if resolve.source_map.resolve_span(interface.span).is_some_and(
+                                |location| {
+                                    same_source_path(location.path, path)
+                                        && location.range == name_node.byte_range()
+                                },
+                            ) {
+                                scopes.push(interface_scope(resolve, id, path, body.byte_range()));
+                                break;
+                            }
+                        }
+                    }
+                }
+                "world_item" => {
+                    if let (Some(name_node), Some(body)) =
+                        (node.child_by_field_name("name"), child_kind(node, "body"))
+                    {
+                        for (id, world) in resolve.worlds.iter() {
+                            if resolve
+                                .source_map
+                                .resolve_span(world.span)
+                                .is_some_and(|location| {
+                                    same_source_path(location.path, path)
+                                        && location.range == name_node.byte_range()
+                                })
+                            {
+                                scopes.push(world_scope(resolve, id, path, body.byte_range()));
+                                break;
+                            }
+                        }
+                    }
+                }
+                "import_item" | "export_item" => {
+                    let name_node = node.child_by_field_name("name");
+                    let body = (0..node.child_count())
+                        .filter_map(|index| u32::try_from(index).ok().and_then(|i| node.child(i)))
+                        .find(|child| child.kind() == "extern_type")
+                        .and_then(|extern_type| {
+                            (0..extern_type.child_count())
+                                .filter_map(|index| {
+                                    u32::try_from(index).ok().and_then(|i| extern_type.child(i))
+                                })
+                                .find(|child| child.kind() == "body")
+                        });
+                    if let (Some(name_node), Some(body)) = (name_node, body) {
+                        for (id, interface) in resolve.interfaces.iter() {
+                            if interface.name.is_none()
+                                && resolve.source_map.resolve_span(interface.span).is_some_and(
+                                    |location| {
+                                        same_source_path(location.path, path)
+                                            && location.range == name_node.byte_range()
+                                    },
+                                )
+                            {
+                                scopes.push(interface_scope(resolve, id, path, body.byte_range()));
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            for index in (0..node.child_count()).rev() {
+                if let Ok(index) = u32::try_from(index)
+                    && let Some(child) = node.child(index)
+                {
+                    nodes.push(child);
+                }
+            }
+        }
+    }
+    scopes.sort_by(|a, b| {
+        (&a.path, a.range.start, a.range.end).cmp(&(&b.path, b.range.start, b.range.end))
+    });
+    scopes
+}
+
+fn scope_at<'a>(
+    scopes: &'a [SemanticScope],
+    path: &Path,
+    offset: usize,
+) -> Option<&'a SemanticScope> {
+    scopes
+        .iter()
+        .filter(|scope| {
+            same_source_path(&scope.path.to_string_lossy(), path)
+                && scope.range.start <= offset
+                && offset < scope.range.end
+        })
+        .min_by_key(|scope| scope.range.end - scope.range.start)
+}
+
+fn semantic_references(
+    resolve: &Resolve,
+    overlays: &Overlays,
+    scopes: &[SemanticScope],
+) -> Vec<SemanticReference> {
     let mut references = Vec::new();
     for (_, world) in resolve.worlds.iter() {
         for item in world.imports.values().chain(world.exports.values()) {
@@ -367,12 +818,8 @@ fn semantic_references(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticRe
         }
     }
     for path in resolve.source_map.source_files() {
-        let source = match overlays.get(path) {
-            Some(source) => source.clone(),
-            None => match std::fs::read_to_string(path) {
-                Ok(source) => source,
-                Err(_) => continue,
-            },
+        let Some(source) = source_text(path, overlays) else {
+            continue;
         };
         let mut parser = tree_sitter::Parser::new();
         if parser.set_language(&wit_syntax::language()).is_err() {
@@ -390,80 +837,83 @@ fn semantic_references(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticRe
                     nodes.push(child);
                 }
             }
-            if node.kind() != "ty" {
-                continue;
-            }
-            let name = (0..node.child_count())
-                .filter_map(|index| {
-                    u32::try_from(index)
-                        .ok()
-                        .and_then(|index| node.child(index))
-                })
-                .find(|child| child.kind() == "id");
-            let Some(name) = name else {
-                continue;
-            };
-            let start = name.start_byte();
-            let end = name.end_byte();
-            let Some(name_text) = source.get(start..end) else {
-                continue;
-            };
-            let mut ancestor = node.parent();
-            let mut interface = None;
-            let mut world = None;
-            while let Some(parent) = ancestor {
-                if parent.kind() == "interface_item"
-                    && let Some(name_node) = parent.child_by_field_name("name")
-                    && let Some(owner_name) = source.get(name_node.byte_range())
-                {
-                    interface = resolve.interfaces.iter().find_map(|(id, item)| {
-                        let location = resolve.source_map.resolve_span(item.span)?;
-                        (item.name.as_deref() == Some(owner_name)
-                            && location.path == path.to_string_lossy()
-                            && location.range == name_node.byte_range())
-                        .then_some(id)
-                    });
-                    break;
+            if matches!(node.kind(), "ty" | "handle") {
+                let mut descendants = vec![node];
+                while let Some(current) = descendants.pop() {
+                    if current.kind() == "id" {
+                        let start = current.start_byte();
+                        if let Some(name) = source.get(current.byte_range())
+                            && let Some(scope) = scope_at(scopes, path, start)
+                            && let Some(visible) = scope.types.iter().find(|ty| ty.name == name)
+                        {
+                            references.push(SemanticReference {
+                                key: visible.key.clone(),
+                                path: path.to_path_buf(),
+                                range: current.byte_range(),
+                            });
+                        }
+                    }
+                    for index in (0..current.child_count()).rev() {
+                        if let Ok(index) = u32::try_from(index)
+                            && let Some(child) = current.child(index)
+                        {
+                            descendants.push(child);
+                        }
+                    }
                 }
-                if parent.kind() == "world_item"
-                    && let Some(name_node) = parent.child_by_field_name("name")
-                    && let Some(owner_name) = source.get(name_node.byte_range())
-                {
-                    world = resolve.worlds.iter().find_map(|(id, item)| {
-                        let location = resolve.source_map.resolve_span(item.span)?;
-                        (item.name == owner_name
-                            && location.path == path.to_string_lossy()
-                            && location.range == name_node.byte_range())
-                        .then_some(id)
-                    });
-                    break;
-                }
-                ancestor = parent.parent();
             }
-            let type_id = interface
-                .and_then(|id| resolve.interfaces[id].types.get(name_text).copied())
-                .or_else(|| {
-                    world.and_then(|id| {
-                        resolve.worlds[id]
-                            .imports
-                            .values()
-                            .chain(resolve.worlds[id].exports.values())
-                            .find_map(|item| match item {
-                                wit_parser::WorldItem::Type { id, .. }
-                                    if resolve.types[*id].name.as_deref() == Some(name_text) =>
-                                {
-                                    Some(*id)
-                                }
-                                _ => None,
-                            })
-                    })
-                });
-            if let Some(id) = type_id {
-                references.push(SemanticReference {
-                    key: format!("type:{}", id.index()),
-                    path: path.to_path_buf(),
-                    range: start..end,
-                });
+            if node.kind() == "use_names_item" {
+                let mut identifiers = Vec::new();
+                let mut descendants = vec![node];
+                while let Some(current) = descendants.pop() {
+                    if current.kind() == "id" {
+                        identifiers.push(current);
+                    }
+                    for index in (0..current.child_count()).rev() {
+                        if let Ok(index) = u32::try_from(index)
+                            && let Some(child) = current.child(index)
+                        {
+                            descendants.push(child);
+                        }
+                    }
+                }
+                if let Some(scope) = scope_at(scopes, path, node.start_byte()) {
+                    for identifier in identifiers {
+                        let range = identifier.byte_range();
+                        let Some(name) = source.get(range.clone()) else {
+                            continue;
+                        };
+                        let key = scope
+                            .types
+                            .iter()
+                            .find(|ty| ty.name == name)
+                            .map(|ty| ty.key.clone())
+                            .or_else(|| {
+                                resolve.types.iter().find_map(|(_, ty)| {
+                                    let location = resolve.source_map.resolve_span(ty.span)?;
+                                    if ty.name.as_deref() == Some(name)
+                                        || !same_source_path(location.path, path)
+                                        || location.range != range
+                                    {
+                                        return None;
+                                    }
+                                    match &ty.kind {
+                                        wit_parser::TypeDefKind::Type(wit_parser::Type::Id(
+                                            original,
+                                        )) => Some(format!("type:{}", original.index())),
+                                        _ => None,
+                                    }
+                                })
+                            });
+                        if let Some(key) = key {
+                            references.push(SemanticReference {
+                                key,
+                                path: path.to_path_buf(),
+                                range,
+                            });
+                        }
+                    }
+                }
             }
         }
     }
@@ -509,6 +959,73 @@ pub fn declared_type_names(source: &str) -> Vec<String> {
     names.into_iter().collect()
 }
 
+/// Return locally declared type names visible at the source offset.
+pub fn declared_type_names_at(source: &str, offset: usize) -> Vec<String> {
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&wit_syntax::language()).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    let mut bodies = Vec::new();
+    let mut nodes = vec![tree.root_node()];
+    while let Some(node) = nodes.pop() {
+        match node.kind() {
+            "interface_item" | "world_item" => {
+                if let Some(body) = child_kind(node, "body")
+                    && body.start_byte() <= offset
+                    && offset < body.end_byte()
+                {
+                    bodies.push(body);
+                }
+            }
+            "import_item" | "export_item" => {
+                if let Some(extern_type) = child_kind(node, "extern_type")
+                    && let Some(body) = child_kind(extern_type, "body")
+                    && body.start_byte() <= offset
+                    && offset < body.end_byte()
+                {
+                    bodies.push(body);
+                }
+            }
+            _ => {}
+        }
+        for index in (0..node.child_count()).rev() {
+            if let Ok(index) = u32::try_from(index)
+                && let Some(child) = node.child(index)
+            {
+                nodes.push(child);
+            }
+        }
+    }
+    let Some(body) = bodies
+        .into_iter()
+        .min_by_key(|body| body.end_byte() - body.start_byte())
+    else {
+        return Vec::new();
+    };
+    let mut names = BTreeSet::new();
+    for index in 0..body.child_count() {
+        let Some(child) = u32::try_from(index).ok().and_then(|i| body.child(i)) else {
+            continue;
+        };
+        let field = match child.kind() {
+            "type_item" => "alias",
+            "record_item" | "flags_items" | "enum_items" | "variant_items" | "resource_item" => {
+                "name"
+            }
+            _ => continue,
+        };
+        if let Some(name) = child.child_by_field_name(field)
+            && let Some(value) = source.get(name.byte_range())
+        {
+            names.insert(value.to_owned());
+        }
+    }
+    names.into_iter().collect()
+}
+
 /// Return whether the given byte range is a named type in the syntax tree.
 pub fn is_named_type_reference(source: &str, range: Range<usize>) -> bool {
     let mut parser = tree_sitter::Parser::new();
@@ -520,15 +1037,13 @@ pub fn is_named_type_reference(source: &str, range: Range<usize>) -> bool {
     };
     let mut nodes = vec![tree.root_node()];
     while let Some(node) = nodes.pop() {
-        if node.kind() == "ty" {
-            for index in 0..node.child_count() {
-                if let Ok(index) = u32::try_from(index)
-                    && let Some(child) = node.child(index)
-                    && child.kind() == "id"
-                    && child.byte_range() == range
-                {
+        if node.kind() == "id" && node.byte_range() == range {
+            let mut ancestor = node.parent();
+            while let Some(parent) = ancestor {
+                if matches!(parent.kind(), "ty" | "handle") {
                     return true;
                 }
+                ancestor = parent.parent();
             }
         }
         for index in (0..node.child_count()).rev() {
@@ -593,6 +1108,7 @@ mod tests {
         let source = "package test:app; interface api { record item { value: u32 } echo: func(value: item) -> item; }";
         let analysis =
             analyze_package(dir.path(), &Overlays::from([(main.clone(), source.into())])).unwrap();
+        assert!(!analysis.scopes.is_empty());
         assert!(
             analysis
                 .references
@@ -833,6 +1349,186 @@ mod tests {
             assert_eq!(format(&formatted).unwrap(), formatted, "{name}");
         }
     }
+    #[test]
+    fn resolved_scopes_expose_only_local_and_imported_type_spellings() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = "package test:app; interface a { record hidden { value: u32 } } interface b { record local { value: u32 } use a.{hidden as visible}; call: func(value: visible); }";
+        let path = dir.path().join("main.wit");
+        let analysis =
+            analyze_package(dir.path(), &Overlays::from([(path.clone(), source.into())])).unwrap();
+        assert!(analysis.diagnostics.is_empty());
+        let offset = source.find("value: visible").unwrap();
+        let offset = offset + "value: ".len();
+        let names: BTreeSet<_> = analysis
+            .visible_types_at(&path, offset)
+            .iter()
+            .map(|ty| ty.name.as_str())
+            .collect();
+        assert!(names.contains("local"));
+        assert!(names.contains("visible"));
+        assert!(!names.contains("hidden"));
+    }
+
+    #[test]
+    fn function_names_and_composite_signatures_use_wit_source_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.wit");
+        let source = "package test:app; interface api { record item { value: u32 } resource connection; resource token; render: func(a: list<u8>, b: option<item>, c: result<item, string>, d: result<_, string>, e: tuple<u8, string>, f: borrow<connection>, g: own<token>, h: future<item>, i: stream<u8>, j: f32, k: f64) -> map<string, list<option<item>>>; async-call: async func(); resource object { constructor(); method: func(); async-method: async func(); static-method: static func(); async-static: static async func(); value: get() -> u32; value: set(v: u32); static-value: static get() -> u32; static-value: static set(v: u32); } }";
+        let analysis =
+            analyze_package(dir.path(), &Overlays::from([(path, source.into())])).unwrap();
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+        let render = analysis
+            .items
+            .iter()
+            .find(|item| item.name == "render")
+            .unwrap();
+        assert_eq!(
+            render.detail,
+            "func(a: list<u8>, b: option<item>, c: result<item, string>, d: result<_, string>, e: tuple<u8, string>, f: borrow<connection>, g: own<token>, h: future<item>, i: stream<u8>, j: f32, k: f64) -> map<string, list<option<item>>>"
+        );
+        let functions: Vec<_> = analysis
+            .items
+            .iter()
+            .filter(|item| item.kind == "function")
+            .collect();
+        assert!(
+            functions
+                .iter()
+                .any(|item| item.signature.as_deref() == Some("async-method: async func();")),
+            "{functions:#?}"
+        );
+        assert!(
+            functions
+                .iter()
+                .any(|item| item.signature.as_deref() == Some("static-method: static func();"))
+        );
+        assert!(functions.iter().any(|item| item.signature.as_deref() == Some("async-static: static async func();")));
+        assert!(
+            functions
+                .iter()
+                .any(|item| item.signature.as_deref() == Some("constructor();"))
+        );
+        assert!(
+            functions
+                .iter()
+                .any(|item| item.signature.as_deref() == Some("value: get() -> u32;"))
+        );
+        assert!(
+            functions
+                .iter()
+                .any(|item| item.signature.as_deref() == Some("value: set(v: u32);"))
+        );
+        assert!(functions.iter().any(|item| item.signature.as_deref() == Some("static-value: static get() -> u32;")));
+        assert!(
+            functions
+                .iter()
+                .any(|item| item.signature.as_deref() == Some("static-value: static set(v: u32);"))
+        );
+        assert!(
+            functions
+                .iter()
+                .any(|item| item.signature.as_deref() == Some("async-call: async func();"))
+        );
+        assert!(functions.iter().all(|item| !item.name.contains('[')
+            && !item.signature.as_deref().unwrap_or_default().contains('[')));
+    }
+
+    #[test]
+    fn inline_world_interfaces_keep_their_resolved_type_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.wit");
+        let source = "package demo:app; interface shared { record entry { value: u32 } } world app { import clock: interface { use shared.{entry}; read: func() -> entry; } }";
+        let analysis =
+            analyze_package(dir.path(), &Overlays::from([(path.clone(), source.into())])).unwrap();
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+
+        let offset = source.rfind("entry").unwrap();
+        assert!(
+            analysis
+                .visible_types_at(&path, offset)
+                .iter()
+                .any(|ty| ty.name == "entry"),
+            "scopes: {:?}",
+            analysis.scopes
+        );
+        assert!(
+            analysis
+                .references
+                .iter()
+                .any(|reference| reference.path == path && reference.range.start == offset),
+            "references: {:?}",
+            analysis.references
+        );
+    }
+
+    #[test]
+    fn nested_named_type_references_include_handle_and_alias_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.wit");
+        let source = "package test:app; interface shared { record entry { value: u32 } resource connection; resource token; } interface api { use shared.{entry, connection, token, entry as local}; use shared.{entry as state}; nested: func(a: list<entry>, b: option<local>, c: borrow<connection>, d: own<token>, e: result<entry, state>, f: tuple<entry, local>); }";
+        let analysis =
+            analyze_package(dir.path(), &Overlays::from([(path.clone(), source.into())])).unwrap();
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+        for text in [
+            "list<entry>",
+            "option<local>",
+            "borrow<connection>",
+            "own<token>",
+            "result<entry, state>",
+            "tuple<entry, local>",
+        ] {
+            let offset = source.find(text).unwrap();
+            let name = if text == "borrow<connection>" || text == "own<token>" {
+                offset
+                    + if text.starts_with("borrow") {
+                        text.find("connection").unwrap()
+                    } else {
+                        text.find("token").unwrap()
+                    }
+            } else if text == "option<local>" {
+                offset + text.find("local").unwrap()
+            } else if text == "result<entry, state>" {
+                offset + text.find("state").unwrap()
+            } else if text == "tuple<entry, local>" {
+                offset + text.find("local").unwrap()
+            } else {
+                offset + text.find("entry").unwrap()
+            };
+            assert!(
+                analysis
+                    .references
+                    .iter()
+                    .any(|reference| reference.path == path && reference.range.start == name)
+            );
+        }
+        let state_target = source.find("entry as state").unwrap();
+        assert!(
+            analysis
+                .references
+                .iter()
+                .any(|reference| reference.range.start == state_target)
+        );
+        let state_alias = source.find("as state").unwrap() + "as ".len();
+        assert!(
+            analysis
+                .references
+                .iter()
+                .any(|reference| reference.range.start == state_alias)
+        );
+    }
+
     #[test]
     fn formatter_preserves_comments_and_is_idempotent() {
         let source = "package test:app;\n// 🦀 comment\ninterface api{record thing{x:u32,y:string} call:func(x:thing)->string;}";

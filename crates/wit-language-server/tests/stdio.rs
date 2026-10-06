@@ -275,6 +275,210 @@ fn cli_help_version_and_reject_unknown_flags() {
     );
 }
 
+fn request(client: &mut Client, id: u64, method: &str, params: Value) -> Value {
+    client.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
+    client.until(|value| value["id"] == id)
+}
+
+#[test]
+fn type_completion_is_scope_safe_and_uses_valid_wit_builtins() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("deps")).unwrap();
+    let path = dir.path().join("main.wit");
+    let dep = dir.path().join("deps/types.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package demo:app; interface a { record hidden { value: u32 } } interface b { record local { value: u32 } use a.{hidden as visible}; call: func(value: local); } world app { import demo:dep/api; }";
+    std::fs::write(
+        dep,
+        "package demo:dep; interface api { record secret { value: u32 } }",
+    )
+    .unwrap();
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+    let offset = source.find("call: func(value: local").unwrap() + "call: func(value: ".len();
+    let response = request(
+        &mut client,
+        40,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+    );
+    let labels: Vec<_> = response["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect();
+    for visible in ["local", "visible", "f32", "f64"] {
+        assert!(labels.contains(&visible), "missing {visible}: {labels:?}");
+    }
+    for hidden in ["hidden", "secret", "float32", "float64"] {
+        assert!(!labels.contains(&hidden), "unexpected {hidden}: {labels:?}");
+    }
+    client.shutdown();
+}
+
+#[test]
+fn typo_fixes_use_only_types_visible_in_the_diagnostic_scope() {
+    for (label, source, dependency, expected) in [
+        (
+            "sibling-only",
+            "package demo:app; interface a { record item { value: u32 } } interface b { call: func(value: itme); }",
+            None,
+            None,
+        ),
+        (
+            "dependency-only",
+            "package demo:app; interface b { call: func(value: secrt); } world app { import demo:dep/api; }",
+            Some("package demo:dep; interface api { record secret { value: u32 } }"),
+            None,
+        ),
+        (
+            "visible-vs-invisible",
+            "package demo:app; interface a { record itme { value: u32 } } interface b { record item { value: u32 } call: func(value: itme); }",
+            None,
+            Some("Replace with `item`"),
+        ),
+    ] {
+        let tempdir = tempfile::tempdir().unwrap();
+        let dir = tempdir.path().join(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("main.wit");
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        if let Some(dependency) = dependency {
+            std::fs::create_dir(dir.join("deps")).unwrap();
+            std::fs::write(dir.join("deps/dep.wit"), dependency).unwrap();
+        }
+        let mut client = Client::start("utf-16");
+        client.open(&uri, source);
+        let diagnostics = client.diagnostics(&uri, 1);
+        assert_eq!(diagnostics.as_array().unwrap().len(), 1, "{label}");
+        let response = request(
+            &mut client,
+            41,
+            "textDocument/codeAction",
+            json!({"textDocument":{"uri":uri},"range":diagnostics[0]["range"],"context":{"diagnostics":diagnostics}}),
+        );
+        match expected {
+            Some(title) => assert_eq!(response["result"][0]["title"], title, "{label}"),
+            None => assert_eq!(response["result"], json!([]), "{label}: {response}"),
+        }
+        client.shutdown();
+    }
+}
+
+#[test]
+fn inline_interfaces_aliases_and_world_functions_have_protocol_navigation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package demo:app; interface shared { record entry { value: u32 } enum status { ready } resource connection; } interface api { use shared.{entry, status as state, connection}; nested: func(a: list<entry>, b: option<state>, c: borrow<connection>); } world app { import clock: interface { use shared.{entry}; read: func() -> entry; } import log: func(message: string); export run: func(); }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+    let state_offset = source.find("option<state>").unwrap() + "option<".len();
+    let hover = request(
+        &mut client,
+        42,
+        "textDocument/hover",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":state_offset}}),
+    );
+    let hover_text = hover["result"]["contents"]["value"].as_str().unwrap();
+    assert!(!hover_text.contains("[method]"));
+    assert!(!hover_text.contains("[get]"));
+
+    let inline_use = source.find("use shared.{entry}").unwrap() + "use shared.{".len();
+    let return_use = source.rfind("entry").unwrap();
+    let references = request(
+        &mut client,
+        43,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":return_use},"context":{"includeDeclaration":true}}),
+    );
+    let starts: Vec<_> = references["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|location| location["range"]["start"]["character"].as_u64())
+        .collect();
+    assert!(starts.contains(&(inline_use as u64)), "{references}");
+    assert!(starts.contains(&(return_use as u64)), "{references}");
+
+    for (id, token, expected) in [
+        (44, "log", "import log: func(message: string);"),
+        (45, "run", "export run: func();"),
+    ] {
+        let offset = source.find(token).unwrap();
+        let hover = request(
+            &mut client,
+            id,
+            "textDocument/hover",
+            json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+        );
+        assert!(
+            hover["result"]["contents"]["value"]
+                .as_str()
+                .unwrap()
+                .contains(expected),
+            "{hover}"
+        );
+    }
+    client.shutdown();
+}
+
+#[test]
+fn navigation_skips_targets_removed_after_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    let dep_dir = dir.path().join("deps");
+    std::fs::create_dir(&dep_dir).unwrap();
+    let path = dir.path().join("main.wit");
+    let dep = dep_dir.join("dep.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let dep_uri = url::Url::from_file_path(&dep).unwrap().to_string();
+    let source = "package demo:app; world app { import demo:dep/api; }";
+    std::fs::write(
+        &dep,
+        "package demo:dep; interface api { record entry { value: u32 } }",
+    )
+    .unwrap();
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+    std::fs::remove_file(&dep).unwrap();
+
+    let offset = source.rfind("api").unwrap();
+    let definition = request(
+        &mut client,
+        46,
+        "textDocument/definition",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+    );
+    assert!(definition["result"].is_null(), "{definition}");
+    let references = request(
+        &mut client,
+        47,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset},"context":{"includeDeclaration":true}}),
+    );
+    assert!(
+        references["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|location| location["uri"] == uri)
+    );
+    assert!(
+        !references["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|location| location["uri"] == dep_uri)
+    );
+    client.shutdown();
+}
+
 #[test]
 fn formatting_honors_spaces_and_tabs() {
     let dir = tempfile::tempdir().unwrap();

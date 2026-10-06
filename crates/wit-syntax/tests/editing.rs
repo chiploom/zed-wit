@@ -294,6 +294,22 @@ fn unrelated_error_nodes_do_not_receive_accessor_recovery_captures() {
             );
         }
     }
+
+    let malformed = "package demo:negative; interface i { call: func(value: get() -> u32); }";
+    let tree = parse(malformed);
+    assert!(
+        tree.root_node().has_error(),
+        "{}",
+        tree.root_node().to_sexp()
+    );
+    let get = malformed.find("get()").unwrap();
+    for (capture, _, start) in captures_allow_errors("highlights", malformed) {
+        assert!(
+            !(matches!(capture.as_str(), "keyword" | "type.builtin") && start == get),
+            "non-accessor get received accessor highlighting at {start}: {}",
+            tree.root_node().to_sexp()
+        );
+    }
 }
 
 #[test]
