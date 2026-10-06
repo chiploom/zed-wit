@@ -6,6 +6,22 @@ use std::{
     time::Duration,
 };
 
+const MANUAL_SEMANTIC: &str = include_str!("../../../tests/manual-zed/semantic/main.wit");
+const MANUAL_ESCAPED: &str = include_str!("../../../tests/manual-zed/escaped/main.wit");
+const MANUAL_ESCAPED_ALIAS: &str =
+    include_str!("../../../tests/manual-zed/escaped-alias/main.wit");
+const MANUAL_OVERLAY_MAIN: &str = include_str!("../../../tests/manual-zed/overlay/main.wit");
+const MANUAL_OVERLAY_TYPES: &str = include_str!("../../../tests/manual-zed/overlay/types.wit");
+const MANUAL_DEPENDENCY_MAIN: &str =
+    include_str!("../../../tests/manual-zed/dependency/main.wit");
+const MANUAL_DEPENDENCY_TYPES: &str =
+    include_str!("../../../tests/manual-zed/dependency/deps/types.wit");
+const MANUAL_UNICODE: &str = include_str!("../../../tests/manual-zed/unicode/main.wit");
+const MANUAL_FORMATTING_MAIN: &str =
+    include_str!("../../../tests/manual-zed/formatting/main.wit");
+const MANUAL_FORMATTING_COMMENTS: &str =
+    include_str!("../../../tests/manual-zed/formatting/comments.wit");
+
 struct Client {
     child: Child,
     input: Option<ChildStdin>,
@@ -73,6 +89,20 @@ impl Client {
         assert_eq!(
             result["result"]["capabilities"]["codeActionProvider"]["codeActionKinds"],
             json!(["quickfix"])
+        );
+        assert!(
+            result["result"]["capabilities"]
+                .get("renameProvider")
+                .is_none()
+                || result["result"]["capabilities"]["renameProvider"].is_null()
+                || result["result"]["capabilities"]["renameProvider"] == false
+        );
+        assert!(
+            result["result"]["capabilities"]
+                .get("workspaceSymbolProvider")
+                .is_none()
+                || result["result"]["capabilities"]["workspaceSymbolProvider"].is_null()
+                || result["result"]["capabilities"]["workspaceSymbolProvider"] == false
         );
         client.notify("initialized", json!({}));
         let startup_log = client.until(|v| v["method"] == "window/logMessage");
@@ -278,6 +308,27 @@ fn cli_help_version_and_reject_unknown_flags() {
 fn request(client: &mut Client, id: u64, method: &str, params: Value) -> Value {
     client.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
     client.until(|value| value["id"] == id)
+}
+
+fn position_at(text: &str, byte: usize, encoding: &str) -> Value {
+    let prefix = &text[..byte];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count();
+    let tail = prefix.rsplit('\n').next().unwrap_or("");
+    let character = if encoding == "utf-8" {
+        tail.len()
+    } else {
+        tail.encode_utf16().count()
+    };
+    json!({"line":line,"character":character})
+}
+
+fn completion_labels(response: &Value) -> Vec<&str> {
+    response["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect()
 }
 
 #[test]
@@ -1097,3 +1148,336 @@ fn semantic_requests_resolve_types_and_offer_a_safe_typo_fix() {
     );
     client.shutdown();
 }
+
+#[test]
+fn manual_semantic_fixture_runs_hover_navigation_completion_and_typo_mutations() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    std::fs::write(&path, MANUAL_SEMANTIC).unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let mut client = Client::start("utf-16");
+    client.open(&uri, MANUAL_SEMANTIC);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+    let declaration = MANUAL_SEMANTIC.find("record item").unwrap() + "record ".len();
+    let type_use = MANUAL_SEMANTIC.find("value: item").unwrap() + "value: ".len();
+    let point = position_at(MANUAL_SEMANTIC, type_use, "utf-16");
+
+    let hover = request(
+        &mut client,
+        200,
+        "textDocument/hover",
+        json!({"textDocument":{"uri":uri},"position":point}),
+    );
+    assert!(
+        hover["result"]["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("record item"),
+        "{hover}"
+    );
+
+    let definition = request(
+        &mut client,
+        201,
+        "textDocument/definition",
+        json!({"textDocument":{"uri":uri},"position":point}),
+    );
+    assert_eq!(
+        definition["result"]["range"]["start"],
+        position_at(MANUAL_SEMANTIC, declaration, "utf-16")
+    );
+
+    let references = request(
+        &mut client,
+        202,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":point,"context":{"includeDeclaration":true}}),
+    );
+    assert_eq!(references["result"].as_array().unwrap().len(), 3);
+
+    let completion = request(
+        &mut client,
+        203,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":point}),
+    );
+    let labels = completion_labels(&completion);
+    assert!(labels.contains(&"item"), "{labels:?}");
+    assert!(labels.contains(&"u32"), "{labels:?}");
+
+    let typo = MANUAL_SEMANTIC.replacen("value: item", "value: itme", 1);
+    client.change(&uri, &typo, 2);
+    let diagnostics = client.diagnostics(&uri, 2);
+    assert_eq!(diagnostics.as_array().unwrap().len(), 1);
+    let actions = request(
+        &mut client,
+        204,
+        "textDocument/codeAction",
+        json!({"textDocument":{"uri":uri},"range":diagnostics[0]["range"],"context":{"diagnostics":diagnostics}}),
+    );
+    assert_eq!(actions["result"].as_array().unwrap().len(), 1);
+    assert_eq!(actions["result"][0]["title"], "Replace with \`item\`");
+
+    let negative = "package manual:semantic; interface api { call: func(first: u32, par) }";
+    client.change(&uri, negative, 3);
+    let par = negative.find(", par").unwrap() + ", par".len();
+    let completion = request(
+        &mut client,
+        205,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":position_at(negative, par, "utf-16")}),
+    );
+    assert!(completion_labels(&completion).is_empty(), "{completion}");
+    client.shutdown();
+}
+
+#[test]
+fn manual_escaped_fixtures_preserve_explicit_identifier_spelling() {
+    for (source, file_name) in [
+        (MANUAL_ESCAPED, "escaped.wit"),
+        (MANUAL_ESCAPED_ALIAS, "escaped-alias.wit"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(file_name);
+        std::fs::write(&path, source).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        let mut client = Client::start("utf-16");
+        client.open(&uri, source);
+        assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+        let token = if source.contains("%alias") { "%alias" } else { "%type" };
+        let use_offset = source.rfind(token).unwrap();
+        let point = position_at(source, use_offset, "utf-16");
+        let completion = request(
+            &mut client,
+            210,
+            "textDocument/completion",
+            json!({"textDocument":{"uri":uri},"position":point}),
+        );
+        assert!(completion_labels(&completion).contains(&token), "{completion}");
+
+        let hover = request(
+            &mut client,
+            211,
+            "textDocument/hover",
+            json!({"textDocument":{"uri":uri},"position":point}),
+        );
+        assert!(
+            hover["result"]["contents"]["value"]
+                .as_str()
+                .unwrap()
+                .contains(token),
+            "{hover}"
+        );
+        client.shutdown();
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("alias.wit");
+    std::fs::write(&path, MANUAL_ESCAPED_ALIAS).unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let mut client = Client::start("utf-16");
+    client.open(&uri, MANUAL_ESCAPED_ALIAS);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+    let imported = MANUAL_ESCAPED_ALIAS.find("shared.{%type").unwrap() + "shared.{".len();
+    let definition = request(
+        &mut client,
+        212,
+        "textDocument/definition",
+        json!({"textDocument":{"uri":uri},"position":position_at(MANUAL_ESCAPED_ALIAS, imported, "utf-16")}),
+    );
+    assert_eq!(
+        definition["result"]["range"]["start"],
+        position_at(
+            MANUAL_ESCAPED_ALIAS,
+            MANUAL_ESCAPED_ALIAS.find("%type").unwrap(),
+            "utf-16"
+        )
+    );
+    client.shutdown();
+}
+
+#[test]
+fn manual_overlay_fixture_runs_unsaved_change_undo_close_and_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.wit");
+    let types = dir.path().join("types.wit");
+    std::fs::write(&main, MANUAL_OVERLAY_MAIN).unwrap();
+    std::fs::write(&types, MANUAL_OVERLAY_TYPES).unwrap();
+    let main_uri = url::Url::from_file_path(&main).unwrap().to_string();
+    let types_uri = url::Url::from_file_path(&types).unwrap().to_string();
+    let mut client = Client::start("utf-16");
+
+    client.open(&main_uri, MANUAL_OVERLAY_MAIN);
+    assert_eq!(client.diagnostics(&main_uri, 1), json!([]));
+    client.open(&types_uri, MANUAL_OVERLAY_TYPES);
+    assert_eq!(client.diagnostics(&types_uri, 1), json!([]));
+
+    let renamed = MANUAL_OVERLAY_TYPES.replace("record item", "record thing");
+    client.change(&types_uri, &renamed, 2);
+    assert!(!client.diagnostics(&main_uri, 1).as_array().unwrap().is_empty());
+
+    client.change(&types_uri, MANUAL_OVERLAY_TYPES, 3);
+    assert_eq!(client.diagnostics(&main_uri, 1), json!([]));
+
+    client.change(&types_uri, &renamed, 4);
+    assert!(!client.diagnostics(&main_uri, 1).as_array().unwrap().is_empty());
+    client.notify(
+        "textDocument/didClose",
+        json!({"textDocument":{"uri":types_uri}}),
+    );
+    assert_eq!(client.diagnostics(&main_uri, 1), json!([]));
+
+    client.open(&types_uri, MANUAL_OVERLAY_TYPES);
+    assert_eq!(client.diagnostics(&types_uri, 1), json!([]));
+    client.shutdown();
+}
+
+#[test]
+fn manual_dependency_fixture_anchors_broken_dependency_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let deps = dir.path().join("deps");
+    std::fs::create_dir(&deps).unwrap();
+    let main = dir.path().join("main.wit");
+    let types = deps.join("types.wit");
+    std::fs::write(&main, MANUAL_DEPENDENCY_MAIN).unwrap();
+    std::fs::write(&types, MANUAL_DEPENDENCY_TYPES).unwrap();
+    let main_uri = url::Url::from_file_path(&main).unwrap().to_string();
+    let types_uri = url::Url::from_file_path(&types).unwrap().to_string();
+    let mut client = Client::start("utf-16");
+
+    client.open(&main_uri, MANUAL_DEPENDENCY_MAIN);
+    assert_eq!(client.diagnostics(&main_uri, 1), json!([]));
+    client.open(&types_uri, MANUAL_DEPENDENCY_TYPES);
+    assert_eq!(client.diagnostics(&types_uri, 1), json!([]));
+
+    let broken = MANUAL_DEPENDENCY_TYPES.replace("type item = u32;", "type item = ;");
+    client.change(&types_uri, &broken, 2);
+    let diagnostics = client.diagnostics(&types_uri, 2);
+    assert!(!diagnostics.as_array().unwrap().is_empty(), "{diagnostics}");
+    assert!(
+        diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|diagnostic| diagnostic["source"] == "wit-parser")
+    );
+
+    client.change(&types_uri, MANUAL_DEPENDENCY_TYPES, 3);
+    assert_eq!(client.diagnostics(&types_uri, 3), json!([]));
+    assert_eq!(client.diagnostics(&main_uri, 1), json!([]));
+    client.shutdown();
+}
+
+#[test]
+fn manual_unicode_fixture_keeps_diagnostic_range_aligned() {
+    for encoding in ["utf-8", "utf-16"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.wit");
+        std::fs::write(&path, MANUAL_UNICODE).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        let mut client = Client::start(encoding);
+        client.open(&uri, MANUAL_UNICODE);
+        assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+        let broken = MANUAL_UNICODE.replace("type broken = u32;", "type broken = missing;");
+        client.change(&uri, &broken, 2);
+        let diagnostics = client.diagnostics(&uri, 2);
+        assert_eq!(diagnostics.as_array().unwrap().len(), 1);
+        let start = broken.find("missing").unwrap();
+        let end = start + "missing".len();
+        assert_eq!(
+            diagnostics[0]["range"]["start"],
+            position_at(&broken, start, encoding)
+        );
+        assert_eq!(
+            diagnostics[0]["range"]["end"],
+            position_at(&broken, end, encoding)
+        );
+        client.shutdown();
+    }
+}
+
+#[test]
+fn manual_formatting_fixtures_are_idempotent_preserve_comments_and_refuse_invalid_input() {
+    for (index, source) in [MANUAL_FORMATTING_MAIN, MANUAL_FORMATTING_COMMENTS]
+        .into_iter()
+        .enumerate()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("format-{index}.wit"));
+        std::fs::write(&path, source).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        let mut client = Client::start("utf-16");
+        client.open(&uri, source);
+        assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+        let first = request(
+            &mut client,
+            220,
+            "textDocument/formatting",
+            json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
+        );
+        let formatted = if first["result"].as_array().is_some_and(|edits| edits.is_empty()) {
+            source.to_owned()
+        } else {
+            first["result"][0]["newText"].as_str().unwrap().to_owned()
+        };
+        if source == MANUAL_FORMATTING_COMMENTS {
+            for retained in [
+                "// Formatting must preserve this line comment.",
+                "/// Formatting must preserve this doc comment.",
+                "@since(version = 1.0.0)",
+            ] {
+                assert!(formatted.contains(retained), "{formatted}");
+            }
+        }
+        client.change(&uri, &formatted, 2);
+        assert_eq!(client.diagnostics(&uri, 2), json!([]));
+        let second = request(
+            &mut client,
+            221,
+            "textDocument/formatting",
+            json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
+        );
+        assert_eq!(second["result"], json!([]));
+
+        let invalid = formatted.trim_end().strip_suffix('}').unwrap();
+        client.change(&uri, invalid, 3);
+        assert!(!client.diagnostics(&uri, 3).as_array().unwrap().is_empty());
+        let refusal = request(
+            &mut client,
+            222,
+            "textDocument/formatting",
+            json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
+        );
+        assert!(refusal.get("error").is_some(), "{refusal}");
+        assert!(refusal["result"].is_null());
+        client.shutdown();
+    }
+}
+
+#[test]
+fn manual_parser_diagnostic_clears_after_repair() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let invalid = "package manual:parser; interface api { type broken = ; }";
+    let repaired = "package manual:parser; interface api { type broken = u32; }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, invalid);
+    let diagnostics = client.diagnostics(&uri, 1);
+    assert!(!diagnostics.as_array().unwrap().is_empty());
+    assert!(
+        diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|diagnostic| diagnostic["source"] == "wit-parser")
+    );
+    client.change(&uri, repaired, 2);
+    assert_eq!(client.diagnostics(&uri, 2), json!([]));
+    client.shutdown();
+}
+
