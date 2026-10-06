@@ -89,7 +89,10 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         ));
     }
 
-    phase(5, "staging isolated runtime extension, grammar, and workspace");
+    phase(
+        5,
+        "staging isolated runtime extension, grammar, and workspace",
+    );
     let staged = stage(&root, profile)?;
     log(format!(
         "runtime extension: {}",
@@ -172,7 +175,10 @@ struct Staged {
 
 fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
     if profile.exists() {
-        log(format!("resetting existing smoke profile: {}", profile.display()));
+        log(format!(
+            "resetting existing smoke profile: {}",
+            profile.display()
+        ));
         fs::remove_dir_all(profile)
             .map_err(|error| format!("remove {}: {error}", profile.display()))?;
     }
