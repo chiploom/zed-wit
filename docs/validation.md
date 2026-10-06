@@ -8,7 +8,7 @@ or end-to-end hosted installation.
 ## PR #6 semantic editor candidate
 
 - Validation date: 2026-10-06
-- Validated source HEAD: `2727e9df8af83ee42b78e8bce19ed01d8bd4a0ef`
+- Validated source HEAD: `38df08ab88d666c05a709af837038b0f3b24cf0a` (validation-document commit)
 - Host: macOS ARM64 (`aarch64-apple-darwin`)
 - Rust: `rustc 1.99.0 (b940084d7 2026-09-28)`
 - Exact local gate: passed
@@ -16,17 +16,19 @@ or end-to-end hosted installation.
   protocol, 11 syntax/editing, 7 xtask, 6 adapter/distribution); doctest suites
   had no doctests.
 - Build identity: passed; release server reported
-  `wit-language-server 0.1.0+git.2727e9df8af83ee42b78e8bce19ed01d8bd4a0ef`.
+  `wit-language-server 0.1.0+git.38df08ab88d666c05a709af837038b0f3b24cf0a`.
 - Host packaging: passed for `aarch64-apple-darwin`; package and 116-package
   license report were produced. The packaged binary reported the same build
-  identity. Provenance recorded `source_dirty: false` and SHA-256
-  `60122f7479e86892023dbb7bfa3d7eebdb57a91009937f65f949b2939a389ef5`.
+  identity. Provenance recorded `source_dirty: false`, source revision
+  `38df08ab88d666c05a709af837038b0f3b24cf0a`, and SHA-256
+  `9c090c516b5928a537c8cb09bca51d3b6f021b23fc75a0afbc770b1120628ac2`.
 - Zed GUI qualification: not performed for this candidate; exact Zed version is
   unavailable. See [manual testing](manual-testing.md).
 - Hosted CI: no run on this candidate was verified. Earlier hosted results below
   are for the stated historical baseline only.
 
-Commands passed on that source HEAD:
+The complete gate passed again on this HEAD after the validation document was
+committed. Commands passed on that source HEAD:
 
 ```sh
 cargo xtask check-no-python
