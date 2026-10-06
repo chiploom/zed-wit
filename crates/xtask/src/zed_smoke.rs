@@ -443,9 +443,11 @@ fn launch(
         .map_err(|error| format!("create {}: {error}", stdout_log.display()))?;
     let stderr = File::create(stderr_log)
         .map_err(|error| format!("create {}: {error}", stderr_log.display()))?;
+    let filtered_path = path_without_language_server()?;
     let mut command = Command::new(zed);
     command
         .env("ZED_STATELESS", "1")
+        .env("PATH", filtered_path)
         .arg("--foreground")
         .arg("--new")
         .arg("--user-data-dir")
@@ -522,6 +524,18 @@ fn wait_for_server(
         server.display(),
         profile.display()
     ))
+}
+
+fn path_without_language_server() -> Result<std::ffi::OsString, String> {
+    let inherited = env::var_os("PATH").unwrap_or_default();
+    let directories = env::split_paths(&inherited)
+        .filter(|directory| {
+            !directory.join("wit-language-server").is_file()
+                && !directory.join("wit-language-server.exe").is_file()
+        })
+        .collect::<Vec<_>>();
+    env::join_paths(directories)
+        .map_err(|error| format!("construct Zed PATH without WIT language server: {error}"))
 }
 
 fn stop_zed(child: &mut Child) -> Result<(), String> {
