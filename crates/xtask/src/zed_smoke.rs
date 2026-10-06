@@ -852,7 +852,7 @@ fn manual_scenarios(head: &str) -> Value {
         {"scenario":"context_completion","result":"passed","evidence":"manual semantic fixture checks visible type completion and negative parameter-name context"},
         {"scenario":"type_typo_quick_fix","result":"passed","evidence":"manual semantic fixture mutation asserts the unique safe replacement action"},
         {"scenario":"unsupported_capabilities","result":"passed","evidence":"initialize assertions reject rename and workspace-symbol advertisement"},
-        {"scenario":"local_override","result":"passed","evidence":format!("real Zed launched exact +git.{head} server from staged .zed/settings.json without PATH injection")},
+        {"scenario":"local_override","result":"passed","evidence":format!("real Zed launched exact +git.{head} server from staged .zed/settings.json with WIT server binaries filtered from PATH; protocol tests assert matching serverInfo.version and startup logMessage")},
         {"scenario":"first_hosted_install","result":"not-run","reason":"requires published matching release assets"},
         {"scenario":"cached_install","result":"not-run","reason":"requires a successful first hosted install"},
         {"scenario":"missing_corrupt_hosted_asset","result":"not-run","reason":"requires controlled published-release download scenarios; adapter cache/checksum behavior is covered by deterministic tests"},
