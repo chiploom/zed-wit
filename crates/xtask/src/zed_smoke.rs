@@ -215,6 +215,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         "profile": profile,
         "runtime_extension": staged.extension_dir,
         "workspace": staged.workspace_dir,
+        "worktree_trust": "auto-trusted-via-isolated-user-settings",
         "wit_fixture_count": fixture_paths.len(),
         "wit_fixtures": fixture_paths,
         "server_pid": server_pid,
@@ -249,6 +250,33 @@ pub(crate) struct Staged {
     pub(crate) wit_files: Vec<PathBuf>,
 }
 
+pub(crate) fn write_isolated_settings(
+    profile: &Path,
+    mut settings: Value,
+) -> Result<PathBuf, String> {
+    let object = settings
+        .as_object_mut()
+        .ok_or_else(|| "isolated Zed settings must be a JSON object".to_owned())?;
+    object.insert(
+        "session".into(),
+        json!({
+            "trust_all_worktrees": true,
+        }),
+    );
+
+    let config = profile.join("config");
+    fs::create_dir_all(&config)
+        .map_err(|error| format!("create {}: {error}", config.display()))?;
+    let settings_path = config.join("settings.json");
+    fs::write(
+        &settings_path,
+        serde_json::to_vec_pretty(&settings)
+            .map_err(|error| format!("encode {}: {error}", settings_path.display()))?,
+    )
+    .map_err(|error| format!("write {}: {error}", settings_path.display()))?;
+    Ok(settings_path)
+}
+
 pub(crate) fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
     if profile.exists() {
         log(format!(
@@ -258,6 +286,12 @@ pub(crate) fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged
         fs::remove_dir_all(profile)
             .map_err(|error| format!("remove {}: {error}", profile.display()))?;
     }
+
+    let profile_settings = write_isolated_settings(profile, json!({}))?;
+    log(format!(
+        "staged isolated user settings with worktree auto-trust: {}",
+        profile_settings.display()
+    ));
 
     let extension_dir = profile.join("runtime-extension");
     fs::create_dir_all(&extension_dir)
@@ -982,7 +1016,7 @@ fn relative_paths(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>, String
 
 fn manual_scenarios(head: &str) -> Value {
     json!([
-        {"scenario":"development_install","result":"passed","evidence":"isolated Zed loaded the staged development extension"},
+        {"scenario":"development_install","result":"passed","evidence":"isolated Zed loaded the staged development extension with session.trust_all_worktrees=true in the isolated user settings, preventing Restricted Mode from blocking project settings or language-server startup"},
         {"scenario":"highlighting_and_structure","result":"gui-qualification-required","gui_qualification_command":"cargo xtask test-zed-gui --allow-input-injection true","evidence":"all WIT fixtures opened in real Zed; syntax/query/outline/bracket tests passed; no query errors logged; real outline UI navigation is qualified separately"},
         {"scenario":"snippets","result":"gui-qualification-required","gui_qualification_command":"cargo xtask test-zed-gui --allow-input-injection true","evidence":"snippet expansion, validity, sequential tab-stop indices and final cursor placement passed deterministically; real completion and forward/reverse tab-stop interaction are qualified separately"},
         {"scenario":"parser_diagnostic","result":"passed","evidence":"manual fixture mutation test creates parser error then repairs and clears it"},
@@ -1063,6 +1097,37 @@ fn output_result(program: &str, result: std::process::Output) -> Result<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isolated_settings_force_worktree_trust_and_preserve_extra_settings() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let profile = std::env::temp_dir().join(format!(
+            "zed-wit-isolated-settings-{}-{nonce}",
+            std::process::id()
+        ));
+
+        let settings_path = write_isolated_settings(
+            &profile,
+            json!({
+                "accessible_mode": true,
+                "snippet_sort_order": "top",
+            }),
+        )
+        .unwrap();
+        let settings: Value =
+            serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+
+        assert_eq!(settings["session"]["trust_all_worktrees"], json!(true));
+        assert_eq!(settings["accessible_mode"], json!(true));
+        assert_eq!(settings["snippet_sort_order"], json!("top"));
+
+        fs::remove_dir_all(profile).unwrap();
+    }
 
     #[test]
     fn parses_process_snapshot() {
