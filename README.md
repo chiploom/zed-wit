@@ -4,16 +4,16 @@ Modern editing support for WebAssembly Interface Types, maintained by Chiploom
 and useful independently of any Chiploom project. This extension is **unreleased**
 and is not published in the Zed registry.
 
-| Feature | Implemented behavior |
-| --- | --- |
-| File recognition | `.wit` files, WIT Markdown code fences |
-| Syntax | Canonical Bytecode Alliance Tree-sitter grammar, immutable revision |
-| Editing | Highlighting, doc/comments, brackets, indentation, outline, Vim text objects |
-| Snippets | Package, interface, world, types, functions, imports, exports and use |
-| Diagnostics | Upstream `wit-parser` syntax, name/type and package errors; unsaved buffers |
-| Packages | Sibling multi-file packages, direct `deps/` files and package directories |
-| Formatting | Maintained Topiary engine; comment-preserving document formatting |
-| Semantic editor features | Type and declaration completion, resolved hover, go to definition and references; deterministic unresolved type typo quick fixes |
+| Feature                  | Implemented behavior                                                                                                         |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| File recognition         | `.wit` files, WIT Markdown code fences                                                                                       |
+| Syntax                   | Canonical Bytecode Alliance Tree-sitter grammar, immutable revision                                                          |
+| Editing                  | Highlighting, doc/comments, brackets, indentation, outline, Vim text objects                                                 |
+| Snippets                 | Package, interface, world, types, functions, imports, exports and use                                                        |
+| Diagnostics              | Upstream `wit-parser` syntax, name/type and package errors; unsaved buffers                                                  |
+| Packages                 | Sibling multi-file packages, direct `deps/` files and package directories                                                    |
+| Formatting               | Maintained Topiary engine; comment-preserving document formatting                                                            |
+| Semantic editor features | Scope-aware type completion, resolved hover, go to definition and references; deterministic unresolved type typo quick fixes |
 
 ## Install locally
 
