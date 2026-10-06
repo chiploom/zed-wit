@@ -528,7 +528,30 @@ fn snippet_tabstops(input: &str) -> Vec<u32> {
     let mut indices = Vec::new();
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
-        if ch != '
+        if ch != '$' {
+            continue;
+        }
+        if chars.peek() == Some(&'{') {
+            chars.next();
+            let placeholder: String = chars.by_ref().take_while(|ch| *ch != '}').collect();
+            let index = placeholder
+                .split_once(':')
+                .map(|(index, _)| index)
+                .unwrap_or(placeholder.as_str());
+            indices.push(index.parse().expect("snippet tabstop index"));
+        } else {
+            let index: String =
+                std::iter::from_fn(|| chars.next_if(|ch| ch.is_ascii_digit())).collect();
+            if !index.is_empty() {
+                indices.push(index.parse().expect("snippet tabstop index"));
+            }
+        }
+    }
+    indices
+}
+
+#[test]
+fn every_snippet_default_expands_into_valid_wit_in_its_context() {
     let snippets: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(root().join("snippets/wit.json")).unwrap())
             .unwrap();
