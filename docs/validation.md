@@ -91,6 +91,15 @@ to 60 seconds and includes captured Zed logs in smoke failures.
 This trial is failure evidence for `d28af483...`, not qualification evidence
 for the subsequent fix.
 
+A second smoke run on `5a8acf664535d12122808b85c17607cd73b0cbec`
+passed the formatting, `xtask` unit, clippy, syntax/editing and stdio protocol
+stages, but the real-Zed phase again timed out. The captured foreground log
+contained only `zed is already running`, proving the remaining blocker was
+Zed's stable-channel global single-instance guard rather than extension/server
+startup. Zed's own `ZED_STATELESS` mode bypasses that guard and uses in-memory
+databases, so the next harness revision launches the isolated editor with
+`ZED_STATELESS=1` instead of requiring the user's normal Zed session to stop.
+
 ## Exact local validation run at `1ab100abe7aa5a278828345bdc2283295b201fa4`
 
 On 2026-10-06, the user reran the full local gate on

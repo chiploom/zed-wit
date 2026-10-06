@@ -312,6 +312,7 @@ fn launch(
     let stderr = File::create(stderr_log)
         .map_err(|error| format!("create {}: {error}", stderr_log.display()))?;
     Command::new(zed)
+        .env("ZED_STATELESS", "1")
         .arg("--foreground")
         .arg("--new")
         .arg("--user-data-dir")
