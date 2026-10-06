@@ -22,24 +22,32 @@ fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let script = args
         .next()
-        .ok_or("usage: zed-gui-input <all> <settle-milliseconds>")?;
-    let settle = args
-        .next()
-        .ok_or("usage: zed-gui-input <all> <settle-milliseconds>")?
-        .parse::<u64>()
-        .map_err(|error| format!("invalid settle milliseconds: {error}"))?;
-    if args.next().is_some() {
-        return Err("usage: zed-gui-input <all> <settle-milliseconds>".into());
-    }
-    if script != "all" {
-        return Err(format!("unknown input script {script:?}"));
-    }
-    if !(100..=5000).contains(&settle) {
-        return Err("settle milliseconds must be between 100 and 5000".into());
-    }
+        .ok_or("usage: zed-gui-input <probe|all> [settle-milliseconds]")?;
 
     validate_backend_selection()?;
-    run_all(Duration::from_millis(settle))
+    match script.as_str() {
+        "probe" => {
+            if args.next().is_some() {
+                return Err("usage: zed-gui-input probe".into());
+            }
+            probe_backend()
+        }
+        "all" => {
+            let settle = args
+                .next()
+                .ok_or("usage: zed-gui-input all <settle-milliseconds>")?
+                .parse::<u64>()
+                .map_err(|error| format!("invalid settle milliseconds: {error}"))?;
+            if args.next().is_some() {
+                return Err("usage: zed-gui-input all <settle-milliseconds>".into());
+            }
+            if !(100..=5000).contains(&settle) {
+                return Err("settle milliseconds must be between 100 and 5000".into());
+            }
+            run_all(Duration::from_millis(settle))
+        }
+        other => Err(format!("unknown input script {other:?}")),
+    }
 }
 
 fn validate_backend_selection() -> Result<(), String> {
@@ -72,13 +80,45 @@ fn validate_backend_selection() -> Result<(), String> {
     feature = "linux-wayland",
     feature = "linux-libei"
 ))]
-fn run_all(settle: Duration) -> Result<(), String> {
+fn input_device() -> Result<Enigo, String> {
     let mut settings = Settings::default();
     settings.open_prompt_to_get_permissions = false;
     let mut input = Enigo::new(&settings)
         .map_err(|error| format!("initialize input backend: {error}"))?;
     #[cfg(target_os = "linux")]
     input.set_delay(20);
+    Ok(input)
+}
+
+#[cfg(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+))]
+fn probe_backend() -> Result<(), String> {
+    let _input = input_device()?;
+    Ok(())
+}
+
+#[cfg(not(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+)))]
+fn probe_backend() -> Result<(), String> {
+    Err("GUI input helper was built without an input backend feature".into())
+}
+
+#[cfg(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+))]
+fn run_all(settle: Duration) -> Result<(), String> {
+    let mut input = input_device()?;
 
     press(&mut input, Key::End, settle)?;
     press(&mut input, Key::F14, settle)?;
