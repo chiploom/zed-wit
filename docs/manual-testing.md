@@ -13,31 +13,40 @@ Run the repeatable local Zed integration gate from the repository root:
 cargo xtask test-zed
 ```
 
-The command combines deterministic protocol coverage with a real Zed process
-smoke test. It runs the complete workspace unit/integration suite plus workspace
-doctests, builds the Wasm adapter and exact native server, compiles the pinned WIT
-grammar, copies the complete repository `tests/` tree into an isolated workspace,
-verifies that every source `.wit` fixture was staged, and asks Zed to open the
-workspace plus every staged WIT fixture. It then launches Zed with
-`ZED_STATELESS=1`, `--foreground`, `--new` and `--user-data-dir`. The exact
-release-built server directory is prepended to the spawned editor's `PATH`,
-which exercises the extension's supported
-`worktree.which("wit-language-server")` fallback without relying on project
-settings/trust in a fresh stateless worktree.
+The command combines deterministic protocol coverage with real Zed process
+qualification. It runs the complete workspace unit/integration suite plus
+workspace doctests, including tests that execute the exact temporary mutations in
+`tests/manual-zed/`: parser break/repair, unresolved names, unsaved sibling
+overlays, close/reopen, dependency failures, Unicode ranges, formatting,
+hover/navigation, completion and typo quick fixes. The syntax suite also validates
+query captures, outline/bracket structure, snippet expansion and tab-stop layout.
+
+The command then builds the Wasm adapter and exact native server, compiles the
+pinned WIT grammar, copies the complete repository `tests/` tree into an isolated
+workspace, verifies that every source `.wit` fixture was staged, and asks Zed to
+open the workspace plus every staged WIT fixture. It writes an explicit
+`.zed/settings.json` binary override to the isolated workspace and does not add
+the server directory to `PATH`, so successful startup proves the configured
+binary path was honored. Zed is launched with `ZED_STATELESS=1`, `--foreground`,
+`--new` and `--user-data-dir`.
 Stateless mode bypasses Zed's stable-build single-instance guard and keeps its
 databases in memory, so the smoke can coexist with your normal running Zed
 session. The run passes only after Zed starts a
 new instance of the exact `target/release/wit-language-server` binary and the
 isolated logs contain no WIT extension, grammar, query or language-server startup
-failure.
+failure. The same isolated profile/workspace is then launched a second time; a
+new exact server PID must start and stop cleanly to qualify editor restart and
+reconnection.
 
 A successful run writes
-`target/zed-smoke/profile/zed-smoke-report.json` plus foreground logs. The report
-records the exact fixture count and relative paths passed to Zed. Intentionally
-negative fixtures may still produce their expected parser diagnostics; the real
-editor gate is checking activation, loading, server lifecycle and integration
-failures, while semantic expectations remain asserted by the deterministic test
-suite. Override the executable/profile/timeout with `--zed`, `--profile` and
+`target/zed-smoke/profile/zed-smoke-report.json` plus foreground logs. The report records the exact fixture count and relative paths passed to Zed,
+both server PIDs, restart logs, and a result/evidence entry for every scenario in
+the checklist below. Intentionally negative fixtures may still produce their
+expected parser diagnostics; the real editor gate checks activation, loading,
+explicit binary selection, restart lifecycle and integration failures, while the
+exact editor mutations and semantic requests are asserted through the native LSP
+protocol suite. Hosted-release scenarios remain explicit `not-run` entries until
+matching release assets exist. Override the executable/profile/timeout with `--zed`, `--profile` and
 `--timeout-seconds` when needed.
 
 The real-editor smoke currently supports macOS and Linux. Grammar compilation
@@ -102,26 +111,26 @@ temporary edits. Restore the directory after each qualification pass.
 
 | Scenario                   | Action                                                                                                                | Required observable                                                                                                                                                     | Status  |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Development install        | Install dev extension, open `.wit`                                                                                    | WIT language selected; no extension/query load errors                                                                                                                   | Pending |
-| Highlighting and structure | Open records, resources, variants, async/future/stream/map fixtures                                                   | Meaningful captures, brackets, indentation, outline; no query errors                                                                                                    | Pending |
-| Snippets                   | Invoke a WIT snippet in an empty file                                                                                 | Valid scaffold and working tab stops                                                                                                                                    | Pending |
-| Parser diagnostic          | Enter invalid syntax then repair it                                                                                   | Diagnostic has correct range and clears after repair                                                                                                                    | Pending |
-| Resolver diagnostic        | Reference an unknown type                                                                                             | Parser-backed error points to the relevant identifier/file                                                                                                              | Pending |
-| Unsaved sibling overlay    | Edit a shared type without saving, then use it from a sibling file                                                    | Diagnostics reflect the open buffer and propagate to affected files                                                                                                     | Pending |
-| Dependency package         | Add direct `deps/` package and then break its declaration                                                             | Resolution succeeds when valid; correct dependency file gets error                                                                                                      | Pending |
-| Close/reopen               | Break an unsaved buffer, close and reopen                                                                             | Stale diagnostics clear; disk contents become authoritative                                                                                                             | Pending |
-| Unicode positions          | Put non-ASCII and astral characters before an error                                                                   | Underline and edits match the negotiated position encoding                                                                                                              | Pending |
-| Formatting                 | Format comments, docs and multiline constructs twice                                                                  | Comments preserved; second format produces no further change                                                                                                            | Pending |
-| Invalid formatting input   | Format incomplete/error-tree input                                                                                    | No destructive edit; useful refusal/error                                                                                                                               | Pending |
-| Semantic hover/navigation  | Open a named type and a type use, request hover, definition and references                                            | Hover shows resolved declaration; definition targets its source; references include uses and optionally declaration                                                     | Pending |
-| Context completion         | Request completion after a partial type name in valid and invalid documents, and at unsupported declaration positions | Type context offers WIT primitives and only visible types; unsupported contexts do not leak global declarations                                                         | Pending |
-| Type typo quick fix        | Reference a uniquely similar missing named type, then an ambiguous or non-type unresolved name                        | Only the unique named-type typo gets a source-ranged quick fix                                                                                                          | Pending |
-| Unsupported capabilities   | Inspect initialize and editor commands                                                                                | No unsupported rename or workspace symbols advertised                                                                                                                   | Pending |
-| Local override             | Configure a trusted explicit native binary                                                                            | Exact binary launches; no download needed; Zed server info reports the expected `+git.<commit>` build identity and View Logs contains the matching startup INFO message | Pending |
-| First hosted install       | Remove test install cache after assets are published, restart server                                                  | Matching platform/version downloads and checksum passes                                                                                                                 | Pending |
-| Cached install             | Restart with the verified installed executable                                                                        | Server starts using the validated cache behavior                                                                                                                        | Pending |
-| Missing/corrupt asset      | Exercise controlled missing/checksum/cache-corruption cases                                                           | Invalid cache is discarded and a clean download is attempted; unverified executable never starts                                                                        | Pending |
-| Editor restart             | Restart Zed with an open WIT package                                                                                  | Language server reconnects and recomputes diagnostics                                                                                                                   | Pending |
+| Development install | Install dev extension, open `.wit` | WIT language selected; no extension/query load errors | Automated |
+| Highlighting and structure | Open records, resources, variants, async/future/stream/map fixtures | Meaningful captures, brackets, indentation, outline; no query errors | Automated + GUI spot-check |
+| Snippets | Invoke a WIT snippet in an empty file | Valid scaffold and working tab stops | Automated + GUI spot-check |
+| Parser diagnostic | Enter invalid syntax then repair it | Diagnostic has correct range and clears after repair | Automated |
+| Resolver diagnostic | Reference an unknown type | Parser-backed error points to the relevant identifier/file | Automated |
+| Unsaved sibling overlay | Edit a shared type without saving, then use it from a sibling file | Diagnostics reflect the open buffer and propagate to affected files | Automated |
+| Dependency package | Add direct `deps/` package and then break its declaration | Resolution succeeds when valid; correct dependency file gets error | Automated |
+| Close/reopen | Break an unsaved buffer, close and reopen | Stale diagnostics clear; disk contents become authoritative | Automated |
+| Unicode positions | Put non-ASCII and astral characters before an error | Underline and edits match the negotiated position encoding | Automated |
+| Formatting | Format comments, docs and multiline constructs twice | Comments preserved; second format produces no further change | Automated |
+| Invalid formatting input | Format incomplete/error-tree input | No destructive edit; useful refusal/error | Automated |
+| Semantic hover/navigation | Open a named type and a type use, request hover, definition and references | Hover shows resolved declaration; definition targets its source; references include uses and optionally declaration | Automated |
+| Context completion | Request completion after a partial type name in valid and invalid documents, and at unsupported declaration positions | Type context offers WIT primitives and only visible types; unsupported contexts do not leak global declarations | Automated |
+| Type typo quick fix | Reference a uniquely similar missing named type, then an ambiguous or non-type unresolved name | Only the unique named-type typo gets a source-ranged quick fix | Automated |
+| Unsupported capabilities | Inspect initialize and editor commands | No unsupported rename or workspace symbols advertised | Automated |
+| Local override | Configure a trusted explicit native binary | Exact binary launches; no download needed; Zed server info reports the expected `+git.<commit>` build identity and View Logs contains the matching startup INFO message | Automated |
+| First hosted install | Remove test install cache after assets are published, restart server | Matching platform/version downloads and checksum passes | Release-gated |
+| Cached install | Restart with the verified installed executable | Server starts using the validated cache behavior | Release-gated |
+| Missing/corrupt asset | Exercise controlled missing/checksum/cache-corruption cases | Invalid cache is discarded and a clean download is attempted; unverified executable never starts | Release-gated |
+| Editor restart | Restart Zed with an open WIT package | Language server reconnects and recomputes diagnostics | Automated |
 
 Run the install/download rows separately on macOS ARM64, macOS Intel, Linux ARM64
 GNU, Linux x86_64 GNU and Windows x86_64 MSVC. Keep pending rows explicit when the
@@ -140,8 +149,10 @@ Zed's supported command-line surface:
 - controlled missing/corrupt hosted-release behavior; and
 - platform-specific GUI qualification where a real Zed session is required.
 
-Do not repeat semantic correctness manually when `cargo xtask test-zed` already
-passed the corresponding syntax and stdio assertions.
+Do not repeat semantic correctness or the documented temporary file mutations
+manually when `cargo xtask test-zed` already passed them. Manual work is limited
+to visual/editor presentation that Zed does not expose through a supported
+automation surface and release-download scenarios that require published assets.
 
 ## Evidence record
 
