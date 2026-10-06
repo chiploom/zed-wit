@@ -99,13 +99,13 @@ jobs:
           fallback: none
       - name: Check platform-specific xtask
         run: cargo check -p xtask --all-targets --locked --target "$TARGET"
-      - name: Check platform GUI input backend
-        run: cargo check -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui_feature }}" --target "$TARGET"
-      - name: Check Linux Wayland GUI input backends
+      - name: Clippy platform GUI input backend
+        run: cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui_feature }}" --target "$TARGET" -- -D warnings
+      - name: Clippy Linux Wayland GUI input backends
         if: runner.os == 'Linux'
         run: |
-          cargo check -p zed-gui-input --all-targets --locked --no-default-features --features linux-wayland --target "$TARGET"
-          cargo check -p zed-gui-input --all-targets --locked --no-default-features --features linux-libei --target "$TARGET"
+          cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-wayland --target "$TARGET" -- -D warnings
+          cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-libei --target "$TARGET" -- -D warnings
       - name: Run native tests
         run: cargo nextest run --workspace --exclude xtask --locked --target "$TARGET"
 
@@ -143,13 +143,13 @@ jobs:
         run: cargo check --workspace --exclude xtask --all-targets --locked --target "$TARGET"
       - name: Check platform-specific xtask
         run: cargo check -p xtask --all-targets --locked --target "$TARGET"
-      - name: Check platform GUI input backend
-        run: cargo check -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui_feature }}" --target "$TARGET"
-      - name: Check Linux Wayland GUI input backends
+      - name: Clippy platform GUI input backend
+        run: cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui_feature }}" --target "$TARGET" -- -D warnings
+      - name: Clippy Linux Wayland GUI input backends
         if: runner.os == 'Linux'
         run: |
-          cargo check -p zed-gui-input --all-targets --locked --no-default-features --features linux-wayland --target "$TARGET"
-          cargo check -p zed-gui-input --all-targets --locked --no-default-features --features linux-libei --target "$TARGET"
+          cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-wayland --target "$TARGET" -- -D warnings
+          cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-libei --target "$TARGET" -- -D warnings
 
   native-artifacts:
     name: Artifact / ${{ matrix.target }}
