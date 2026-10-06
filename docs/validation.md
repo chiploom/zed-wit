@@ -5,6 +5,40 @@ not a substitute for the manual Zed qualification checklist in
 [manual testing](manual-testing.md), and it does not claim registry publication
 or end-to-end hosted installation.
 
+## PR #6 final merge re-audit — 2026-10-06
+
+The final merge audit separates previously validated product/runtime code from
+later qualification-tooling changes:
+
+- Core extension, distribution, WIT analysis and language-server source are
+  unchanged from `51f13af44fbf3906a5c4162edb8faccc381a16ef`, where the
+  complete local gate, native Apple Silicon nextest run, packaging/license
+  checks and automated real-Zed smoke all passed.
+- The real GUI snippet/outline qualification subsequently passed on macOS using
+  the cross-platform `test-zed-gui` harness. Later changes are confined to CI,
+  GUI qualification tooling/dependencies, dependency-policy coverage and
+  qualification documentation.
+- The GUI input helper pins published `enigo` 0.6.1 and uses separate native,
+  X11, Wayland and libei features. CI clippy-checks the applicable backend on
+  every supported runner/architecture and both additional Linux Wayland
+  backends.
+- `check-dependencies` resolves `--all-features`, so optional GUI backend
+  dependencies are included in repository source/license policy instead of
+  escaping the audit through disabled default features.
+- Synthetic GUI input remains explicit opt-in. Failed shortcut injection
+  attempts release every modifier that was successfully pressed and report any
+  cleanup failure.
+
+Before merge, retain an exact-final-HEAD run of repository policy, formatting,
+workspace clippy/tests, native target tests/build identity, packaging/licenses,
+`cargo xtask test-zed`, and the macOS
+`cargo xtask test-zed-gui --allow-input-injection true` qualification. Hosted
+GitHub Actions should also run on the exact candidate when account billing
+allows it; if that is operationally unavailable, record the exception rather
+than presenting historical hosted runs as final-candidate evidence. Published
+release install/cache/corruption scenarios remain release-gated and are not a
+PR merge prerequisite.
+
 ## PR #6 semantic editor candidate
 
 - Validation date: 2026-10-06
