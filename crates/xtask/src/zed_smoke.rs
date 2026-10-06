@@ -303,8 +303,7 @@ fn launch(
         .ok_or_else(|| format!("{} has no parent", server.display()))?;
     let inherited_path = env::var_os("PATH").unwrap_or_default();
     let path = env::join_paths(
-        std::iter::once(server_dir.to_path_buf())
-            .chain(env::split_paths(&inherited_path)),
+        std::iter::once(server_dir.to_path_buf()).chain(env::split_paths(&inherited_path)),
     )
     .map_err(|error| format!("construct Zed PATH: {error}"))?;
 

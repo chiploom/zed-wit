@@ -102,10 +102,17 @@ A third smoke run on `29ee20e4efbc2ef05af87362fa878f790d3e214d`
 successfully launched the isolated stateless Zed instance and loaded the WIT
 extension, but Zed reported the expected unreleased-server 404. That proves the
 fresh stateless worktree did not apply the project-local LSP binary override
-before the adapter selected a server. The next harness revision prepends the
-exact `target/release` directory to the spawned Zed process's `PATH`, using
-the adapter's supported `worktree.which("wit-language-server")` fallback
-instead of depending on trust-sensitive project settings.
+before the adapter selected a server.
+
+The next run on `fa91c1da69e60c586646c39d06eb21fa6675e5a3`
+passed the real-Zed smoke end to end. The generated report recorded
+`result: passed`, Zed 1.22.0, server PID 91133, and exact server identity
+`wit-language-server 0.1.0+git.fa91c1da69e60c586646c39d06eb21fa6675e5a3`.
+This demonstrates that isolated stateless Zed loaded the staged WIT extension,
+resolved the exact release-built native server through the worktree PATH, and
+started that server successfully. The same shell invocation still exposed one
+rustfmt-only difference in `zed_smoke.rs`; the following commit applies that
+formatting change, so a final complete gate is still required.
 
 ## Exact local validation run at `1ab100abe7aa5a278828345bdc2283295b201fa4`
 
