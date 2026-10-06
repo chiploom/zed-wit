@@ -2827,7 +2827,6 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 name = "xtask"
 version = "0.0.0"
 dependencies = [
- "enigo",
  "serde_json",
  "sha2",
  "sysinfo",
@@ -2931,6 +2930,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1afec51604565183aeb5c54c20aeab286120d4e4460f7f76e3e8bb8c0d99473"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "zed-gui-input"
+version = "0.0.0"
+dependencies = [
+ "enigo",
 ]
 
 [[package]]
