@@ -362,7 +362,8 @@ fn launch(
     )
     .map_err(|error| format!("construct Zed PATH: {error}"))?;
 
-    Command::new(zed)
+    let mut command = Command::new(zed);
+    command
         .env("ZED_STATELESS", "1")
         .env("PATH", path)
         .arg("--foreground")
@@ -371,7 +372,15 @@ fn launch(
         .arg(profile)
         .arg(workspace_file)
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
+        .stderr(Stdio::from(stderr));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    command
         .spawn()
         .map_err(|error| format!("launch {zed}: {error}"))
 }
@@ -435,51 +444,51 @@ fn wait_for_server(
 }
 
 fn stop_zed(child: &mut Child) -> Result<(), String> {
-    if child
+    let pid = child.id();
+    let running = child
         .try_wait()
         .map_err(|error| format!("poll isolated Zed process before shutdown: {error}"))?
-        .is_none()
-    {
-        let pid = child.id();
-        let status = Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status()
-            .map_err(|error| format!("send SIGTERM to isolated Zed PID {pid}: {error}"))?;
-        if !status.success()
-            && child
-                .try_wait()
-                .map_err(|error| format!("recheck isolated Zed PID {pid}: {error}"))?
-                .is_none()
-        {
-            return Err(format!(
-                "failed to send SIGTERM to isolated Zed PID {pid}: {status}"
-            ));
-        }
+        .is_none();
 
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while Instant::now() < deadline {
-            if child
-                .try_wait()
-                .map_err(|error| format!("wait for isolated Zed PID {pid}: {error}"))?
-                .is_some()
-            {
-                return Ok(());
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-
-        log(format!(
-            "isolated Zed PID {pid} did not exit after SIGTERM; sending hard kill"
-        ));
-        child
-            .kill()
-            .map_err(|error| format!("hard-kill isolated Zed PID {pid}: {error}"))?;
+    if running {
+        signal_process_group(pid, "-TERM")?;
     }
 
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        if child
+            .try_wait()
+            .map_err(|error| format!("wait for isolated Zed PID {pid}: {error}"))?
+            .is_some()
+        {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    log(format!(
+        "isolated Zed process group {pid} did not exit after SIGTERM; sending SIGKILL"
+    ));
+    signal_process_group(pid, "-KILL")?;
     child
         .wait()
         .map_err(|error| format!("wait for isolated Zed process: {error}"))?;
     Ok(())
+}
+
+fn signal_process_group(pgid: u32, signal: &str) -> Result<(), String> {
+    let target = format!("-{pgid}");
+    let status = Command::new("kill")
+        .args([signal, &target])
+        .status()
+        .map_err(|error| format!("send {signal} to process group {pgid}: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "send {signal} to process group {pgid} exited with {status}"
+        ))
+    }
 }
 
 fn process_matches(pid: u32, executable: &Path) -> Result<bool, String> {
