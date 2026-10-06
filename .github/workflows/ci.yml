@@ -67,13 +67,13 @@ jobs:
         include:
           - runner: macos-15
             target: aarch64-apple-darwin
-            gui-feature: native
+            gui_feature: native
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            gui-feature: linux-x11
+            gui_feature: linux-x11
           - runner: windows-2025
             target: x86_64-pc-windows-msvc
-            gui-feature: native
+            gui_feature: native
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     defaults:
@@ -100,7 +100,7 @@ jobs:
       - name: Check platform-specific xtask
         run: cargo check -p xtask --all-targets --locked --target "$TARGET"
       - name: Check platform GUI input backend
-        run: cargo check -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui-feature }}" --target "$TARGET"
+        run: cargo check -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui_feature }}" --target "$TARGET"
       - name: Check Linux Wayland GUI input backends
         if: runner.os == 'Linux'
         run: |
@@ -117,10 +117,10 @@ jobs:
         include:
           - runner: macos-15-intel
             target: x86_64-apple-darwin
-            gui-feature: native
+            gui_feature: native
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            gui-feature: linux-x11
+            gui_feature: linux-x11
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     defaults:
@@ -144,7 +144,7 @@ jobs:
       - name: Check platform-specific xtask
         run: cargo check -p xtask --all-targets --locked --target "$TARGET"
       - name: Check platform GUI input backend
-        run: cargo check -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui-feature }}" --target "$TARGET"
+        run: cargo check -p zed-gui-input --all-targets --locked --no-default-features --features "${{ matrix.gui_feature }}" --target "$TARGET"
       - name: Check Linux Wayland GUI input backends
         if: runner.os == 'Linux'
         run: |
