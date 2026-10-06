@@ -25,6 +25,7 @@ pub fn metadata(target: Option<&str>) -> Result<Value, String> {
     let mut args = vec![
         "metadata".to_owned(),
         "--locked".to_owned(),
+        "--all-features".to_owned(),
         "--format-version".to_owned(),
         "1".to_owned(),
     ];
