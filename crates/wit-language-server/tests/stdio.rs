@@ -1217,7 +1217,7 @@ fn manual_semantic_fixture_runs_hover_navigation_completion_and_typo_mutations()
         json!({"textDocument":{"uri":uri},"range":diagnostics[0]["range"],"context":{"diagnostics":diagnostics}}),
     );
     assert_eq!(actions["result"].as_array().unwrap().len(), 1);
-    assert_eq!(actions["result"][0]["title"], "Replace with \`item\`");
+    assert_eq!(actions["result"][0]["title"], "Replace with `item`");
 
     let negative = "package manual:semantic; interface api { call: func(first: u32, par) }";
     client.change(&uri, negative, 3);
