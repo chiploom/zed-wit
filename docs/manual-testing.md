@@ -83,12 +83,18 @@ than relying on screenshots:
   smoke test.
 
 The command is supported on Zed's desktop operating systems: macOS, Linux and
-Windows. It uses Enigo 0.6.1 for keyboard injection. Linux builds enable X11,
-Wayland virtual-keyboard and libei backends; the command fails rather than
-reporting a skipped pass if the current compositor/session exposes none of those
-interfaces. macOS requires Accessibility permission for the terminal or runner
-that invokes the command. Windows requires Zed and the runner to use compatible
-integrity levels so UIPI does not block synthetic input.
+Windows. It uses Enigo 0.6.1 for keyboard injection through a separate helper
+binary so Linux never broadcasts one synthetic key through multiple desktop
+protocols. Auto mode selects an X11-only helper for X11 sessions. For Wayland it
+tries a libei-only helper first and, if that clean isolated attempt fails, retries
+from a fresh Zed profile with a Wayland-virtual-keyboard-only helper. Override
+auto-detection with `--linux-input-backend x11|wayland|libei` when qualifying a
+specific Linux backend. The command fails rather than reporting a skipped pass
+if the selected desktop interface is unavailable.
+
+macOS requires Accessibility permission for the terminal or runner that invokes
+the command. Windows requires Zed and the runner to use compatible integrity
+levels so UIPI does not block synthetic input.
 
 Because this command sends real keyboard events, it requires the explicit
 `--allow-input-injection true` acknowledgement. Save or close unrelated
