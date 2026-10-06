@@ -456,25 +456,17 @@ mod supported {
     }
 
     fn write_isolated_config(profile: &Path) -> Result<(), String> {
-        let config = profile.join("config");
-        fs::create_dir_all(&config)
-            .map_err(|error| format!("create {}: {error}", config.display()))?;
-
-        let settings = json!({
-            "accessible_mode": true,
-            "vim_mode": false,
-            "helix_mode": false,
-            "show_completions_on_input": true,
-            "snippet_sort_order": "top",
-        });
-        fs::write(
-            config.join("settings.json"),
-            serde_json::to_vec_pretty(&settings)
-                .map_err(|error| format!("encode isolated GUI settings: {error}"))?,
+        zed_smoke::write_isolated_settings(
+            profile,
+            json!({
+                "accessible_mode": true,
+                "vim_mode": false,
+                "helix_mode": false,
+                "show_completions_on_input": true,
+                "snippet_sort_order": "top",
+            }),
         )
-        .map_err(|error| format!("write isolated GUI settings: {error}"))?;
-
-        Ok(())
+        .map(|_| ())
     }
 
     fn write_report(
@@ -492,6 +484,7 @@ mod supported {
             "wayland_display": env::var("WAYLAND_DISPLAY").ok(),
             "x11_display": env::var("DISPLAY").ok(),
             "zed_version": zed_version,
+            "worktree_trust": "auto-trusted-via-isolated-user-settings",
             "input_backend": evidence.backend,
             "server_pid": evidence.server_pid,
             "stdout": evidence.stdout,
