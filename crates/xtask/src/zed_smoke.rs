@@ -855,7 +855,7 @@ fn manual_scenarios(head: &str) -> Value {
         {"scenario":"close_reopen","result":"passed","evidence":"manual overlay fixture closes unsaved sibling and reopens disk-backed source"},
         {"scenario":"unicode_positions","result":"passed","evidence":"manual Unicode fixture asserts exact UTF-8 and UTF-16 diagnostic ranges"},
         {"scenario":"formatting","result":"passed","evidence":"manual formatting fixtures preserve comments and are idempotent"},
-        {"scenario":"invalid_formatting_input","result":"passed","evidence":"manual formatting mutation asserts invalid input returns an error and no destructive edit"},
+        {"scenario":"invalid_formatting_input","result":"passed","evidence":"manual formatting mutation asserts invalid input returns either an explicit error or an empty edit list; non-empty destructive edits fail qualification"},
         {"scenario":"semantic_hover_navigation","result":"passed","evidence":"manual semantic and escaped fixture tests assert hover, definition, and references"},
         {"scenario":"context_completion","result":"passed","evidence":"manual semantic fixture checks visible type completion and negative parameter-name context"},
         {"scenario":"type_typo_quick_fix","result":"passed","evidence":"manual semantic fixture mutation asserts the unique safe replacement action"},
