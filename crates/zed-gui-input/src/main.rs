@@ -206,20 +206,28 @@ fn shortcut(
         pressed.push(*modifier);
     }
 
-    let key_result = input
+    let key_error = input
         .key(key, Direction::Click)
-        .map_err(|error| format!("press shortcut key {key:?}: {error}"));
+        .err()
+        .map(|error| format!("press shortcut key {key:?}: {error}"));
 
-    let mut release_error = None;
+    let mut release_errors = Vec::new();
     for modifier in pressed.iter().rev() {
         if let Err(error) = input.key(*modifier, Direction::Release) {
-            release_error = Some(format!("release modifier {modifier:?}: {error}"));
+            release_errors.push(format!("release modifier {modifier:?}: {error}"));
         }
     }
 
-    key_result?;
-    if let Some(error) = release_error {
-        return Err(error);
+    match (key_error, release_errors.is_empty()) {
+        (None, true) => {}
+        (Some(error), true) => return Err(error),
+        (None, false) => return Err(release_errors.join("; ")),
+        (Some(error), false) => {
+            return Err(format!(
+                "{error}; cleanup failed: {}",
+                release_errors.join("; ")
+            ));
+        }
     }
     std::thread::sleep(settle);
     Ok(())
