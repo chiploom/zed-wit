@@ -299,8 +299,9 @@ mod supported {
     ) -> Result<(), String> {
         let settle_ms = u64::try_from(settle.as_millis())
             .map_err(|_| "settle duration does not fit in u64".to_owned())?;
+        let settle_ms = settle_ms.to_string();
         let mut child = Command::new(&driver.executable)
-            .args(["all", &settle_ms.to_string()])
+            .args(["all", settle_ms.as_str()])
             .spawn()
             .map_err(|error| {
                 format!(
