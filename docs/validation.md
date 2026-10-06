@@ -8,27 +8,22 @@ or end-to-end hosted installation.
 ## PR #6 semantic editor candidate
 
 - Validation date: 2026-10-06
-- Validated implementation HEAD: `f4d87ec72467283c846d76e3b5cf5625915a4128`
-  (escaped-identifier and completion-context fixes plus validation-artifact
-  ignore rule).
+- Validated implementation HEAD: `31d540950b1265dbe7ed4a8f9a694776b89f9bf6`
+  (alias-aware signature rendering and parameter-span source spelling).
 - Host: macOS ARM64 (`aarch64-apple-darwin`)
 - Rust: `rustc 1.99.0 (b940084d7 2026-09-28)`; Cargo 1.99.0
-- Exact local gate: passed on the implementation candidate. It includes
+- Exact local gate: passed on this implementation HEAD. It includes
   `cargo xtask check-no-python`, `cargo xtask check-dependencies`, formatting,
   workspace clippy, workspace tests, workspace check, Wasm build, native
   release build, and `git diff --check origin/main...HEAD`.
-- Workspace tests: 65 passed (21 `wit-analysis`, 4 language-server unit, 16
+- Workspace tests: 67 passed (22 `wit-analysis`, 4 language-server unit, 17
   stdio protocol, 11 syntax/editing, 7 `xtask`, 6 adapter/distribution); no
   doctests were present.
-- Build identity: passed on the implementation candidate; server reported
-  `wit-language-server 0.1.0+git.f4d87ec72467283c846d76e3b5cf5625915a4128`.
-- Host packaging: passed for `aarch64-apple-darwin`; packaged server reported
-  `wit-language-server 0.1.0+git.f4d87ec72467283c846d76e3b5cf5625915a4128`.
-  Package SHA-256:
-  `7846371107bbbb175ac2ce2b2793c9a345738790429bc245cd31ae8a7e44d3ee`.
-  The 116-package license report was produced. Packaging metadata recorded the
-  matching source revision and `source_dirty: true` because this validation
-  document was being edited; it is not clean-release provenance.
+- Build identity: passed; server reported
+  `wit-language-server 0.1.0+git.31d540950b1265dbe7ed4a8f9a694776b89f9bf6`.
+- Host packaging: not rerun for this candidate. Earlier packaging for
+  `f4d87ec72467283c846d76e3b5cf5625915a4128` produced a 116-package license
+  report, but is not treated as packaging evidence for this candidate.
 - Zed: `zed --version` reports `Zed 1.22.0` on `/Applications/Zed.app`, but
   interactive GUI testing was not available in this session. The requested
   semantic/editor checklist remains pending; see [manual testing](manual-testing.md).
@@ -37,11 +32,9 @@ or end-to-end hosted installation.
   it is not a result for this candidate. Status: **BLOCKED — no hosted runner
   execution on final SHA**.
 
-The complete gate passed on implementation HEAD `f4d87ec72467283c846d76e3b5cf5625915a4128`
-and was rerun on validation-evidence HEAD
-`fc9d24111d9a73c4f70b6c8191ae965e4d532107`. The evidence commit changes only
-this document; the full exact-head gate passed after it was committed. The exact
-commands are:
+The complete gate passed on implementation HEAD
+`31d540950b1265dbe7ed4a8f9a694776b89f9bf6`. After this evidence update is
+committed, rerun the exact gate on that documentation-inclusive HEAD. Commands:
 
 ```sh
 cargo xtask check-no-python
