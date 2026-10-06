@@ -446,10 +446,9 @@ impl Server {
                         let mut locations = Vec::new();
                         if include_declaration
                             && let Some(item) = analysis.items.iter().find(|item| item.key == key)
+                            && let Some(text) = self.source_text(&item.path)
                         {
-                            if let Some(text) = self.source_text(&item.path) {
-                                locations.push(json!({"uri":uri(&item.path)?,"range":lsp_range(&text, &item.range, self.encoding)}));
-                            }
+                            locations.push(json!({"uri":uri(&item.path)?,"range":lsp_range(&text, &item.range, self.encoding)}));
                         }
                         for reference in analysis
                             .references
@@ -467,10 +466,7 @@ impl Server {
                             return Ok(json!({"isIncomplete":false,"items":[]}));
                         };
                         let offset = byte_offset(&document.text, point, self.encoding);
-                        let before = &document.text[..offset.min(document.text.len())];
-                        let type_context = [":", "->", "=", "<", ","]
-                            .iter()
-                            .any(|trigger| before.trim_end().ends_with(trigger));
+                        let type_context = wit_analysis::is_type_position(&document.text, offset);
                         let mut items = Vec::new();
                         let primitives = [
                             "bool", "u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64", "f32",
@@ -483,10 +479,18 @@ impl Server {
                                     |ty| json!({"label":ty.name,"kind":25,"detail":ty.detail}),
                                 ),
                             );
-                        } else {
-                            items.extend(analysis.items.iter().filter(|item| {
-                                item.kind == "interface" || item.kind == "world" || item.kind == "function"
-                            }).map(|item| json!({"label":item.insertion_name,"kind":if item.kind == "function" {3} else if item.kind == "interface" {8} else {9},"detail":item.detail,"documentation":item.documentation})));
+                            if analysis.scopes.is_empty() {
+                                items.extend(
+                                    wit_analysis::syntax_visible_type_names_at(
+                                        &document.text,
+                                        offset,
+                                    )
+                                    .iter()
+                                    .map(
+                                        |name| json!({"label":name,"kind":25,"detail":"WIT type"}),
+                                    ),
+                                );
+                            }
                         }
                         Ok(json!({"isIncomplete":false,"items":items}))
                     }
@@ -533,7 +537,7 @@ impl Server {
                                 .map(|ty| ty.name.clone())
                                 .collect();
                             if analysis.scopes.is_empty() {
-                                names.extend(wit_analysis::declared_type_names_at(
+                                names.extend(wit_analysis::syntax_visible_type_names_at(
                                     &document.text,
                                     start,
                                 ));

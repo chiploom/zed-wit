@@ -320,6 +320,87 @@ fn type_completion_is_scope_safe_and_uses_valid_wit_builtins() {
 }
 
 #[test]
+fn incomplete_type_completion_uses_only_syntax_visible_bindings() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source =
+        "package demo:app; interface api { record local { value: u32 } call: func(value: lo) }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert!(!client.diagnostics(&uri, 1).as_array().unwrap().is_empty());
+
+    let offset = source.find("value: lo").unwrap() + "value: lo".len();
+    let response = request(
+        &mut client,
+        48,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+    );
+    let labels: Vec<_> = response["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect();
+    assert!(labels.contains(&"local"), "{labels:?}");
+    assert!(
+        labels.contains(&"f32") && labels.contains(&"f64"),
+        "{labels:?}"
+    );
+    assert!(
+        !labels.contains(&"float32") && !labels.contains(&"float64"),
+        "{labels:?}"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn incomplete_completion_preserves_scope_and_hides_global_declarations() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("deps")).unwrap();
+    let path = dir.path().join("main.wit");
+    std::fs::write(
+        dir.path().join("deps/types.wit"),
+        "package demo:dep; interface api { record secret { value: u32 } leak: func(); }",
+    )
+    .unwrap();
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package demo:app; interface shared { record item { value: u32 } } interface sibling { record hidden { value: u32 } } interface api { record local { value: u32 } use shared.{item as visible}; call: func(value: vis); } world app { import demo:dep/api; }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    let offset = source.find("value: vis").unwrap() + "value: vis".len();
+    let response = request(
+        &mut client,
+        49,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+    );
+    let labels: Vec<_> = response["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect();
+    for expected in ["local", "visible", "f32", "f64"] {
+        assert!(labels.contains(&expected), "missing {expected}: {labels:?}");
+    }
+    for hidden in ["item", "hidden", "secret", "leak", "float32", "float64"] {
+        assert!(!labels.contains(&hidden), "unexpected {hidden}: {labels:?}");
+    }
+
+    let non_type = source.find("interface api {").unwrap() + "interface api {".len();
+    let response = request(
+        &mut client,
+        50,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":non_type}}),
+    );
+    assert_eq!(response["result"]["items"], json!([]));
+    client.shutdown();
+}
+
+#[test]
 fn typo_fixes_use_only_types_visible_in_the_diagnostic_scope() {
     for (label, source, dependency, expected) in [
         (
@@ -335,10 +416,22 @@ fn typo_fixes_use_only_types_visible_in_the_diagnostic_scope() {
             None,
         ),
         (
+            "imported-alias",
+            "package demo:app; interface shared { enum status { ready } } interface api { use shared.{status as state}; call: func(value: staet); }",
+            None,
+            Some("Replace with `state`"),
+        ),
+        (
             "visible-vs-invisible",
             "package demo:app; interface a { record itme { value: u32 } } interface b { record item { value: u32 } call: func(value: itme); }",
             None,
             Some("Replace with `item`"),
+        ),
+        (
+            "equidistant-visible-types",
+            "package demo:app; interface api { record cat { value: u32 } record cut { value: u32 } call: func(value: cot); }",
+            None,
+            None,
         ),
     ] {
         let tempdir = tempfile::tempdir().unwrap();
@@ -373,7 +466,7 @@ fn inline_interfaces_aliases_and_world_functions_have_protocol_navigation() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("main.wit");
     let uri = url::Url::from_file_path(&path).unwrap().to_string();
-    let source = "package demo:app; interface shared { record entry { value: u32 } enum status { ready } resource connection; } interface api { use shared.{entry, status as state, connection}; nested: func(a: list<entry>, b: option<state>, c: borrow<connection>); } world app { import clock: interface { use shared.{entry}; read: func() -> entry; } import log: func(message: string); export run: func(); }";
+    let source = "package demo:app; interface shared { record entry { value: u32 } enum status { ready } resource connection; resource token; } interface api { use shared.{entry, status as state, connection, token}; nested: func(a: list<entry>, b: option<state>, c: borrow<connection>, d: own<token>); } world app { import clock: interface { use shared.{entry}; read: func() -> entry; } import log: func(message: string); export run: func(); }";
     let mut client = Client::start("utf-16");
     client.open(&uri, source);
     assert_eq!(client.diagnostics(&uri, 1), json!([]));
@@ -406,6 +499,57 @@ fn inline_interfaces_aliases_and_world_functions_have_protocol_navigation() {
     assert!(starts.contains(&(inline_use as u64)), "{references}");
     assert!(starts.contains(&(return_use as u64)), "{references}");
 
+    let borrowed = source.find("borrow<connection>").unwrap() + "borrow<".len();
+    let definition = request(
+        &mut client,
+        51,
+        "textDocument/definition",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":borrowed}}),
+    );
+    assert_eq!(
+        definition["result"]["range"]["start"]["character"],
+        source.find("connection, token};").unwrap()
+    );
+    let references = request(
+        &mut client,
+        52,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":borrowed},"context":{"includeDeclaration":true}}),
+    );
+    assert!(
+        references["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|location| { location["range"]["start"]["character"] == borrowed }),
+        "{references}"
+    );
+    let owned = source.find("own<token>").unwrap() + "own<".len();
+    let definition = request(
+        &mut client,
+        60,
+        "textDocument/definition",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":owned}}),
+    );
+    assert_eq!(
+        definition["result"]["range"]["start"]["character"],
+        source.find("token};").unwrap()
+    );
+    let references = request(
+        &mut client,
+        61,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":owned},"context":{"includeDeclaration":true}}),
+    );
+    assert!(
+        references["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|location| { location["range"]["start"]["character"] == owned }),
+        "{references}"
+    );
+
     for (id, token, expected) in [
         (44, "log", "import log: func(message: string);"),
         (45, "run", "export run: func();"),
@@ -424,6 +568,196 @@ fn inline_interfaces_aliases_and_world_functions_have_protocol_navigation() {
                 .contains(expected),
             "{hover}"
         );
+    }
+    client.shutdown();
+}
+
+#[test]
+fn aliases_keep_source_and_local_navigation_identities_distinct() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package demo:app; interface shared { enum status { ready } } interface api { use shared.{status as state}; call: func(value: state); use shared.{status}; other: func(value: status); }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+    let original_decl = source.find("enum status").unwrap() + "enum ".len();
+    let alias_source = source.find("status as state").unwrap();
+    let alias_binding = source.find("as state").unwrap() + "as ".len();
+    let alias_use = source.find("value: state").unwrap() + "value: ".len();
+    let unaliased_binding = source.rfind("use shared.{status}").unwrap() + "use shared.{".len();
+    let unaliased_use = source.rfind("value: status").unwrap() + "value: ".len();
+    for (id, offset, target) in [
+        (53, alias_source, original_decl),
+        (54, alias_binding, alias_binding),
+        (55, alias_use, alias_binding),
+        (56, unaliased_use, unaliased_binding),
+    ] {
+        let definition = request(
+            &mut client,
+            id,
+            "textDocument/definition",
+            json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+        );
+        assert_eq!(
+            definition["result"]["range"]["start"]["character"], target,
+            "{definition}"
+        );
+    }
+    for (id, offset, expected) in [
+        (73, alias_source, "status"),
+        (74, alias_binding, "state"),
+        (75, alias_use, "state"),
+        (76, unaliased_binding, "status"),
+    ] {
+        let hover = request(
+            &mut client,
+            id,
+            "textDocument/hover",
+            json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+        );
+        assert!(
+            hover["result"]["contents"]["value"]
+                .as_str()
+                .unwrap_or_default()
+                .contains(expected),
+            "{hover}"
+        );
+    }
+    let original_refs = request(
+        &mut client,
+        57,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":original_decl},"context":{"includeDeclaration":true}}),
+    );
+    let original_starts: Vec<_> = original_refs["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|location| location["range"]["start"]["character"].as_u64())
+        .collect();
+    assert!(
+        original_starts.contains(&(original_decl as u64)),
+        "{original_refs}"
+    );
+    assert!(
+        original_starts.contains(&(alias_source as u64)),
+        "{original_refs}"
+    );
+    assert!(
+        !original_starts.contains(&(unaliased_binding as u64)),
+        "{original_refs}"
+    );
+    assert!(
+        !original_starts.contains(&(alias_use as u64)),
+        "{original_refs}"
+    );
+
+    let alias_refs = request(
+        &mut client,
+        58,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":alias_binding},"context":{"includeDeclaration":true}}),
+    );
+    let alias_starts: Vec<_> = alias_refs["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|location| location["range"]["start"]["character"].as_u64())
+        .collect();
+    assert!(
+        alias_starts.contains(&(alias_binding as u64)),
+        "{alias_refs}"
+    );
+    assert!(alias_starts.contains(&(alias_use as u64)), "{alias_refs}");
+    assert!(
+        !alias_starts.contains(&(original_decl as u64)),
+        "{alias_refs}"
+    );
+    let unaliased_refs = request(
+        &mut client,
+        59,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":unaliased_binding},"context":{"includeDeclaration":true}}),
+    );
+    let unaliased_starts: Vec<_> = unaliased_refs["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|location| location["range"]["start"]["character"].as_u64())
+        .collect();
+    assert!(
+        unaliased_starts.contains(&(unaliased_binding as u64)),
+        "{unaliased_refs}"
+    );
+    assert!(
+        unaliased_starts.contains(&(unaliased_use as u64)),
+        "{unaliased_refs}"
+    );
+    assert!(
+        !unaliased_starts.contains(&(original_decl as u64)),
+        "{unaliased_refs}"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn function_kind_and_composite_hover_use_source_valid_wit() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package demo:app; interface api { record item { value: u32 } resource connection; freestanding: func(a: list<u8>, b: option<item>, c: result<item, string>, d: tuple<u8, string>, e: borrow<connection>, f: own<connection>, g: f32, h: f64); async-call: async func(); resource object { constructor(); method: func(); async-method: async func(); static-method: static func(); async-static: static async func(); value: get() -> u32; value: set(v: u32); static-value: static get() -> u32; static-value: static set(v: u32); } }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+    for (id, token, required) in [
+        (
+            62,
+            "freestanding",
+            "freestanding: func(a: list<u8>, b: option<item>, c: result<item, string>, d: tuple<u8, string>, e: borrow<connection>, f: own<connection>, g: f32, h: f64);",
+        ),
+        (63, "async-call", "async-call: async func();"),
+        (64, "method: func", "method: func();"),
+        (65, "async-method", "async-method: async func();"),
+        (66, "static-method", "static-method: static func();"),
+        (67, "async-static", "async-static: static async func();"),
+        (68, "constructor", "constructor();"),
+        (69, "value: get", "value: get() -> u32;"),
+        (70, "value: set", "value: set(v: u32);"),
+        (
+            71,
+            "static-value: static get",
+            "static-value: static get() -> u32;",
+        ),
+        (
+            72,
+            "static-value: static set",
+            "static-value: static set(v: u32);",
+        ),
+    ] {
+        let offset = source.find(token).unwrap();
+        let hover = request(
+            &mut client,
+            id,
+            "textDocument/hover",
+            json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+        );
+        let text = hover["result"]["contents"]["value"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(text.contains(required), "{token}: {hover}");
+        for resolver_spelling in [
+            "[get]",
+            "[set]",
+            "[method]",
+            "[static]",
+            "[constructor]resource",
+            "float32",
+            "float64",
+        ] {
+            assert!(!text.contains(resolver_spelling), "{token}: {text}");
+        }
     }
     client.shutdown();
 }

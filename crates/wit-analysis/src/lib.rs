@@ -223,9 +223,10 @@ pub fn analyze_package(directory: &Path, overlays: &Overlays) -> Result<PackageA
         let mut resolve = Resolve::default();
         match resolve.push_groups(main, dependencies) {
             Ok(_) => {
-                analysis.items = semantic_items(&resolve, overlays);
-                analysis.scopes = semantic_scopes(&resolve, overlays);
-                analysis.references = semantic_references(&resolve, overlays, &analysis.scopes);
+                let syntax = parsed_sources(&resolve, overlays);
+                analysis.items = semantic_items(&resolve, &syntax);
+                analysis.scopes = semantic_scopes(&resolve, &syntax);
+                analysis.references = semantic_references(&resolve, &syntax, &analysis.scopes);
             }
             Err(error) => {
                 if let Some(location) = resolve.source_map.resolve_span(error.kind().span()) {
@@ -267,21 +268,44 @@ fn type_description(resolve: &Resolve, id: wit_parser::TypeId) -> String {
     }
 }
 
+struct ParsedSource {
+    path: PathBuf,
+    source: String,
+    tree: tree_sitter::Tree,
+}
+
+fn parsed_sources(resolve: &Resolve, overlays: &Overlays) -> Vec<ParsedSource> {
+    resolve
+        .source_map
+        .source_files()
+        .filter_map(|path| {
+            let source = source_text(path, overlays)?;
+            let mut parser = tree_sitter::Parser::new();
+            parser.set_language(&wit_syntax::language()).ok()?;
+            let tree = parser.parse(&source, None)?;
+            Some(ParsedSource {
+                path: PathBuf::from(path),
+                source,
+                tree,
+            })
+        })
+        .collect()
+}
+
 fn use_alias_source(
     resolve: &Resolve,
     span: wit_parser::Span,
     path: &Path,
-    overlays: &Overlays,
+    sources: &[ParsedSource],
 ) -> Option<Range<usize>> {
     let location = resolve.source_map.resolve_span(span)?;
     if !same_source_path(location.path, path) {
         return None;
     }
-    let source = source_text(path, overlays)?;
-    let mut parser = tree_sitter::Parser::new();
-    parser.set_language(&wit_syntax::language()).ok()?;
-    let tree = parser.parse(&source, None)?;
-    let mut nodes = vec![tree.root_node()];
+    let source = sources
+        .iter()
+        .find(|source| same_source_path(&source.path.to_string_lossy(), path))?;
+    let mut nodes = vec![source.tree.root_node()];
     while let Some(node) = nodes.pop() {
         if node.kind() == "use_names_item" {
             let mut descendants = vec![node];
@@ -311,7 +335,7 @@ fn use_alias_source(
     None
 }
 
-fn semantic_items(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticItem> {
+fn semantic_items(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticItem> {
     let mut items = Vec::new();
     let mut add = |key: String,
                    name: String,
@@ -405,7 +429,7 @@ fn semantic_items(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticItem> {
                 .source_map
                 .resolve_span(ty.span)
                 .and_then(|location| {
-                    use_alias_source(resolve, ty.span, Path::new(location.path), overlays)
+                    use_alias_source(resolve, ty.span, Path::new(location.path), sources)
                         .map(|range| (PathBuf::from(location.path), range))
                 });
             let signature = if alias_location.is_some() {
@@ -677,20 +701,11 @@ fn source_text(path: &Path, overlays: &Overlays) -> Option<String> {
         .or_else(|| std::fs::read_to_string(path).ok())
 }
 
-fn semantic_scopes(resolve: &Resolve, overlays: &Overlays) -> Vec<SemanticScope> {
+fn semantic_scopes(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticScope> {
     let mut scopes = Vec::new();
-    for path in resolve.source_map.source_files() {
-        let Some(source) = source_text(path, overlays) else {
-            continue;
-        };
-        let mut parser = tree_sitter::Parser::new();
-        if parser.set_language(&wit_syntax::language()).is_err() {
-            continue;
-        }
-        let Some(tree) = parser.parse(&source, None) else {
-            continue;
-        };
-        let mut nodes = vec![tree.root_node()];
+    for source in sources {
+        let path = source.path.as_path();
+        let mut nodes = vec![source.tree.root_node()];
         while let Some(node) = nodes.pop() {
             match node.kind() {
                 "interface_item" => {
@@ -791,7 +806,7 @@ fn scope_at<'a>(
 
 fn semantic_references(
     resolve: &Resolve,
-    overlays: &Overlays,
+    sources: &[ParsedSource],
     scopes: &[SemanticScope],
 ) -> Vec<SemanticReference> {
     let mut references = Vec::new();
@@ -817,18 +832,10 @@ fn semantic_references(
             }
         }
     }
-    for path in resolve.source_map.source_files() {
-        let Some(source) = source_text(path, overlays) else {
-            continue;
-        };
-        let mut parser = tree_sitter::Parser::new();
-        if parser.set_language(&wit_syntax::language()).is_err() {
-            continue;
-        }
-        let Some(tree) = parser.parse(&source, None) else {
-            continue;
-        };
-        let mut nodes = vec![tree.root_node()];
+    for parsed in sources {
+        let path = parsed.path.as_path();
+        let source = &parsed.source;
+        let mut nodes = vec![parsed.tree.root_node()];
         while let Some(node) = nodes.pop() {
             for index in (0..node.child_count()).rev() {
                 if let Ok(index) = u32::try_from(index)
@@ -883,16 +890,14 @@ fn semantic_references(
                         let Some(name) = source.get(range.clone()) else {
                             continue;
                         };
-                        let key = scope
-                            .types
-                            .iter()
-                            .find(|ty| ty.name == name)
-                            .map(|ty| ty.key.clone())
-                            .or_else(|| {
+                        let explicit_import_name = child_kind(node, "alias_item")
+                            .and_then(|alias| alias.child_by_field_name("alias"))
+                            .is_some_and(|alias| alias.byte_range() != range);
+                        let original_key = explicit_import_name
+                            .then(|| {
                                 resolve.types.iter().find_map(|(_, ty)| {
                                     let location = resolve.source_map.resolve_span(ty.span)?;
-                                    if ty.name.as_deref() == Some(name)
-                                        || !same_source_path(location.path, path)
+                                    if !same_source_path(location.path, path)
                                         || location.range != range
                                     {
                                         return None;
@@ -904,7 +909,15 @@ fn semantic_references(
                                         _ => None,
                                     }
                                 })
-                            });
+                            })
+                            .flatten();
+                        let key = original_key.or_else(|| {
+                            scope
+                                .types
+                                .iter()
+                                .find(|ty| ty.name == name)
+                                .map(|ty| ty.key.clone())
+                        });
                         if let Some(key) = key {
                             references.push(SemanticReference {
                                 key,
@@ -959,8 +972,9 @@ pub fn declared_type_names(source: &str) -> Vec<String> {
     names.into_iter().collect()
 }
 
-/// Return locally declared type names visible at the source offset.
-pub fn declared_type_names_at(source: &str, offset: usize) -> Vec<String> {
+/// Return type bindings introduced in the innermost syntax scope at an offset.
+/// This remains useful while upstream semantic resolution is blocked by an edit.
+pub fn syntax_visible_type_names_at(source: &str, offset: usize) -> Vec<String> {
     let mut parser = tree_sitter::Parser::new();
     if parser.set_language(&wit_syntax::language()).is_err() {
         return Vec::new();
@@ -971,25 +985,17 @@ pub fn declared_type_names_at(source: &str, offset: usize) -> Vec<String> {
     let mut bodies = Vec::new();
     let mut nodes = vec![tree.root_node()];
     while let Some(node) = nodes.pop() {
-        match node.kind() {
-            "interface_item" | "world_item" => {
-                if let Some(body) = child_kind(node, "body")
-                    && body.start_byte() <= offset
-                    && offset < body.end_byte()
-                {
-                    bodies.push(body);
-                }
-            }
-            "import_item" | "export_item" => {
-                if let Some(extern_type) = child_kind(node, "extern_type")
-                    && let Some(body) = child_kind(extern_type, "body")
-                    && body.start_byte() <= offset
-                    && offset < body.end_byte()
-                {
-                    bodies.push(body);
-                }
-            }
-            _ => {}
+        let body = match node.kind() {
+            "interface_item" | "world_item" => child_kind(node, "body"),
+            "import_item" | "export_item" => child_kind(node, "extern_type")
+                .and_then(|extern_type| child_kind(extern_type, "body")),
+            _ => None,
+        };
+        if let Some(body) = body
+            && body.start_byte() <= offset
+            && offset <= body.end_byte()
+        {
+            bodies.push(body);
         }
         for index in (0..node.child_count()).rev() {
             if let Ok(index) = u32::try_from(index)
@@ -1015,15 +1021,85 @@ pub fn declared_type_names_at(source: &str, offset: usize) -> Vec<String> {
             "record_item" | "flags_items" | "enum_items" | "variant_items" | "resource_item" => {
                 "name"
             }
-            _ => continue,
+            _ => "",
         };
-        if let Some(name) = child.child_by_field_name(field)
+        if !field.is_empty()
+            && let Some(name) = child.child_by_field_name(field)
             && let Some(value) = source.get(name.byte_range())
         {
             names.insert(value.to_owned());
         }
+        if child.kind() == "use_item" {
+            let mut use_nodes = vec![child];
+            while let Some(use_node) = use_nodes.pop() {
+                if use_node.kind() == "use_names_item" {
+                    let alias = child_kind(use_node, "alias_item")
+                        .and_then(|item| item.child_by_field_name("alias"));
+                    let ids = (0..use_node.child_count())
+                        .filter_map(|i| u32::try_from(i).ok().and_then(|i| use_node.child(i)))
+                        .filter(|node| node.kind() == "id")
+                        .collect::<Vec<_>>();
+                    let binding = alias.or_else(|| ids.last().copied());
+                    if let Some(binding) = binding
+                        && let Some(value) = source.get(binding.byte_range())
+                    {
+                        names.insert(value.to_owned());
+                    }
+                }
+                for i in (0..use_node.child_count()).rev() {
+                    if let Some(child) = u32::try_from(i).ok().and_then(|i| use_node.child(i)) {
+                        use_nodes.push(child);
+                    }
+                }
+            }
+        }
     }
     names.into_iter().collect()
+}
+
+/// Return whether the cursor is in a Tree-sitter type or handle node.
+pub fn is_type_position(source: &str, offset: usize) -> bool {
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&wit_syntax::language()).is_err() {
+        return false;
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return false;
+    };
+    let root = tree.root_node();
+    let probe = offset.min(source.len());
+    let node = root.descendant_for_byte_range(probe.saturating_sub(1), probe);
+    let mut current = node;
+    let mut inside_non_code = false;
+    while let Some(node) = current {
+        if matches!(node.kind(), "ty" | "handle")
+            && node.start_byte() <= probe
+            && probe <= node.end_byte()
+        {
+            return true;
+        }
+        inside_non_code |= node.kind().contains("comment") || node.kind().contains("string");
+        current = node.parent();
+    }
+    if inside_non_code {
+        return false;
+    }
+    let before = source[..probe].trim_end();
+    let token_start = before
+        .char_indices()
+        .rev()
+        .take_while(|(_, ch)| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '%'))
+        .last()
+        .map_or(before.len(), |(index, _)| index);
+    let context = before[..token_start].trim_end();
+    [":", "->", "=", "<", ","]
+        .iter()
+        .any(|trigger| context.ends_with(trigger))
+}
+
+/// Backwards-compatible name for syntax-visible type bindings.
+pub fn declared_type_names_at(source: &str, offset: usize) -> Vec<String> {
+    syntax_visible_type_names_at(source, offset)
 }
 
 /// Return whether the given byte range is a named type in the syntax tree.
@@ -1367,6 +1443,33 @@ mod tests {
         assert!(names.contains("local"));
         assert!(names.contains("visible"));
         assert!(!names.contains("hidden"));
+    }
+
+    #[test]
+    fn type_context_recognizes_partial_names_and_composite_arguments() {
+        for source in [
+            "interface api { call: func(value: |) }",
+            "interface api { call: func(value: lo|) }",
+            "interface api { call: func() -> | }",
+            "interface api { call: func() -> lo| }",
+            "interface api { type x = | }",
+            "interface api { type x = list<|> }",
+            "interface api { type x = list<lo|> }",
+            "interface api { type x = option<lo|> }",
+            "interface api { type x = result<lo|, string> }",
+            "interface api { type x = tuple<lo|, string> }",
+            "interface api { variant outcome { item(lo|) } }",
+            "interface api { resource r; type x = borrow<lo|> }",
+            "interface api { resource r; type x = own<lo|> }",
+            "interface api { type x = map<lo|, u8> }",
+            "interface api { type x = future<lo|> }",
+            "interface api { type x = stream<lo|> }",
+            "interface api { type x = list<lo|, 4> }",
+        ] {
+            let offset = source.find('|').unwrap();
+            let source = source.replace('|', "");
+            assert!(is_type_position(&source, offset), "{source} at {offset}");
+        }
     }
 
     #[test]
