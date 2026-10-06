@@ -25,9 +25,11 @@ or end-to-end hosted installation.
   differed only in this validation document; no executable source or effective
   workflow changes remained.
 - Subsequent maintenance advances `taiki-e/install-action` from v2.87.25 to
-  v2.87.26 in CI/release workflows and corrects this provenance record. Those
-  changes do not modify Rust/WIT executable source, but exact-candidate local
-  validation and hosted CI are still required before merge.
+  v2.87.26 in CI/release workflows, corrects this provenance record, and adds
+  reusable manual qualification fixtures under `tests/manual-zed/`. Those
+  changes do not modify extension or native-server executable source; the WIT
+  additions are test inputs only. Exact-candidate local validation and hosted CI
+  are still required before merge.
 - Workspace tests: 67 passed (22 `wit-analysis`, 4 language-server unit, 17
   stdio protocol, 11 syntax/editing, 7 `xtask`, 6 adapter/distribution); no
   doctests were present.
@@ -51,8 +53,9 @@ The complete gate passed on implementation HEAD
 validation-evidence HEAD `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`.
 The self-hosted runner experiment was fully reverted. At
 `5fb68459e0e83247f9fd02c598d10371a9c76693`, the effective executable/workflow
-tree remained unchanged from the pre-experiment candidate; the later v2.87.26
-Action-pin maintenance is workflow-only and does not alter extension/server
+tree remained unchanged from the pre-experiment candidate. The later v2.87.26
+Action-pin maintenance is workflow-only, while `tests/manual-zed/` and its
+documentation are qualification-only additions; none alter extension/server
 executable source. Run the complete gate and hosted CI on the exact final
 candidate before merge. Commands:
 
