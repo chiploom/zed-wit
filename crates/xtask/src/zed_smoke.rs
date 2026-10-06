@@ -36,24 +36,17 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     log(format!("Zed: {zed_version}"));
     log(format!("isolated profile: {}", profile.display()));
 
-    phase(1, "running syntax, query, snippet, and editing tests");
+    phase(1, "running full workspace unit and integration tests");
     run_status(
         "cargo",
-        &["test", "-p", "wit-syntax", "--test", "editing", "--locked"],
+        &["test", "--workspace", "--all-features", "--locked"],
         &root,
         &[],
     )?;
-    phase(2, "running native language-server stdio protocol tests");
+    phase(2, "running workspace doctests");
     run_status(
         "cargo",
-        &[
-            "test",
-            "-p",
-            "wit-language-server",
-            "--test",
-            "stdio",
-            "--locked",
-        ],
+        &["test", "--doc", "--workspace", "--exclude", "xtask", "--locked"],
         &root,
         &[],
     )?;
@@ -98,7 +91,14 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         "runtime extension: {}",
         staged.extension_dir.display()
     ));
-    log(format!("workspace: {}", staged.workspace_file.display()));
+    log(format!("workspace: {}", staged.workspace_dir.display()));
+    log(format!("WIT fixtures staged: {}", staged.wit_files.len()));
+    for fixture in &staged.wit_files {
+        let relative = fixture
+            .strip_prefix(&staged.workspace_dir)
+            .unwrap_or(fixture);
+        log(format!("fixture: {}", relative.display()));
+    }
 
     let stdout_log = profile.join("zed-foreground.stdout.log");
     let stderr_log = profile.join("zed-foreground.stderr.log");
@@ -108,7 +108,8 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     let mut child = launch(
         zed,
         profile,
-        &staged.workspace_file,
+        &staged.workspace_dir,
+        &staged.wit_files,
         &server,
         &stdout_log,
         &stderr_log,
@@ -143,6 +144,16 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     log("no WIT extension, grammar, query, or language-server startup failures found");
 
     phase(8, "writing smoke-test evidence");
+    let fixture_paths = staged
+        .wit_files
+        .iter()
+        .map(|path| {
+            path.strip_prefix(&staged.workspace_dir)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
     let report = json!({
         "result": "passed",
         "head": head,
@@ -150,7 +161,9 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         "server_version": server_version,
         "profile": profile,
         "runtime_extension": staged.extension_dir,
-        "workspace_file": staged.workspace_file,
+        "workspace": staged.workspace_dir,
+        "wit_fixture_count": fixture_paths.len(),
+        "wit_fixtures": fixture_paths,
         "server_pid": server_pid,
         "foreground_stdout": stdout_log,
         "foreground_stderr": stderr_log,
@@ -175,7 +188,8 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
 
 struct Staged {
     extension_dir: PathBuf,
-    workspace_file: PathBuf,
+    workspace_dir: PathBuf,
+    wit_files: Vec<PathBuf>,
 }
 
 fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
@@ -218,18 +232,32 @@ fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
     log("compiling pinned Tree-sitter WIT grammar to Wasm");
     compile_grammar(root, &grammar_dir.join("wit.wasm"))?;
 
-    let workspace = profile.join("workspace");
-    fs::create_dir_all(workspace.join(".zed"))
+    let workspace_dir = profile.join("workspace");
+    fs::create_dir_all(&workspace_dir)
         .map_err(|error| format!("create smoke workspace: {error}"))?;
-    let workspace_file = workspace.join("main.wit");
-    copy_file(
-        &root.join("tests/manual-zed/semantic/main.wit"),
-        &workspace_file,
-    )?;
+
+    let source_tests = root.join("tests");
+    let staged_tests = workspace_dir.join("tests");
+    log("copying complete tests tree into isolated workspace");
+    copy_dir(&source_tests, &staged_tests)?;
+
+    let source_wit = collect_wit_files(&source_tests)?;
+    let wit_files = collect_wit_files(&staged_tests)?;
+    let source_relative = relative_paths(&source_tests, &source_wit)?;
+    let staged_relative = relative_paths(&staged_tests, &wit_files)?;
+    if source_relative != staged_relative {
+        return Err(format!(
+            "staged WIT fixture set differs from repository tests tree\nsource: {source_relative:?}\nstaged: {staged_relative:?}"
+        ));
+    }
+    if wit_files.is_empty() {
+        return Err("tests tree contains no WIT fixtures to open in Zed".into());
+    }
 
     Ok(Staged {
         extension_dir,
-        workspace_file,
+        workspace_dir,
+        wit_files,
     })
 }
 
@@ -344,7 +372,8 @@ fn find_wasi_clang() -> Option<PathBuf> {
 fn launch(
     zed: &str,
     profile: &Path,
-    workspace_file: &Path,
+    workspace_dir: &Path,
+    wit_files: &[PathBuf],
     server: &Path,
     stdout_log: &Path,
     stderr_log: &Path,
@@ -370,7 +399,8 @@ fn launch(
         .arg("--new")
         .arg("--user-data-dir")
         .arg(profile)
-        .arg(workspace_file)
+        .arg(workspace_dir)
+        .args(wit_files)
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
 
@@ -678,6 +708,52 @@ fn copy_dir(source: &Path, destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn collect_wit_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    collect_wit_files_into(root, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_wit_files_into(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in
+        fs::read_dir(root).map_err(|error| format!("read {}: {error}", root.display()))?
+    {
+        let entry = entry.map_err(|error| format!("read {} entry: {error}", root.display()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("stat {}: {error}", entry.path().display()))?;
+        if file_type.is_dir() {
+            collect_wit_files_into(&entry.path(), files)?;
+        } else if file_type.is_file()
+            && entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "wit")
+        {
+            files.push(entry.path());
+        }
+    }
+    Ok(())
+}
+
+fn relative_paths(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    paths
+        .iter()
+        .map(|path| {
+            path.strip_prefix(root)
+                .map(Path::to_path_buf)
+                .map_err(|error| {
+                    format!(
+                        "{} is outside expected root {}: {error}",
+                        path.display(),
+                        root.display()
+                    )
+                })
+        })
+        .collect()
+}
+
 fn native_server(root: &Path) -> PathBuf {
     root.join("target").join("release").join(if cfg!(windows) {
         "wit-language-server.exe"
@@ -768,6 +844,36 @@ mod tests {
             parse_process_snapshot("not-a-pid command\n  42\n  7 valid"),
             vec![(7, "valid".into())]
         );
+    }
+
+    #[test]
+    fn discovers_all_wit_files_recursively_and_ignores_other_files() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "zed-wit-smoke-fixtures-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("nested/deps")).unwrap();
+        fs::write(root.join("root.wit"), "package test:root;").unwrap();
+        fs::write(root.join("nested/deps/types.wit"), "package test:types;").unwrap();
+        fs::write(root.join("README.md"), "not WIT").unwrap();
+
+        let files = collect_wit_files(&root).unwrap();
+        let relative = relative_paths(&root, &files).unwrap();
+        assert_eq!(
+            relative,
+            vec![
+                PathBuf::from("nested/deps/types.wit"),
+                PathBuf::from("root.wit")
+            ]
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
