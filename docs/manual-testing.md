@@ -133,7 +133,7 @@ temporary edits. Restore the directory after each qualification pass.
 | Editor restart | Restart Zed with an open WIT package | Language server reconnects and recomputes diagnostics | Automated |
 
 Run the install/download rows separately on macOS ARM64, macOS Intel, Linux ARM64
-GNU, Linux x86_64 GNU and Windows x86_64 MSVC. Keep pending rows explicit when the
+GNU, Linux x86_64 GNU and Windows x86_64 MSVC. Keep release-gated rows explicit when the
 platform or release is unavailable. Do not claim editor/platform support from
 cross-compilation alone.
 
