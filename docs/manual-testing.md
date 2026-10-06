@@ -25,9 +25,33 @@ fresh evidence; a unit test or configured workflow cannot stand in for them.
    and should produce no parser or resolver diagnostics. The leaf packages under
    `tests/fixtures/grammar-gaps/` deliberately exercise known grammar/parser
    disagreements and are not expected to be uniformly clean.
-5. Open a disposable multi-file WIT package. Record the Zed language-server log,
-   server info and screenshots in a dated evidence directory. Do not place private
-   workspace source or secrets in shared evidence.
+5. Use the committed reusable packages under `tests/manual-zed/` for semantic,
+   overlay, dependency, Unicode and formatting qualification. Follow
+   [their README](../tests/manual-zed/README.md) for the exact temporary edits,
+   then restore the baselines with `git restore tests/manual-zed`.
+6. Record the Zed language-server log, server info and screenshots in a dated
+   evidence directory. Do not place private workspace source or secrets in shared
+   evidence.
+
+## Reusable manual fixtures
+
+The manual fixture packages are intentionally valid at rest. Tests that require
+invalid syntax, unresolved names, unsaved overlays or corrupt declarations are
+performed as temporary editor mutations so the repository never carries broken
+WIT as its baseline.
+
+| Fixture | Primary scenarios |
+| --- | --- |
+| `tests/manual-zed/semantic/` | completion, hover, definition, references, typo quick fixes, negative completion context |
+| `tests/manual-zed/escaped/` | explicit `%` identifier spelling across completion, hover and navigation |
+| `tests/manual-zed/escaped-alias/` | imported escaped aliases and definition/source spelling |
+| `tests/manual-zed/overlay/` | unsaved sibling overlays and close/reopen behavior |
+| `tests/manual-zed/dependency/` | direct `deps/` package resolution and dependency diagnostics |
+| `tests/manual-zed/unicode/` | UTF-16/Unicode diagnostic range alignment |
+| `tests/manual-zed/formatting/` | formatting, comment preservation, idempotence and invalid-input refusal |
+
+See `tests/manual-zed/README.md` for the exact expected observations and
+temporary edits. Restore the directory after each qualification pass.
 
 ## Scenarios
 

@@ -1,0 +1,6 @@
+package manual:unicode;
+
+// 🦀 Keep this astral character before the editable type reference.
+interface api {
+    type broken = u32;
+}

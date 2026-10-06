@@ -1,0 +1,1 @@
+package manual:formatting; interface compact{call:func();}

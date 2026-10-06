@@ -1,0 +1,7 @@
+package manual:overlay;
+
+interface api {
+    use types.{item};
+
+    echo: func(value: item) -> item;
+}

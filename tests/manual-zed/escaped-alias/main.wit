@@ -1,0 +1,11 @@
+package manual:escaped-alias;
+
+interface shared {
+    type %type = string;
+}
+
+interface api {
+    use shared.{%type as %alias};
+
+    call: func(value: %alias);
+}

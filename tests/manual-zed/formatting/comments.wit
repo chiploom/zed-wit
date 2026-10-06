@@ -1,0 +1,7 @@
+// Formatting must preserve this line comment.
+
+/// Formatting must preserve this doc comment.
+@since(version = 1.0.0)
+interface documented {
+    call: func(value: string);
+}
