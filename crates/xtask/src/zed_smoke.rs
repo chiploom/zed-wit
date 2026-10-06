@@ -120,7 +120,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         server.display()
     ));
     let smoke = wait_for_server(&mut child, &server, &before, profile, timeout);
-    stop_zed(&mut child, profile);
+    stop_zed(&mut child)?;
     log("isolated Zed process stopped");
     let server_pid = match smoke {
         Ok(pid) => pid,
@@ -133,6 +133,9 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
             });
         }
     };
+    ensure_server_stopped(server_pid, &server, Duration::from_secs(3))?;
+    log(format!("language-server PID {server_pid} stopped with isolated Zed"));
+
     phase(7, "scanning isolated Zed logs for integration failures");
     scan_logs(profile, &stdout_log, &stderr_log)?;
     log("no WIT extension, grammar, query, or language-server startup failures found");
@@ -429,20 +432,39 @@ fn wait_for_server(
     ))
 }
 
-fn stop_zed(child: &mut Child, profile: &Path) {
-    let _ = child.kill();
-    let _ = child.wait();
+fn stop_zed(child: &mut Child) -> Result<(), String> {
+    if child
+        .try_wait()
+        .map_err(|error| format!("poll isolated Zed process before shutdown: {error}"))?
+        .is_none()
+    {
+        child
+            .kill()
+            .map_err(|error| format!("stop isolated Zed process: {error}"))?;
+    }
+    child
+        .wait()
+        .map_err(|error| format!("wait for isolated Zed process: {error}"))?;
+    Ok(())
+}
 
-    if let Ok(processes) = process_snapshot() {
-        let profile = profile.to_string_lossy();
-        for (pid, command) in processes {
-            if command.contains(profile.as_ref()) {
-                let _ = Command::new("kill")
-                    .arg("-TERM")
-                    .arg(pid.to_string())
-                    .status();
-            }
+fn ensure_server_stopped(pid: u32, server: &Path, timeout: Duration) -> Result<(), String> {
+    let expected = server.to_string_lossy();
+    let deadline = Instant::now() + timeout;
+    loop {
+        let still_running = process_snapshot()?.into_iter().any(|(candidate, command)| {
+            candidate == pid && command.contains(expected.as_ref())
+        });
+        if !still_running {
+            return Ok(());
         }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "language-server PID {pid} remained alive after isolated Zed shutdown: {}",
+                server.display()
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -662,6 +684,23 @@ mod tests {
         assert_eq!(
             parse_process_snapshot("not-a-pid command\n  42\n  7 valid"),
             vec![(7, "valid".into())]
+        );
+    }
+
+    #[test]
+    fn process_cleanup_matching_is_scoped_to_the_detected_pid() {
+        let server = Path::new("/tmp/target/release/wit-language-server");
+        let expected = server.to_string_lossy();
+        let snapshot = parse_process_snapshot(
+            "  12 /Applications/Zed.app/Contents/MacOS/zed --user-data-dir /tmp/profile\n  34 /tmp/target/release/wit-language-server\n  56 helper /tmp/target/release/wit-language-server\n",
+        );
+        let matching = snapshot
+            .into_iter()
+            .filter(|(pid, command)| *pid == 34 && command.contains(expected.as_ref()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matching,
+            vec![(34, "/tmp/target/release/wit-language-server".into())]
         );
     }
 }
