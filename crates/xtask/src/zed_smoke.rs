@@ -46,7 +46,14 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     phase(2, "running workspace doctests");
     run_status(
         "cargo",
-        &["test", "--doc", "--workspace", "--exclude", "xtask", "--locked"],
+        &[
+            "test",
+            "--doc",
+            "--workspace",
+            "--exclude",
+            "xtask",
+            "--locked",
+        ],
         &root,
         &[],
     )?;
@@ -716,9 +723,7 @@ fn collect_wit_files(root: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 fn collect_wit_files_into(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    for entry in
-        fs::read_dir(root).map_err(|error| format!("read {}: {error}", root.display()))?
-    {
+    for entry in fs::read_dir(root).map_err(|error| format!("read {}: {error}", root.display()))? {
         let entry = entry.map_err(|error| format!("read {} entry: {error}", root.display()))?;
         let file_type = entry
             .file_type()
