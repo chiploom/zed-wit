@@ -56,8 +56,9 @@ Configured paths, arguments and environment use Zed's normal `lsp` binary settin
 
 ## Compatibility
 
-The audit snapshot is dated 2026-10-01: Rust 1.99.0, Zed extension API 0.7.0,
-Tree-sitter ABI 15 and `wit-parser` 0.260.0. See
+The architecture baseline was established 2026-10-01; upstream compatibility was
+last re-audited 2026-10-06. The compatibility snapshot records Rust 1.99.0, Zed
+extension API 0.7.0, Tree-sitter ABI 15 and `wit-parser` 0.260.0. See
 [upstream compatibility](docs/upstream-compatibility.md) for revisions and sources.
 The adapter/native release workflow targets macOS ARM64/x86_64, Linux GNU
 ARM64/x86_64 and Windows x86_64 MSVC. Local qualification and remaining platform

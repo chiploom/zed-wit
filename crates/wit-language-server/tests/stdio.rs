@@ -320,6 +320,153 @@ fn type_completion_is_scope_safe_and_uses_valid_wit_builtins() {
 }
 
 #[test]
+fn escaped_identifiers_keep_wit_spelling_across_editor_requests() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source =
+        "package demo:escaped; interface api { type %type = string; %func: func(%value: %type); }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+    let offset = source.rfind("%type").unwrap();
+    let completion = request(
+        &mut client,
+        70,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+    );
+    let labels: Vec<_> = completion["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect();
+    assert!(labels.contains(&"%type"), "{labels:?}");
+    assert!(!labels.contains(&"type"), "{labels:?}");
+
+    let function = source.find("%func").unwrap();
+    let hover = request(
+        &mut client,
+        71,
+        "textDocument/hover",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":function}}),
+    );
+    assert!(
+        hover["result"]["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("%func: func(%value: %type);")
+    );
+
+    let definition = request(
+        &mut client,
+        72,
+        "textDocument/definition",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+    );
+    assert_eq!(
+        definition["result"]["range"]["start"]["character"],
+        source.find("%type").unwrap()
+    );
+    let references = request(
+        &mut client,
+        73,
+        "textDocument/references",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset},"context":{"includeDeclaration":true}}),
+    );
+    assert_eq!(
+        references["result"].as_array().unwrap().len(),
+        2,
+        "{references}"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn escaped_import_alias_completion_and_navigation_use_source_spelling() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package demo:escaped; interface shared { type %type = string; } interface api { use shared.{%type as %alias}; call: func(value: %alias); }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+    let use_offset = source.find("%type as").unwrap();
+    let definition = request(
+        &mut client,
+        75,
+        "textDocument/definition",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":use_offset}}),
+    );
+    assert_eq!(
+        definition["result"]["range"]["start"]["character"],
+        source.find("type %type").unwrap() + "type ".len()
+    );
+
+    let alias_use = source.rfind("%alias").unwrap();
+    let completion = request(
+        &mut client,
+        76,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":alias_use}}),
+    );
+    let labels: Vec<_> = completion["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect();
+    assert!(labels.contains(&"%alias"), "{labels:?}");
+    assert!(!labels.contains(&"alias"), "{labels:?}");
+    let hover = request(
+        &mut client,
+        77,
+        "textDocument/hover",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":alias_use}}),
+    );
+    assert!(
+        hover["result"]["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("%alias")
+    );
+    client.shutdown();
+}
+
+#[test]
+fn completion_does_not_offer_types_in_parameter_name_position() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package demo:app; interface api { call: func(first: u32, par) }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert!(!client.diagnostics(&uri, 1).as_array().unwrap().is_empty());
+    let offset = source.find(", par").unwrap() + ", par".len();
+    let response = request(
+        &mut client,
+        74,
+        "textDocument/completion",
+        json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+    );
+    let labels: Vec<_> = response["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["label"].as_str())
+        .collect();
+    assert!(
+        !labels.contains(&"u8") && !labels.contains(&"f32"),
+        "{labels:?}"
+    );
+    assert!(labels.is_empty(), "{labels:?}");
+    client.shutdown();
+}
+
+#[test]
 fn incomplete_type_completion_uses_only_syntax_visible_bindings() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("main.wit");

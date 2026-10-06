@@ -24,6 +24,7 @@ pub struct SemanticItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisibleType {
     pub name: String,
+    pub normalized_name: String,
     pub key: String,
     pub detail: String,
 }
@@ -292,6 +293,47 @@ fn parsed_sources(resolve: &Resolve, overlays: &Overlays) -> Vec<ParsedSource> {
         .collect()
 }
 
+fn source_text_at(sources: &[ParsedSource], path: &str, range: &Range<usize>) -> Option<String> {
+    let parsed = sources
+        .iter()
+        .find(|source| same_source_path(&source.path.to_string_lossy(), Path::new(path)))?;
+    parsed.source.get(range.clone()).map(str::to_owned)
+}
+
+fn source_name(
+    resolve: &Resolve,
+    sources: &[ParsedSource],
+    span: wit_parser::Span,
+    normalized: &str,
+) -> String {
+    resolve
+        .source_map
+        .resolve_span(span)
+        .and_then(|location| source_text_at(sources, location.path, &location.range))
+        .unwrap_or_else(|| normalized.to_owned())
+}
+
+fn normalized_identifier(source: &str) -> &str {
+    source.strip_prefix('%').unwrap_or(source)
+}
+
+fn visible_type_name(
+    resolve: &Resolve,
+    sources: &[ParsedSource],
+    id: wit_parser::TypeId,
+    normalized: &str,
+) -> String {
+    let ty = &resolve.types[id];
+    if let Some(location) = resolve.source_map.resolve_span(ty.span)
+        && let Some(alias_range) =
+            use_alias_source(resolve, ty.span, Path::new(location.path), sources)
+        && let Some(alias) = source_text_at(sources, location.path, &alias_range)
+    {
+        return alias;
+    }
+    source_name(resolve, sources, ty.span, normalized)
+}
+
 fn use_alias_source(
     resolve: &Resolve,
     span: wit_parser::Span,
@@ -345,10 +387,12 @@ fn semantic_items(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticIt
                    documentation: Option<String>,
                    span| {
         if let Some(location) = resolve.source_map.resolve_span(span) {
+            let source_name =
+                source_text_at(sources, location.path, &location.range).unwrap_or(name);
             items.push(SemanticItem {
                 key,
-                insertion_name: name.clone(),
-                name,
+                insertion_name: source_name.clone(),
+                name: source_name,
                 kind: kind.into(),
                 detail,
                 signature,
@@ -371,8 +415,8 @@ fn semantic_items(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticIt
             );
         }
         for function in interface.functions.values() {
-            let name = function.item_name().to_owned();
-            let signature = interface_function_signature(resolve, function);
+            let name = source_name(resolve, sources, function.span, function.item_name());
+            let signature = interface_function_signature(resolve, function, sources);
             let declaration = if matches!(function.kind, wit_parser::FunctionKind::Constructor(_)) {
                 format!("{signature};")
             } else {
@@ -404,8 +448,8 @@ fn semantic_items(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticIt
                 let wit_parser::WorldItem::Function(function) = item else {
                     continue;
                 };
-                let name = function.item_name().to_owned();
-                let signature = interface_function_signature(resolve, function);
+                let name = source_name(resolve, sources, function.span, function.item_name());
+                let signature = interface_function_signature(resolve, function, sources);
                 add(
                     format!(
                         "function:world:{}:{direction}:{}",
@@ -436,17 +480,21 @@ fn semantic_items(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticIt
                 None
             } else {
                 match &ty.kind {
-                    wit_parser::TypeDefKind::Type(inner) => {
-                        Some(format!("type {name} = {};", display_type(resolve, *inner)))
-                    }
+                    wit_parser::TypeDefKind::Type(inner) => Some(format!(
+                        "type {} = {};",
+                        source_name(resolve, sources, ty.span, name),
+                        display_type(resolve, *inner, sources)
+                    )),
                     _ => None,
                 }
             };
             if let Some((path, range)) = alias_location {
+                let spelling = source_text_at(sources, &path.to_string_lossy(), &range)
+                    .unwrap_or_else(|| name.clone());
                 items.push(SemanticItem {
                     key: format!("type:{}", id.index()),
-                    name: name.clone(),
-                    insertion_name: name.clone(),
+                    name: spelling.clone(),
+                    insertion_name: spelling,
                     kind: ty.kind.as_str().into(),
                     detail: type_description(resolve, id),
                     signature,
@@ -455,10 +503,11 @@ fn semantic_items(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticIt
                     range,
                 });
             } else if let Some(location) = resolve.source_map.resolve_span(ty.span) {
+                let spelling = source_name(resolve, sources, ty.span, name);
                 items.push(SemanticItem {
                     key: format!("type:{}", id.index()),
-                    name: name.clone(),
-                    insertion_name: name.clone(),
+                    name: spelling.clone(),
+                    insertion_name: spelling,
                     kind: ty.kind.as_str().into(),
                     detail: type_description(resolve, id),
                     signature,
@@ -473,23 +522,81 @@ fn semantic_items(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticIt
     items
 }
 
-fn interface_function_signature(resolve: &Resolve, function: &wit_parser::Function) -> String {
+fn source_parameter_names(
+    resolve: &Resolve,
+    function: &wit_parser::Function,
+    sources: &[ParsedSource],
+) -> Vec<String> {
+    let Some(location) = resolve.source_map.resolve_span(function.span) else {
+        return Vec::new();
+    };
+    let Some(source) = sources
+        .iter()
+        .find(|source| same_source_path(&source.path.to_string_lossy(), Path::new(location.path)))
+    else {
+        return Vec::new();
+    };
+    let Some(name) = source
+        .tree
+        .root_node()
+        .descendant_for_byte_range(location.range.start, location.range.end)
+    else {
+        return Vec::new();
+    };
+    let Some(declaration) = std::iter::successors(Some(name), |node| node.parent())
+        .find(|node| matches!(node.kind(), "func_item" | "method_item"))
+    else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut nodes = vec![declaration];
+    while let Some(node) = nodes.pop() {
+        if node.kind() == "named_type"
+            && let Some(param_name) = node.child_by_field_name("name")
+            && let Some(text) = source.source.get(param_name.byte_range())
+        {
+            names.push(text.to_owned());
+        }
+        for index in (0..node.child_count()).rev() {
+            if let Ok(index) = u32::try_from(index)
+                && let Some(child) = node.child(index)
+            {
+                nodes.push(child);
+            }
+        }
+    }
+    names
+}
+
+fn interface_function_signature(
+    resolve: &Resolve,
+    function: &wit_parser::Function,
+    sources: &[ParsedSource],
+) -> String {
     use wit_parser::FunctionKind as Kind;
 
     let implicit_receiver = usize::from(matches!(
         function.kind,
         Kind::Method(_) | Kind::AsyncMethod(_) | Kind::MethodGetter(_) | Kind::MethodSetter(_)
     ));
+    let source_names = source_parameter_names(resolve, function, sources);
     let params = function
         .params
         .iter()
+        .enumerate()
         .skip(implicit_receiver)
-        .map(|param| format!("{}: {}", param.name, display_type(resolve, param.ty)))
+        .map(|(index, param)| {
+            let name = source_names
+                .get(index - implicit_receiver)
+                .cloned()
+                .unwrap_or_else(|| param.name.clone());
+            format!("{name}: {}", display_type(resolve, param.ty, sources))
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let result = function
         .result
-        .map(|ty| format!(" -> {}", display_type(resolve, ty)))
+        .map(|ty| format!(" -> {}", display_type(resolve, ty, sources)))
         .unwrap_or_default();
     match function.kind {
         Kind::Getter | Kind::MethodGetter(_) => format!("get(){result}"),
@@ -521,8 +628,13 @@ fn interface_function_signature(resolve: &Resolve, function: &wit_parser::Functi
     }
 }
 
-fn display_type(resolve: &Resolve, ty: wit_parser::Type) -> String {
-    fn render(resolve: &Resolve, ty: wit_parser::Type, stack: &mut BTreeSet<usize>) -> String {
+fn display_type(resolve: &Resolve, ty: wit_parser::Type, sources: &[ParsedSource]) -> String {
+    fn render(
+        resolve: &Resolve,
+        ty: wit_parser::Type,
+        sources: &[ParsedSource],
+        stack: &mut BTreeSet<usize>,
+    ) -> String {
         use wit_parser::{Handle, Type, TypeDefKind};
         match ty {
             Type::Bool => "bool".into(),
@@ -542,68 +654,55 @@ fn display_type(resolve: &Resolve, ty: wit_parser::Type) -> String {
             Type::Id(id) => {
                 let definition = &resolve.types[id];
                 if let Some(name) = &definition.name {
-                    return name.clone();
+                    return source_name(resolve, sources, definition.span, name);
                 }
                 if !stack.insert(id.index()) {
                     return "_".into();
                 }
+                let mut nested = |ty| render(resolve, ty, sources, stack);
                 let rendered = match &definition.kind {
                     TypeDefKind::Handle(Handle::Own(resource)) => {
-                        format!("own<{}>", render(resolve, Type::Id(*resource), stack))
+                        format!("own<{}>", nested(Type::Id(*resource)))
                     }
                     TypeDefKind::Handle(Handle::Borrow(resource)) => {
-                        format!("borrow<{}>", render(resolve, Type::Id(*resource), stack))
+                        format!("borrow<{}>", nested(Type::Id(*resource)))
                     }
                     TypeDefKind::Tuple(tuple) => format!(
                         "tuple<{}>",
                         tuple
                             .types
                             .iter()
-                            .map(|ty| render(resolve, *ty, stack))
+                            .map(|ty| nested(*ty))
                             .collect::<Vec<_>>()
                             .join(", ")
                     ),
-                    TypeDefKind::Option(inner) => {
-                        format!("option<{}>", render(resolve, *inner, stack))
-                    }
+                    TypeDefKind::Option(inner) => format!("option<{}>", nested(*inner)),
                     TypeDefKind::Result(result) => match (result.ok, result.err) {
                         (None, None) => "result".into(),
-                        (Some(ok), None) => {
-                            format!("result<{}>", render(resolve, ok, stack))
-                        }
-                        (None, Some(err)) => {
-                            format!("result<_, {}>", render(resolve, err, stack))
-                        }
-                        (Some(ok), Some(err)) => format!(
-                            "result<{}, {}>",
-                            render(resolve, ok, stack),
-                            render(resolve, err, stack)
-                        ),
+                        (Some(ok), None) => format!("result<{}>", nested(ok)),
+                        (None, Some(err)) => format!("result<_, {}>", nested(err)),
+                        (Some(ok), Some(err)) => format!("result<{}, {}>", nested(ok), nested(err)),
                     },
-                    TypeDefKind::List(inner) => {
-                        format!("list<{}>", render(resolve, *inner, stack))
+                    TypeDefKind::List(inner) => format!("list<{}>", nested(*inner)),
+                    TypeDefKind::Map(key, value) => {
+                        format!("map<{}, {}>", nested(*key), nested(*value))
                     }
-                    TypeDefKind::Map(key, value) => format!(
-                        "map<{}, {}>",
-                        render(resolve, *key, stack),
-                        render(resolve, *value, stack)
-                    ),
                     TypeDefKind::FixedLengthList(inner, length) => {
-                        format!("list<{}, {length}>", render(resolve, *inner, stack))
+                        format!("list<{}, {length}>", nested(*inner))
                     }
                     TypeDefKind::Future(inner) => format!(
                         "future{}",
                         inner
-                            .map(|ty| format!("<{}>", render(resolve, ty, stack)))
+                            .map(|ty| format!("<{}>", nested(ty)))
                             .unwrap_or_default()
                     ),
                     TypeDefKind::Stream(inner) => format!(
                         "stream{}",
                         inner
-                            .map(|ty| format!("<{}>", render(resolve, ty, stack)))
+                            .map(|ty| format!("<{}>", nested(ty)))
                             .unwrap_or_default()
                     ),
-                    TypeDefKind::Type(inner) => render(resolve, *inner, stack),
+                    TypeDefKind::Type(inner) => nested(*inner),
                     other => other.as_str().to_owned(),
                 };
                 stack.remove(&id.index());
@@ -611,7 +710,7 @@ fn display_type(resolve: &Resolve, ty: wit_parser::Type) -> String {
             }
         }
     }
-    render(resolve, ty, &mut BTreeSet::new())
+    render(resolve, ty, sources, &mut BTreeSet::new())
 }
 
 fn child_kind<'tree>(
@@ -628,6 +727,7 @@ fn interface_scope(
     id: wit_parser::InterfaceId,
     path: &Path,
     range: Range<usize>,
+    sources: &[ParsedSource],
 ) -> SemanticScope {
     SemanticScope {
         path: path.to_path_buf(),
@@ -636,7 +736,8 @@ fn interface_scope(
             .types
             .iter()
             .map(|(name, id)| VisibleType {
-                name: name.clone(),
+                name: visible_type_name(resolve, sources, *id, name),
+                normalized_name: name.clone(),
                 key: format!("type:{}", id.index()),
                 detail: type_description(resolve, *id),
             })
@@ -649,6 +750,7 @@ fn world_scope(
     id: wit_parser::WorldId,
     path: &Path,
     range: Range<usize>,
+    sources: &[ParsedSource],
 ) -> SemanticScope {
     let world = &resolve.worlds[id];
     SemanticScope {
@@ -661,7 +763,8 @@ fn world_scope(
             .filter_map(|item| match item {
                 wit_parser::WorldItem::Type { id, .. } => {
                     resolve.types[*id].name.as_ref().map(|name| VisibleType {
-                        name: name.clone(),
+                        name: visible_type_name(resolve, sources, *id, name),
+                        normalized_name: name.clone(),
                         key: format!("type:{}", id.index()),
                         detail: type_description(resolve, *id),
                     })
@@ -719,7 +822,13 @@ fn semantic_scopes(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticS
                                         && location.range == name_node.byte_range()
                                 },
                             ) {
-                                scopes.push(interface_scope(resolve, id, path, body.byte_range()));
+                                scopes.push(interface_scope(
+                                    resolve,
+                                    id,
+                                    path,
+                                    body.byte_range(),
+                                    sources,
+                                ));
                                 break;
                             }
                         }
@@ -738,7 +847,13 @@ fn semantic_scopes(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticS
                                         && location.range == name_node.byte_range()
                                 })
                             {
-                                scopes.push(world_scope(resolve, id, path, body.byte_range()));
+                                scopes.push(world_scope(
+                                    resolve,
+                                    id,
+                                    path,
+                                    body.byte_range(),
+                                    sources,
+                                ));
                                 break;
                             }
                         }
@@ -766,7 +881,13 @@ fn semantic_scopes(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticS
                                     },
                                 )
                             {
-                                scopes.push(interface_scope(resolve, id, path, body.byte_range()));
+                                scopes.push(interface_scope(
+                                    resolve,
+                                    id,
+                                    path,
+                                    body.byte_range(),
+                                    sources,
+                                ));
                                 break;
                             }
                         }
@@ -851,7 +972,10 @@ fn semantic_references(
                         let start = current.start_byte();
                         if let Some(name) = source.get(current.byte_range())
                             && let Some(scope) = scope_at(scopes, path, start)
-                            && let Some(visible) = scope.types.iter().find(|ty| ty.name == name)
+                            && let Some(visible) = scope
+                                .types
+                                .iter()
+                                .find(|ty| ty.normalized_name == normalized_identifier(name))
                         {
                             references.push(SemanticReference {
                                 key: visible.key.clone(),
@@ -915,7 +1039,7 @@ fn semantic_references(
                             scope
                                 .types
                                 .iter()
-                                .find(|ty| ty.name == name)
+                                .find(|ty| ty.normalized_name == normalized_identifier(name))
                                 .map(|ty| ty.key.clone())
                         });
                         if let Some(key) = key {
@@ -1084,17 +1208,80 @@ pub fn is_type_position(source: &str, offset: usize) -> bool {
     if inside_non_code {
         return false;
     }
-    let before = source[..probe].trim_end();
-    let token_start = before
-        .char_indices()
-        .rev()
-        .take_while(|(_, ch)| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '%'))
-        .last()
-        .map_or(before.len(), |(index, _)| index);
-    let context = before[..token_start].trim_end();
-    [":", "->", "=", "<", ","]
-        .iter()
-        .any(|trigger| context.ends_with(trigger))
+    // In this grammar, partial own/borrow arguments can recover as an ERROR
+    // after the `ty` node for the handle name; retain that CST context.
+    let mut nodes = vec![root];
+    while let Some(candidate) = nodes.pop() {
+        if candidate.kind() == "named_type"
+            && candidate.start_byte() <= probe
+            && let Some(ty) = candidate.child_by_field_name("type")
+            && source
+                .get(ty.byte_range())
+                .is_some_and(|text| matches!(text, "own" | "borrow"))
+            && source.get(ty.end_byte()..probe).is_some_and(|tail| {
+                tail.strip_prefix('<').is_some_and(|argument| {
+                    argument.trim().bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'%')
+                    })
+                })
+            })
+        {
+            return true;
+        }
+        for index in (0..candidate.child_count()).rev() {
+            if let Ok(index) = u32::try_from(index)
+                && let Some(child) = candidate.child(index)
+            {
+                nodes.push(child);
+            }
+        }
+    }
+    let is_identifier_byte =
+        |byte: u8| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'%');
+    let bytes = source.as_bytes();
+    let mut start = probe;
+    while start > 0 && is_identifier_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = probe;
+    while end < bytes.len() && is_identifier_byte(bytes[end]) {
+        end += 1;
+    }
+    let prefix = source[..start].trim_end();
+    let probe_token = if prefix.ends_with("own<") || prefix.ends_with("borrow<") {
+        "r"
+    } else {
+        "u8"
+    };
+    let mut probe_source = String::with_capacity(source.len() + probe_token.len());
+    probe_source.push_str(&source[..start]);
+    probe_source.push_str(probe_token);
+    probe_source.push_str(&source[end..]);
+    let Some(probe_tree) = parser.parse(&probe_source, None) else {
+        return false;
+    };
+    let candidate = start..start + probe_token.len();
+
+    let mut nodes = vec![probe_tree.root_node()];
+    while let Some(node) = nodes.pop() {
+        if node.byte_range() == candidate {
+            let mut parent = Some(node);
+            while let Some(parent_node) = parent {
+                if matches!(parent_node.kind(), "ty" | "handle") {
+                    return true;
+                }
+                parent = parent_node.parent();
+            }
+        }
+        for index in (0..node.child_count()).rev() {
+            if let Ok(index) = u32::try_from(index)
+                && let Some(child) = node.child(index)
+            {
+                nodes.push(child);
+            }
+        }
+    }
+    false
 }
 
 /// Backwards-compatible name for syntax-visible type bindings.
@@ -1446,6 +1633,103 @@ mod tests {
     }
 
     #[test]
+    fn escaped_identifiers_keep_source_spelling_in_semantic_items_and_signatures() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.wit");
+        let source = "package demo:escaped; interface api { type %type = string; %func: func(%value: %type); }";
+        let analysis =
+            analyze_package(dir.path(), &Overlays::from([(path.clone(), source.into())])).unwrap();
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+        let escaped_type = analysis
+            .items
+            .iter()
+            .find(|item| item.key.starts_with("type:"))
+            .unwrap();
+
+        assert_eq!(escaped_type.name, "%type");
+        assert_eq!(escaped_type.insertion_name, "%type");
+        assert_eq!(
+            escaped_type.signature.as_deref(),
+            Some("type %type = string;")
+        );
+        let function = analysis
+            .items
+            .iter()
+            .find(|item| item.kind == "function")
+            .unwrap();
+        assert_eq!(function.name, "%func");
+        assert_eq!(
+            function.signature.as_deref(),
+            Some("%func: func(%value: %type);")
+        );
+        assert!(analysis.references.iter().any(|reference| {
+            reference.key == escaped_type.key && &source[reference.range.clone()] == "%type"
+        }));
+        let offset = source.find("value: %type").unwrap() + "value: ".len();
+        assert!(
+            analysis
+                .visible_types_at(&path, offset)
+                .iter()
+                .any(|ty| ty.name == "%type" && ty.normalized_name == "type")
+        );
+    }
+
+    #[test]
+    fn escaped_type_imports_keep_spelling_and_resolved_references() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.wit");
+        let source = "package demo:escaped; interface shared { type %type = string; } interface api { use shared.{%type}; call: func(value: %type); }";
+        let analysis =
+            analyze_package(dir.path(), &Overlays::from([(path.clone(), source.into())])).unwrap();
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+        let imported_offset = source.find("use shared.{%type}").unwrap() + "use shared.{".len();
+        let imported = analysis
+            .items
+            .iter()
+            .find(|item| item.range.start == imported_offset)
+            .unwrap();
+        assert_eq!(imported.name, "%type");
+        assert!(analysis.references.iter().any(|reference| {
+            reference.key == imported.key && &source[reference.range.clone()] == "%type"
+        }));
+        let use_offset = source.rfind("%type").unwrap();
+        assert!(
+            analysis
+                .visible_types_at(&path, use_offset)
+                .iter()
+                .any(|ty| {
+                    ty.name == "%type" && ty.normalized_name == "type" && ty.key == imported.key
+                })
+        );
+    }
+
+    #[test]
+    fn type_context_rejects_partial_non_type_identifiers() {
+        for source in [
+            "interface api { call: func(first: u32, par|) }",
+            "interface api { record x { first: u32, fie| } }",
+            "interface api { variant x { first, cas| } }",
+            "interface api { enum x { first, cas| } }",
+            "interface api { call: fu| }",
+            "interface api { resource x { met| } }",
+            "interface api { call: func(a: u32, par|) }",
+            "world app { import imp| }",
+        ] {
+            let offset = source.find('|').unwrap();
+            let source = source.replace('|', "");
+            assert!(!is_type_position(&source, offset), "{source} at {offset}");
+        }
+    }
+
+    #[test]
     fn type_context_recognizes_partial_names_and_composite_arguments() {
         for source in [
             "interface api { call: func(value: |) }",
@@ -1457,10 +1741,13 @@ mod tests {
             "interface api { type x = list<lo|> }",
             "interface api { type x = option<lo|> }",
             "interface api { type x = result<lo|, string> }",
+            "interface api { type x = result<string, lo|> }",
             "interface api { type x = tuple<lo|, string> }",
+            "interface api { type x = tuple<u8, lo|> }",
+            "interface api { type x = map<string, lo|> }",
             "interface api { variant outcome { item(lo|) } }",
             "interface api { resource r; type x = borrow<lo|> }",
-            "interface api { resource r; type x = own<lo|> }",
+            "interface api { resource r; call: func(value: own<lo|>) }",
             "interface api { type x = map<lo|, u8> }",
             "interface api { type x = future<lo|> }",
             "interface api { type x = stream<lo|> }",
