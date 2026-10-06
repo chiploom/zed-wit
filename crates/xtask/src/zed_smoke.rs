@@ -1004,6 +1004,34 @@ mod tests {
     }
 
     #[test]
+    fn scans_complete_logs_for_early_integration_failures() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let profile = std::env::temp_dir().join(format!(
+            "zed-wit-smoke-logs-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&profile).unwrap();
+        let stdout = profile.join("zed-foreground.stdout.log");
+        let stderr = profile.join("zed-foreground.stderr.log");
+        let mut log = String::from("WIT failed to load grammar\n");
+        for index in 0..200 {
+            log.push_str(&format!("filler line {index}\n"));
+        }
+        fs::write(&stdout, log).unwrap();
+        fs::write(&stderr, "").unwrap();
+
+        let error = scan_logs(&profile, &stdout, &stderr).unwrap_err();
+        assert!(error.contains("failed to load grammar"), "{error}");
+
+        fs::remove_dir_all(profile).unwrap();
+    }
+
+    #[test]
     fn process_cleanup_matching_is_scoped_to_the_detected_pid() {
         let server = Path::new("/tmp/target/release/wit-language-server");
         let expected = server.to_string_lossy();
