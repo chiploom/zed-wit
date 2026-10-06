@@ -11,7 +11,7 @@ mod supported {
     use std::{
         env, fs,
         path::{Path, PathBuf},
-        process::{Child, Command},
+        process::Command,
         thread,
         time::Duration,
     };
@@ -246,8 +246,9 @@ mod supported {
         type_text(input, "snippet", settle)?;
         press(input, Key::F16, settle)?;
         type_text(input, "1.2.3", settle)?;
-        press(input, Key::F16, settle)?;
         press(input, Key::F17, settle)?;
+        type_text(input, "reverse", settle)?;
+        press(input, Key::F16, settle)?;
         type_text(input, "2.0.0", settle)?;
         press(input, Key::F16, settle)?;
         type_text(input, "\n// GUI_SNIPPET_FINAL", settle)?;
@@ -274,7 +275,7 @@ mod supported {
     fn verify_snippet(path: &Path) -> Result<(), String> {
         let source = fs::read_to_string(path)
             .map_err(|error| format!("read {}: {error}", path.display()))?;
-        let expected = "package gui:snippet@2.0.0;";
+        let expected = "package gui:reverse@2.0.0;";
         if !source.contains(expected) {
             return Err(format!(
                 "snippet GUI qualification did not produce {expected:?}: {source:?}"
@@ -283,7 +284,7 @@ mod supported {
         if !source.contains("// GUI_SNIPPET_FINAL") {
             return Err(format!("snippet final tab stop was not reached: {source:?}"));
         }
-        for unexpected in ["wit-package", "example", "1.2.3"] {
+        for unexpected in ["wit-package", "example", "snippet", "1.2.3"] {
             if source.contains(unexpected) {
                 return Err(format!(
                     "snippet GUI qualification left stale placeholder content {unexpected:?}: {source:?}"
