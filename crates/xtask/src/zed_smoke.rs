@@ -134,7 +134,9 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         }
     };
     ensure_server_stopped(server_pid, &server, Duration::from_secs(3))?;
-    log(format!("language-server PID {server_pid} stopped with isolated Zed"));
+    log(format!(
+        "language-server PID {server_pid} stopped with isolated Zed"
+    ));
 
     phase(7, "scanning isolated Zed logs for integration failures");
     scan_logs(profile, &stdout_log, &stderr_log)?;
@@ -452,9 +454,9 @@ fn ensure_server_stopped(pid: u32, server: &Path, timeout: Duration) -> Result<(
     let expected = server.to_string_lossy();
     let deadline = Instant::now() + timeout;
     loop {
-        let still_running = process_snapshot()?.into_iter().any(|(candidate, command)| {
-            candidate == pid && command.contains(expected.as_ref())
-        });
+        let still_running = process_snapshot()?
+            .into_iter()
+            .any(|(candidate, command)| candidate == pid && command.contains(expected.as_ref()));
         if !still_running {
             return Ok(());
         }
