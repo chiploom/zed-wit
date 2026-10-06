@@ -29,11 +29,13 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
 
     let root = util::repo_root();
     let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
-    let zed_version = output(zed, &["--version"], &root)?;
+    let zed_path = resolve_executable(zed)?;
+    let zed_version = output_path(&zed_path, &["--version"], &root)?;
 
     log(format!("repository: {}", root.display()));
     log(format!("HEAD: {head}"));
     log(format!("Zed: {zed_version}"));
+    log(format!("Zed executable: {}", zed_path.display()));
     log(format!("isolated profile: {}", profile.display()));
 
     phase(1, "running full workspace unit and integration tests");
@@ -113,7 +115,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     phase(6, "launching isolated stateless Zed");
     log("Zed will use a fresh profile and the exact native server from target/release");
     let mut child = launch(
-        zed,
+        &zed_path,
         profile,
         &staged.workspace_dir,
         &staged.wit_files,
@@ -154,7 +156,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     let restart_stderr_log = profile.join("zed-restart.stderr.log");
     let restart_before = matching_processes(&server)?;
     let mut restart_child = launch(
-        zed,
+        &zed_path,
         profile,
         &staged.workspace_dir,
         &staged.wit_files,
@@ -432,7 +434,7 @@ fn find_wasi_clang() -> Option<PathBuf> {
 }
 
 fn launch(
-    zed: &str,
+    zed: &Path,
     profile: &Path,
     workspace_dir: &Path,
     wit_files: &[PathBuf],
@@ -465,7 +467,7 @@ fn launch(
 
     command
         .spawn()
-        .map_err(|error| format!("launch {zed}: {error}"))
+        .map_err(|error| format!("launch {}: {error}", zed.display()))
 }
 
 fn wait_for_server(
@@ -524,6 +526,22 @@ fn wait_for_server(
         server.display(),
         profile.display()
     ))
+}
+
+fn resolve_executable(program: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(program);
+    if candidate.components().count() > 1 {
+        return candidate
+            .is_file()
+            .then_some(candidate.clone())
+            .ok_or_else(|| format!("Zed executable does not exist: {}", candidate.display()));
+    }
+
+    let inherited = env::var_os("PATH").unwrap_or_default();
+    env::split_paths(&inherited)
+        .map(|directory| directory.join(program))
+        .find(|path| path.is_file())
+        .ok_or_else(|| format!("could not resolve {program:?} from PATH"))
 }
 
 fn path_without_language_server() -> Result<std::ffi::OsString, String> {
