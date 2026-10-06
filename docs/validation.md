@@ -24,9 +24,11 @@ or end-to-end hosted installation.
 - Host packaging: not rerun for this candidate. Earlier packaging for
   `f4d87ec72467283c846d76e3b5cf5625915a4128` produced a 116-package license
   report, but is not treated as packaging evidence for this candidate.
-- Zed: `zed --version` reports `Zed 1.22.0` on `/Applications/Zed.app`, but
-  interactive GUI testing was not available in this session. The requested
-  semantic/editor checklist remains pending; see [manual testing](manual-testing.md).
+- Zed: `zed --version` reports `Zed 1.22.0` on `/Applications/Zed.app`. A
+  user-provided RPC trace shows fixture diagnostics behavior; it does not include
+  server build identity or a retained artifact path, so it is partial smoke
+  evidence rather than exact-candidate GUI signoff. Semantic/editor checks remain
+  pending; see [manual testing](manual-testing.md).
 - Hosted CI: no check runs were reported for this candidate. The only listed
   branch run was an older failed run on `67b43f00d38af20d4ceafe085b6086c452096b6f`;
   it is not a result for this candidate. Status: **BLOCKED — no hosted runner
@@ -53,6 +55,21 @@ cargo xtask collect-licenses --target aarch64-apple-darwin --output dist-validat
 
 The package was written under `dist-validation/` to avoid overwriting `dist/`.
 Temporary packaging output was removed after recording its results.
+
+## User-provided Zed fixture diagnostics trace
+
+On 2026-10-06, the user supplied RPC logs from opening fixture files in Zed.
+The trace shows empty diagnostics for the current annotation, async and core
+fixtures, gated feature and nested-package fixtures, and the getter/setter
+grammar-gap fixture. The legacy named-results fixture reports the expected
+`wit-parser` diagnostic, `expected a type, found '('`, at line 2, characters
+21–22. Code-action requests at empty ranges with no supplied diagnostics return
+empty arrays.
+
+The trace does not include the running server's build identity or a saved log
+artifact path. Do not use it as proof of semantic hover, completion, definition,
+references, formatting, or exact-final-SHA GUI qualification. Those manual
+scenarios remain pending in [manual testing](manual-testing.md).
 
 ## Snapshot
 
