@@ -106,9 +106,16 @@ levels so UIPI does not block synthetic input.
 Because this command sends real keyboard events, it requires the explicit
 `--allow-input-injection true` acknowledgement. Save or close unrelated
 foreground applications and do not interact with the desktop while it runs.
-All Zed settings and edited WIT files used by this gate live under the
-disposable `target/zed-gui/` profile/workspace; the test does not install or
-override user keybindings.
+Both automated Zed commands write
+`session.trust_all_worktrees = true` to the disposable profile's global
+`config/settings.json` before launch. This prevents the isolated test worktree
+from entering Restricted Mode, which would otherwise suppress project settings
+and language-server startup. If Zed displays an "Unrecognized Project" /
+"Trust and Continue" prompt during qualification, treat the run as invalid and
+investigate the harness instead of clicking through it manually. All Zed
+settings and edited WIT files used by this gate live under the disposable
+`target/zed-gui/` profile/workspace; the test does not install or override user
+keybindings or persist trust in the user's normal Zed profile.
 
 The test intentionally does not compare theme-specific rendered pixel colors.
 Semantic highlight capture correctness remains asserted deterministically by the
