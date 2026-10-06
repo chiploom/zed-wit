@@ -83,10 +83,15 @@ fn validate_backend_selection() -> Result<(), String> {
 fn input_device() -> Result<Enigo, String> {
     let mut settings = Settings::default();
     settings.open_prompt_to_get_permissions = false;
-    let mut input =
+    let input =
         Enigo::new(&settings).map_err(|error| format!("initialize input backend: {error}"))?;
     #[cfg(target_os = "linux")]
-    input.set_delay(20);
+    {
+        let mut input = input;
+        input.set_delay(20);
+        return Ok(input);
+    }
+    #[cfg(not(target_os = "linux"))]
     Ok(input)
 }
 
@@ -120,23 +125,23 @@ fn probe_backend() -> Result<(), String> {
 fn run_all(settle: Duration) -> Result<(), String> {
     let mut input = input_device()?;
 
-    press(&mut input, Key::End, settle)?;
-    press(&mut input, Key::F14, settle)?;
-    press(&mut input, Key::F15, settle)?;
+    type_keys(&mut input, "wit-package", settle)?;
+    std::thread::sleep(settle);
+    press(&mut input, Key::Return, settle)?;
     type_text(&mut input, "gui", settle)?;
-    press(&mut input, Key::F16, settle)?;
+    press(&mut input, Key::Tab, settle)?;
     type_text(&mut input, "snippet", settle)?;
-    press(&mut input, Key::F16, settle)?;
+    press(&mut input, Key::Tab, settle)?;
     type_text(&mut input, "1.2.3", settle)?;
-    press(&mut input, Key::F17, settle)?;
+    shortcut(&mut input, &[Key::Shift], Key::Tab, settle)?;
     type_text(&mut input, "reverse", settle)?;
-    press(&mut input, Key::F16, settle)?;
+    press(&mut input, Key::Tab, settle)?;
     type_text(&mut input, "2.0.0", settle)?;
-    press(&mut input, Key::F16, settle)?;
+    press(&mut input, Key::Tab, settle)?;
     type_text(&mut input, "\n// GUI_SNIPPET_FINAL", settle)?;
-    press(&mut input, Key::F18, settle.saturating_mul(2))?;
+    save(&mut input, settle.saturating_mul(2))?;
 
-    press(&mut input, Key::F19, settle)?;
+    file_finder(&mut input, settle)?;
     type_text(&mut input, "outline.wit", settle)?;
     press(&mut input, Key::Return, settle.saturating_mul(2))?;
 
@@ -145,12 +150,12 @@ fn run_all(settle: Duration) -> Result<(), String> {
         ("beta", "GUI_OUTLINE_BETA"),
         ("gamma", "GUI_OUTLINE_GAMMA"),
     ] {
-        press(&mut input, Key::F13, settle)?;
+        outline(&mut input, settle)?;
         type_text(&mut input, symbol, settle)?;
         press(&mut input, Key::Return, settle)?;
         press(&mut input, Key::End, settle)?;
         type_text(&mut input, &format!(" // {marker}"), settle)?;
-        press(&mut input, Key::F18, settle)?;
+        save(&mut input, settle)?;
     }
 
     Ok(())
@@ -164,6 +169,119 @@ fn run_all(settle: Duration) -> Result<(), String> {
 )))]
 fn run_all(_settle: Duration) -> Result<(), String> {
     Err("GUI input helper was built without an input backend feature".into())
+}
+
+#[cfg(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+))]
+fn shortcut(
+    input: &mut Enigo,
+    modifiers: &[Key],
+    key: Key,
+    settle: Duration,
+) -> Result<(), String> {
+    for modifier in modifiers {
+        input
+            .key(*modifier, Direction::Press)
+            .map_err(|error| format!("press modifier {modifier:?}: {error}"))?;
+    }
+
+    let key_result = input
+        .key(key, Direction::Click)
+        .map_err(|error| format!("press shortcut key {key:?}: {error}"));
+
+    let mut release_error = None;
+    for modifier in modifiers.iter().rev() {
+        if let Err(error) = input.key(*modifier, Direction::Release) {
+            release_error = Some(format!("release modifier {modifier:?}: {error}"));
+        }
+    }
+
+    key_result?;
+    if let Some(error) = release_error {
+        return Err(error);
+    }
+    std::thread::sleep(settle);
+    Ok(())
+}
+
+#[cfg(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+))]
+fn platform_primary_modifier() -> Key {
+    if cfg!(target_os = "macos") {
+        Key::Meta
+    } else {
+        Key::Control
+    }
+}
+
+#[cfg(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+))]
+fn save(input: &mut Enigo, settle: Duration) -> Result<(), String> {
+    shortcut(
+        input,
+        &[platform_primary_modifier()],
+        Key::Unicode('s'),
+        settle,
+    )
+}
+
+#[cfg(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+))]
+fn file_finder(input: &mut Enigo, settle: Duration) -> Result<(), String> {
+    shortcut(
+        input,
+        &[platform_primary_modifier()],
+        Key::Unicode('p'),
+        settle,
+    )
+}
+
+#[cfg(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+))]
+fn outline(input: &mut Enigo, settle: Duration) -> Result<(), String> {
+    shortcut(
+        input,
+        &[platform_primary_modifier(), Key::Shift],
+        Key::Unicode('o'),
+        settle,
+    )
+}
+
+#[cfg(any(
+    feature = "native",
+    feature = "linux-x11",
+    feature = "linux-wayland",
+    feature = "linux-libei"
+))]
+fn type_keys(input: &mut Enigo, text: &str, settle: Duration) -> Result<(), String> {
+    for ch in text.chars() {
+        input
+            .key(Key::Unicode(ch), Direction::Click)
+            .map_err(|error| format!("type key {ch:?}: {error}"))?;
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    std::thread::sleep(settle);
+    Ok(())
 }
 
 #[cfg(any(
