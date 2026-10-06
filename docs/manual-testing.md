@@ -49,7 +49,7 @@ protocol suite. Hosted-release scenarios remain explicit `not-run` entries until
 matching release assets exist. Override the executable/profile/timeout with `--zed`, `--profile` and
 `--timeout-seconds` when needed.
 
-The real-editor smoke currently supports macOS and Linux. Grammar compilation
+The real-editor smoke supports macOS, Linux and Windows. Grammar compilation
 uses `WASI_SDK_PATH` first, then Zed's normal extension-build wasi-sdk cache.
 If neither exists, install/rebuild a dev extension once in Zed or point
 `WASI_SDK_PATH` at a wasi-sdk installation.
@@ -58,6 +58,50 @@ Zed does not currently expose a supported CLI API for dispatching arbitrary
 editor actions or asserting hover/completion UI contents. Those semantics stay
 in deterministic LSP tests, while the real Zed smoke proves extension discovery,
 grammar/language activation, adapter loading, binary selection and server startup.
+
+## Automated GUI qualification
+
+Run the real editor interaction gate with:
+
+```sh
+cargo xtask test-zed-gui --allow-input-injection true
+```
+
+This command first runs `cargo xtask test-zed`, then stages a second disposable
+stateless Zed profile with an isolated keymap and drives only that Zed instance
+through synthetic keyboard input. It verifies the saved disposable files rather
+than relying on screenshots:
+
+- WIT snippet completion is invoked in real Zed;
+- forward and reverse snippet tab-stop navigation replaces the expected
+  placeholders and reaches the final cursor;
+- the real Zed outline UI is searched for record, variant and resource symbols;
+- each outline navigation target is marked in the disposable buffer and saved;
+- the exact native WIT language server must start and stop cleanly for each GUI
+  session; and
+- GUI logs are scanned with the same integration-failure rules as the normal
+  smoke test.
+
+The command is supported on Zed's desktop operating systems: macOS, Linux and
+Windows. It uses Enigo 0.6.1 for keyboard injection. Linux builds enable X11,
+Wayland virtual-keyboard and libei backends; the command fails rather than
+reporting a skipped pass if the current compositor/session exposes none of those
+interfaces. macOS requires Accessibility permission for the terminal or runner
+that invokes the command. Windows requires Zed and the runner to use compatible
+integrity levels so UIPI does not block synthetic input.
+
+Because this command sends real keyboard events, it requires the explicit
+`--allow-input-injection true` acknowledgement. Save or close unrelated
+foreground applications and do not interact with the desktop while it runs.
+All Zed settings/keybindings and edited WIT files used by this gate live under
+the disposable `target/zed-gui/` profile/workspace.
+
+The test intentionally does not compare theme-specific rendered pixel colors.
+Semantic highlight capture correctness remains asserted deterministically by the
+Tree-sitter query tests, while real Zed activation and structural presentation
+are qualified through successful fixture loading and outline navigation. This
+avoids theme, font rasterization, scaling and GPU differences turning aesthetic
+pixels into a flaky correctness gate.
 
 ## Setup
 
@@ -112,8 +156,8 @@ temporary edits. Restore the directory after each qualification pass.
 | Scenario                   | Action                                                                                                                | Required observable                                                                                                                                                     | Status  |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | Development install | Install dev extension, open `.wit` | WIT language selected; no extension/query load errors | Automated |
-| Highlighting and structure | Open records, resources, variants, async/future/stream/map fixtures | Meaningful captures, brackets, indentation, outline; no query errors | Automated + GUI spot-check |
-| Snippets | Invoke a WIT snippet in an empty file | Valid scaffold and working tab stops | Automated + GUI spot-check |
+| Highlighting and structure | Open records, resources, variants, async/future/stream/map fixtures | Meaningful captures, brackets, indentation, outline; no query errors | Automated; real outline UI covered by `test-zed-gui` |
+| Snippets | Invoke a WIT snippet in an empty file | Valid scaffold and working tab stops | Automated end-to-end by `test-zed-gui` |
 | Parser diagnostic | Enter invalid syntax then repair it | Diagnostic has correct range and clears after repair | Automated |
 | Resolver diagnostic | Reference an unknown type | Parser-backed error points to the relevant identifier/file | Automated |
 | Unsaved sibling overlay | Edit a shared type without saving, then use it from a sibling file | Diagnostics reflect the open buffer and propagate to affected files | Automated |
@@ -139,20 +183,24 @@ cross-compilation alone.
 
 ## Remaining manual surface
 
-Keep manual checks only for behavior that cannot currently be asserted through
-Zed's supported command-line surface:
+The former snippet and outline GUI spot checks are automated by
+`cargo xtask test-zed-gui --allow-input-injection true`. Theme-specific pixel
+appearance may still be inspected manually when desired, but it is presentation
+evidence rather than a correctness or merge gate because semantic captures are
+covered by deterministic query tests.
 
-- visual presentation of highlighting, hover, completion and code-action menus;
-- interactive snippet tab-stop behavior;
-- outline/panel presentation;
-- first/cached install from an actual published GitHub release;
-- controlled missing/corrupt hosted-release behavior; and
-- platform-specific GUI qualification where a real Zed session is required.
+The substantive qualification that still cannot run before publishing matching
+assets is release delivery:
 
-Do not repeat semantic correctness or the documented temporary file mutations
-manually when `cargo xtask test-zed` already passed them. Manual work is limited
-to visual/editor presentation that Zed does not expose through a supported
-automation surface and release-download scenarios that require published assets.
+- first hosted install from an actual published GitHub release;
+- cached install of the verified downloaded executable; and
+- controlled missing/corrupt hosted-release behavior.
+
+Do not substitute a manual GUI pass when `test-zed-gui` fails because the host
+denies input injection. Treat that as an environment/platform qualification
+failure and resolve the platform permission/session backend instead. Do not
+repeat semantic correctness or the documented temporary file mutations manually
+when `cargo xtask test-zed` already passed them.
 
 ## Evidence record
 
