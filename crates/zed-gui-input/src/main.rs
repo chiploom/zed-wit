@@ -81,8 +81,10 @@ fn validate_backend_selection() -> Result<(), String> {
     feature = "linux-libei"
 ))]
 fn input_device() -> Result<Enigo, String> {
-    let mut settings = Settings::default();
-    settings.open_prompt_to_get_permissions = false;
+    let settings = Settings {
+        open_prompt_to_get_permissions: false,
+        ..Settings::default()
+    };
     let input =
         Enigo::new(&settings).map_err(|error| format!("initialize input backend: {error}"))?;
     #[cfg(target_os = "linux")]
