@@ -155,10 +155,33 @@ mod supported {
             zed_smoke::ensure_server_stopped(server_pid, server, Duration::from_secs(3));
         let log_result = zed_smoke::scan_logs(&gui_profile, &stdout, &stderr);
 
-        input_result?;
-        stop_result?;
-        server_stop_result?;
-        log_result?;
+        let mut cleanup_errors = Vec::new();
+        if let Err(error) = stop_result {
+            cleanup_errors.push(format!("stop isolated Zed: {error}"));
+        }
+        if let Err(error) = server_stop_result {
+            cleanup_errors.push(format!("stop exact language server: {error}"));
+        }
+        if let Err(error) = log_result {
+            cleanup_errors.push(format!("scan isolated Zed logs: {error}"));
+        }
+
+        if let Err(error) = input_result {
+            if cleanup_errors.is_empty() {
+                return Err(format!("GUI input helper failed: {error}"));
+            }
+            return Err(format!(
+                "GUI input helper failed: {error}; cleanup/integration errors: {}",
+                cleanup_errors.join("; ")
+            ));
+        }
+        if !cleanup_errors.is_empty() {
+            return Err(format!(
+                "GUI cleanup/integration errors: {}",
+                cleanup_errors.join("; ")
+            ));
+        }
+
         verify_snippet(&snippet)?;
         verify_outline(&outline)?;
 
