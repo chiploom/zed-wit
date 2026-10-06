@@ -5,6 +5,25 @@ not a substitute for the manual Zed qualification checklist in
 [manual testing](manual-testing.md), and it does not claim registry publication
 or end-to-end hosted installation.
 
+## Restricted Mode qualification correction — 2026-10-06
+
+A final macOS qualification run exposed Zed's new-worktree trust modal even
+though the previous smoke/GUI harness could still reach its file/process
+assertions. That made the pass criteria incomplete: Restricted Mode suppresses
+project `.zed/settings.json` and can block language-server startup.
+
+The harness now writes `session.trust_all_worktrees = true` to the isolated
+profile's global `config/settings.json` before launching Zed. This follows
+Zed's documented auto-trust mechanism and is scoped only to the disposable
+`--user-data-dir`; it does not persist a manual trust grant in the user's real
+profile. Both smoke and GUI evidence report the auto-trusted profile state, and
+an xtask regression test verifies that the setting is present while preserving
+GUI-specific settings.
+
+A Restricted Mode / "Unrecognized Project" prompt during either automated Zed
+qualification is therefore a failed or invalid run, not something the operator
+should click through.
+
 ## PR #6 final merge re-audit — 2026-10-06
 
 The final merge audit separates previously validated product/runtime code from
