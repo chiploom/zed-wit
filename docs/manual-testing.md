@@ -67,10 +67,13 @@ Run the real editor interaction gate with:
 cargo xtask test-zed-gui --allow-input-injection true
 ```
 
-This command first runs `cargo xtask test-zed`, then stages a second disposable
-stateless Zed profile with an isolated keymap and drives only that Zed instance
-through synthetic keyboard input. It verifies the saved disposable files rather
-than relying on screenshots:
+This command first builds and probes the selected synthetic-input backend. If
+the host has not granted the required permission or the Linux desktop protocol is
+unavailable, it fails before running the expensive editor qualification. After a
+successful preflight it runs `cargo xtask test-zed`, then stages a second
+disposable stateless Zed profile with an isolated keymap and drives only that Zed
+instance through synthetic keyboard input. It verifies the saved disposable files
+rather than relying on screenshots:
 
 - WIT snippet completion is invoked in real Zed;
 - forward and reverse snippet tab-stop navigation replaces the expected
