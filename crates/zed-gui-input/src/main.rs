@@ -183,10 +183,15 @@ fn shortcut(
     key: Key,
     settle: Duration,
 ) -> Result<(), String> {
+    let mut pressed = Vec::with_capacity(modifiers.len());
     for modifier in modifiers {
-        input
-            .key(*modifier, Direction::Press)
-            .map_err(|error| format!("press modifier {modifier:?}: {error}"))?;
+        if let Err(error) = input.key(*modifier, Direction::Press) {
+            for pressed_modifier in pressed.iter().rev() {
+                let _ = input.key(*pressed_modifier, Direction::Release);
+            }
+            return Err(format!("press modifier {modifier:?}: {error}"));
+        }
+        pressed.push(*modifier);
     }
 
     let key_result = input
@@ -194,7 +199,7 @@ fn shortcut(
         .map_err(|error| format!("press shortcut key {key:?}: {error}"));
 
     let mut release_error = None;
-    for modifier in modifiers.iter().rev() {
+    for modifier in pressed.iter().rev() {
         if let Err(error) = input.key(*modifier, Direction::Release) {
             release_error = Some(format!("release modifier {modifier:?}: {error}"));
         }
