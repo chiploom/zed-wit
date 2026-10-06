@@ -18,10 +18,16 @@ or end-to-end hosted installation.
   release build, and `git diff --check origin/main...HEAD`.
 - Validation-evidence HEAD: `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`;
   the same complete gate was rerun after the evidence update.
-- Later commits after `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`
-  only update validation/evidence documentation. They do not change executable
-  code, so the validated executable implementation remains
-  `31d540950b1265dbe7ed4a8f9a694776b89f9bf6`.
+- A temporary self-hosted CI runner-routing experiment was added after this
+  evidence and then fully reverted. At
+  `5fb68459e0e83247f9fd02c598d10371a9c76693`, the net tree relative to
+  validated implementation `31d540950b1265dbe7ed4a8f9a694776b89f9bf6`
+  differed only in this validation document; no executable source or effective
+  workflow changes remained.
+- Subsequent maintenance advances `taiki-e/install-action` from v2.87.25 to
+  v2.87.26 in CI/release workflows and corrects this provenance record. Those
+  changes do not modify Rust/WIT executable source, but exact-candidate local
+  validation and hosted CI are still required before merge.
 - Workspace tests: 67 passed (22 `wit-analysis`, 4 language-server unit, 17
   stdio protocol, 11 syntax/editing, 7 `xtask`, 6 adapter/distribution); no
   doctests were present.
@@ -35,17 +41,20 @@ or end-to-end hosted installation.
   server build identity or a retained artifact path, so it is partial smoke
   evidence rather than exact-candidate GUI signoff. Semantic/editor checks remain
   pending; see [manual testing](manual-testing.md).
-- Hosted CI: no check runs were reported for the current PR candidate. The only
-  listed branch run was an older failed run on
-  `67b43f00d38af20d4ceafe085b6086c452096b6f`; it is not evidence for the
-  current implementation. Status: **BLOCKED — no hosted runner execution on the
-  current PR head**.
+- Hosted CI: no successful check run is recorded here for the exact final
+  candidate. Historical runs on other SHAs are not candidate evidence. Verify
+  the current PR head in GitHub Actions and require the exact-candidate workflow
+  to pass before merge.
 
 The complete gate passed on implementation HEAD
 `31d540950b1265dbe7ed4a8f9a694776b89f9bf6` and was rerun on
 validation-evidence HEAD `b7c070b682fafadbb0c5855b5277af9c2eeb61c7`.
-Subsequent documentation-only commits do not change that executable validation
-provenance. Commands:
+The self-hosted runner experiment was fully reverted. At
+`5fb68459e0e83247f9fd02c598d10371a9c76693`, the effective executable/workflow
+tree remained unchanged from the pre-experiment candidate; the later v2.87.26
+Action-pin maintenance is workflow-only and does not alter extension/server
+executable source. Run the complete gate and hosted CI on the exact final
+candidate before merge. Commands:
 
 ```sh
 cargo xtask check-no-python
