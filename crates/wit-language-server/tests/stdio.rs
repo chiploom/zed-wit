@@ -910,6 +910,54 @@ fn function_kind_and_composite_hover_use_source_valid_wit() {
 }
 
 #[test]
+fn hover_signatures_preserve_aliases_and_escaped_parameters_across_function_kinds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.wit");
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let source = "package demo:escaped; interface shared { enum status { ready } type %type = string; } interface api { use shared.{status as state, %type as %alias}; call: func(value: state, escaped: %alias); %func: func(%value: string); resource r { static-call: static func(%value: string); constructor(%value: string); method: func(%value: string); value: get() -> string; value: set(%value: string); static-value: static get() -> string; static-value: static set(%value: string); } } world app { import %log: func(%value: string); export %run: func(%value: string); }";
+    let mut client = Client::start("utf-16");
+    client.open(&uri, source);
+    assert_eq!(client.diagnostics(&uri, 1), json!([]));
+
+    for (id, token, signature) in [
+        (
+            80,
+            "call: func",
+            "call: func(value: state, escaped: %alias);",
+        ),
+        (81, "%func", "%func: func(%value: string);"),
+        (
+            82,
+            "static-call",
+            "static-call: static func(%value: string);",
+        ),
+        (83, "constructor", "constructor(%value: string);"),
+        (84, "method: func", "method: func(%value: string);"),
+        (85, "value: set", "value: set(%value: string);"),
+        (
+            86,
+            "static-value: static set",
+            "static-value: static set(%value: string);",
+        ),
+        (87, "%log", "import %log: func(%value: string);"),
+        (88, "%run", "export %run: func(%value: string);"),
+    ] {
+        let offset = source.find(token).unwrap();
+        let hover = request(
+            &mut client,
+            id,
+            "textDocument/hover",
+            json!({"textDocument":{"uri":uri},"position":{"line":0,"character":offset}}),
+        );
+        let contents = hover["result"]["contents"]["value"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(contents.contains(signature), "{token}: {hover}");
+    }
+    client.shutdown();
+}
+
+#[test]
 fn navigation_skips_targets_removed_after_analysis() {
     let dir = tempfile::tempdir().unwrap();
     let dep_dir = dir.path().join("deps");

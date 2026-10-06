@@ -522,52 +522,6 @@ fn semantic_items(resolve: &Resolve, sources: &[ParsedSource]) -> Vec<SemanticIt
     items
 }
 
-fn source_parameter_names(
-    resolve: &Resolve,
-    function: &wit_parser::Function,
-    sources: &[ParsedSource],
-) -> Vec<String> {
-    let Some(location) = resolve.source_map.resolve_span(function.span) else {
-        return Vec::new();
-    };
-    let Some(source) = sources
-        .iter()
-        .find(|source| same_source_path(&source.path.to_string_lossy(), Path::new(location.path)))
-    else {
-        return Vec::new();
-    };
-    let Some(name) = source
-        .tree
-        .root_node()
-        .descendant_for_byte_range(location.range.start, location.range.end)
-    else {
-        return Vec::new();
-    };
-    let Some(declaration) = std::iter::successors(Some(name), |node| node.parent())
-        .find(|node| matches!(node.kind(), "func_item" | "method_item"))
-    else {
-        return Vec::new();
-    };
-    let mut names = Vec::new();
-    let mut nodes = vec![declaration];
-    while let Some(node) = nodes.pop() {
-        if node.kind() == "named_type"
-            && let Some(param_name) = node.child_by_field_name("name")
-            && let Some(text) = source.source.get(param_name.byte_range())
-        {
-            names.push(text.to_owned());
-        }
-        for index in (0..node.child_count()).rev() {
-            if let Ok(index) = u32::try_from(index)
-                && let Some(child) = node.child(index)
-            {
-                nodes.push(child);
-            }
-        }
-    }
-    names
-}
-
 fn interface_function_signature(
     resolve: &Resolve,
     function: &wit_parser::Function,
@@ -579,7 +533,12 @@ fn interface_function_signature(
         function.kind,
         Kind::Method(_) | Kind::AsyncMethod(_) | Kind::MethodGetter(_) | Kind::MethodSetter(_)
     ));
-    let source_names = source_parameter_names(resolve, function, sources);
+    let source_names: Vec<_> = function
+        .params
+        .iter()
+        .skip(implicit_receiver)
+        .map(|param| source_name(resolve, sources, param.span, &param.name))
+        .collect();
     let params = function
         .params
         .iter()
@@ -654,7 +613,7 @@ fn display_type(resolve: &Resolve, ty: wit_parser::Type, sources: &[ParsedSource
             Type::Id(id) => {
                 let definition = &resolve.types[id];
                 if let Some(name) = &definition.name {
-                    return source_name(resolve, sources, definition.span, name);
+                    return visible_type_name(resolve, sources, id, name);
                 }
                 if !stack.insert(id.index()) {
                     return "_".into();
@@ -1709,6 +1668,67 @@ mod tests {
                     ty.name == "%type" && ty.normalized_name == "type" && ty.key == imported.key
                 })
         );
+    }
+
+    #[test]
+    fn signatures_preserve_local_alias_spelling_and_function_parameter_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.wit");
+        let source = "package demo:escaped; interface shared { enum status { ready } type %type = string; } interface api { use shared.{status as state, %type as %alias}; call: func(value: state, escaped: %alias); %func: func(%value: string); resource r { static-call: static func(%value: string); constructor(%value: string); method: func(%value: string); value: get() -> string; value: set(%value: string); static-value: static get() -> string; static-value: static set(%value: string); } } world app { import %log: func(%value: string); export %run: func(%value: string); }";
+        let analysis =
+            analyze_package(dir.path(), &Overlays::from([(path.clone(), source.into())])).unwrap();
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "{:?}",
+            analysis.diagnostics
+        );
+
+        let escaped_function = analysis
+            .items
+            .iter()
+            .find(|item| item.name == "%func")
+            .unwrap();
+        assert!(
+            escaped_function.key.ends_with(":func"),
+            "semantic key keeps wit-parser's normalized name: {}",
+            escaped_function.key
+        );
+
+        for (name, signature) in [
+            ("call", "call: func(value: state, escaped: %alias);"),
+            ("%func", "%func: func(%value: string);"),
+            ("static-call", "static-call: static func(%value: string);"),
+            ("constructor", "constructor(%value: string);"),
+            ("method", "method: func(%value: string);"),
+            ("value", "value: set(%value: string);"),
+            ("static-value", "static-value: static set(%value: string);"),
+            ("%log", "import %log: func(%value: string);"),
+            ("%run", "export %run: func(%value: string);"),
+        ] {
+            assert!(
+                analysis.items.iter().any(|item| {
+                    item.name == name && item.signature.as_deref() == Some(signature)
+                }),
+                "missing source-valid signature for {name}"
+            );
+        }
+
+        let alias_item = analysis
+            .items
+            .iter()
+            .find(|item| item.name == "%alias")
+            .unwrap();
+        let alias_use = source.rfind("%alias").unwrap();
+        let visible_alias = analysis
+            .visible_types_at(&path, alias_use)
+            .iter()
+            .find(|ty| ty.name == "%alias")
+            .unwrap();
+        assert_eq!(visible_alias.normalized_name, "alias");
+        assert_eq!(visible_alias.key, alias_item.key);
+        assert!(analysis.references.iter().any(|reference| {
+            reference.key == alias_item.key && &source[reference.range.clone()] == "%alias"
+        }));
     }
 
     #[test]
