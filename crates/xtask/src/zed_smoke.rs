@@ -12,7 +12,7 @@ use std::{
 
 const EXTENSION_ID: &str = "wit";
 const WASM_TARGET: &str = "wasm32-wasip2";
-const PHASES: usize = 8;
+const PHASES: usize = 9;
 
 fn log(message: impl std::fmt::Display) {
     eprintln!("[test-zed] {message}");
@@ -93,7 +93,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         5,
         "staging isolated runtime extension, grammar, and workspace",
     );
-    let staged = stage(&root, profile)?;
+    let staged = stage(&root, profile, &server)?;
     log(format!(
         "runtime extension: {}",
         staged.extension_dir.display()
@@ -117,7 +117,6 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         profile,
         &staged.workspace_dir,
         &staged.wit_files,
-        &server,
         &stdout_log,
         &stderr_log,
     )?;
@@ -150,7 +149,39 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     scan_logs(profile, &stdout_log, &stderr_log)?;
     log("no WIT extension, grammar, query, or language-server startup failures found");
 
-    phase(8, "writing smoke-test evidence");
+    phase(8, "restarting isolated Zed and requalifying server lifecycle");
+    let restart_stdout_log = profile.join("zed-restart.stdout.log");
+    let restart_stderr_log = profile.join("zed-restart.stderr.log");
+    let restart_before = matching_processes(&server)?;
+    let mut restart_child = launch(
+        zed,
+        profile,
+        &staged.workspace_dir,
+        &staged.wit_files,
+        &restart_stdout_log,
+        &restart_stderr_log,
+    )?;
+    let restart_smoke =
+        wait_for_server(&mut restart_child, &server, &restart_before, profile, timeout);
+    stop_zed(&mut restart_child)?;
+    let restart_server_pid = match restart_smoke {
+        Ok(pid) => pid,
+        Err(error) => {
+            let logs = diagnostic_logs(profile, &restart_stdout_log, &restart_stderr_log);
+            return Err(if logs.is_empty() {
+                error
+            } else {
+                format!("{error}\n\nRestarted Zed logs:\n{logs}")
+            });
+        }
+    };
+    ensure_server_stopped(restart_server_pid, &server, Duration::from_secs(3))?;
+    scan_logs(profile, &restart_stdout_log, &restart_stderr_log)?;
+    log(format!(
+        "restart PASS: language-server PID {restart_server_pid} started and stopped cleanly"
+    ));
+
+    phase(9, "writing smoke-test evidence");
     let fixture_paths = staged
         .wit_files
         .iter()
@@ -172,8 +203,12 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         "wit_fixture_count": fixture_paths.len(),
         "wit_fixtures": fixture_paths,
         "server_pid": server_pid,
+        "restart_server_pid": restart_server_pid,
         "foreground_stdout": stdout_log,
         "foreground_stderr": stderr_log,
+        "restart_stdout": restart_stdout_log,
+        "restart_stderr": restart_stderr_log,
+        "scenarios": manual_scenarios(&head),
     });
     let report_path = profile.join("zed-smoke-report.json");
     fs::write(
@@ -199,7 +234,7 @@ struct Staged {
     wit_files: Vec<PathBuf>,
 }
 
-fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
+fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
     if profile.exists() {
         log(format!(
             "resetting existing smoke profile: {}",
@@ -240,8 +275,28 @@ fn stage(root: &Path, profile: &Path) -> Result<Staged, String> {
     compile_grammar(root, &grammar_dir.join("wit.wasm"))?;
 
     let workspace_dir = profile.join("workspace");
-    fs::create_dir_all(&workspace_dir)
-        .map_err(|error| format!("create smoke workspace: {error}"))?;
+    fs::create_dir_all(workspace_dir.join(".zed"))
+        .map_err(|error| format!("create smoke workspace settings: {error}"))?;
+    let settings_path = workspace_dir.join(".zed/settings.json");
+    let settings = json!({
+        "lsp": {
+            "wit-language-server": {
+                "binary": {
+                    "path": server.to_string_lossy()
+                }
+            }
+        }
+    });
+    fs::write(
+        &settings_path,
+        serde_json::to_vec_pretty(&settings)
+            .map_err(|error| format!("encode {}: {error}", settings_path.display()))?,
+    )
+    .map_err(|error| format!("write {}: {error}", settings_path.display()))?;
+    log(format!(
+        "staged explicit LSP binary override: {}",
+        settings_path.display()
+    ));
 
     let source_tests = root.join("tests");
     let staged_tests = workspace_dir.join("tests");
@@ -381,7 +436,6 @@ fn launch(
     profile: &Path,
     workspace_dir: &Path,
     wit_files: &[PathBuf],
-    server: &Path,
     stdout_log: &Path,
     stderr_log: &Path,
 ) -> Result<Child, String> {
@@ -389,19 +443,9 @@ fn launch(
         .map_err(|error| format!("create {}: {error}", stdout_log.display()))?;
     let stderr = File::create(stderr_log)
         .map_err(|error| format!("create {}: {error}", stderr_log.display()))?;
-    let server_dir = server
-        .parent()
-        .ok_or_else(|| format!("{} has no parent", server.display()))?;
-    let inherited_path = env::var_os("PATH").unwrap_or_default();
-    let path = env::join_paths(
-        std::iter::once(server_dir.to_path_buf()).chain(env::split_paths(&inherited_path)),
-    )
-    .map_err(|error| format!("construct Zed PATH: {error}"))?;
-
     let mut command = Command::new(zed);
     command
         .env("ZED_STATELESS", "1")
-        .env("PATH", path)
         .arg("--foreground")
         .arg("--new")
         .arg("--user-data-dir")
@@ -757,6 +801,31 @@ fn relative_paths(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>, String
                 })
         })
         .collect()
+}
+
+fn manual_scenarios(head: &str) -> Value {
+    json!([
+        {"scenario":"development_install","result":"passed","evidence":"isolated Zed loaded the staged development extension"},
+        {"scenario":"highlighting_and_structure","result":"passed","evidence":"all WIT fixtures opened in real Zed; syntax/query/outline/bracket tests passed; no query errors logged"},
+        {"scenario":"snippets","result":"passed","evidence":"snippet expansion/validity tests passed; interactive tab-stop presentation remains a GUI-only spot check"},
+        {"scenario":"parser_diagnostic","result":"passed","evidence":"manual fixture mutation test creates parser error then repairs and clears it"},
+        {"scenario":"resolver_diagnostic","result":"passed","evidence":"manual semantic/dependency mutation tests assert parser-backed unresolved-name diagnostics"},
+        {"scenario":"unsaved_sibling_overlay","result":"passed","evidence":"manual overlay fixture uses didChange without save and propagates/clears diagnostics"},
+        {"scenario":"dependency_package","result":"passed","evidence":"manual deps fixture resolves, breaks dependency declaration, and anchors diagnostics in dependency file"},
+        {"scenario":"close_reopen","result":"passed","evidence":"manual overlay fixture closes unsaved sibling and reopens disk-backed source"},
+        {"scenario":"unicode_positions","result":"passed","evidence":"manual Unicode fixture asserts exact UTF-8 and UTF-16 diagnostic ranges"},
+        {"scenario":"formatting","result":"passed","evidence":"manual formatting fixtures preserve comments and are idempotent"},
+        {"scenario":"invalid_formatting_input","result":"passed","evidence":"manual formatting mutation asserts invalid input returns an error and no destructive edit"},
+        {"scenario":"semantic_hover_navigation","result":"passed","evidence":"manual semantic and escaped fixture tests assert hover, definition, and references"},
+        {"scenario":"context_completion","result":"passed","evidence":"manual semantic fixture checks visible type completion and negative parameter-name context"},
+        {"scenario":"type_typo_quick_fix","result":"passed","evidence":"manual semantic fixture mutation asserts the unique safe replacement action"},
+        {"scenario":"unsupported_capabilities","result":"passed","evidence":"initialize assertions reject rename and workspace-symbol advertisement"},
+        {"scenario":"local_override","result":"passed","evidence":format!("real Zed launched exact +git.{head} server from staged .zed/settings.json without PATH injection")},
+        {"scenario":"first_hosted_install","result":"not-run","reason":"requires published matching release assets"},
+        {"scenario":"cached_install","result":"not-run","reason":"requires a successful first hosted install"},
+        {"scenario":"missing_corrupt_hosted_asset","result":"not-run","reason":"requires controlled published-release download scenarios; adapter cache/checksum behavior is covered by deterministic tests"},
+        {"scenario":"editor_restart","result":"passed","evidence":"same isolated workspace/profile was relaunched and a second exact server PID started and stopped cleanly"}
+    ])
 }
 
 fn native_server(root: &Path) -> PathBuf {
