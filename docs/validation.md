@@ -37,9 +37,11 @@ or end-to-end hosted installation.
   it is not a result for this candidate. Status: **BLOCKED — no hosted runner
   execution on final SHA**.
 
-The complete gate passed on implementation HEAD `f4d87ec72467283c846d76e3b5cf5625915a4128`.
-After committing this evidence update, rerun the same complete gate against that
-new exact HEAD before updating the PR description. The exact commands are:
+The complete gate passed on implementation HEAD `f4d87ec72467283c846d76e3b5cf5625915a4128`
+and was rerun on validation-evidence HEAD
+`fc9d24111d9a73c4f70b6c8191ae965e4d532107`. The evidence commit changes only
+this document; the full exact-head gate passed after it was committed. The exact
+commands are:
 
 ```sh
 cargo xtask check-no-python
