@@ -1417,14 +1417,17 @@ fn manual_unicode_fixture_keeps_diagnostic_range_aligned() {
 
 #[test]
 fn manual_formatting_fixtures_are_idempotent_preserve_comments_and_refuse_invalid_input() {
-    for (index, source) in [MANUAL_FORMATTING_MAIN, MANUAL_FORMATTING_COMMENTS]
-        .into_iter()
-        .enumerate()
-    {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(format!("format-{index}.wit"));
-        std::fs::write(&path, source).unwrap();
-        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.wit");
+    let comments_path = dir.path().join("comments.wit");
+    std::fs::write(&main_path, MANUAL_FORMATTING_MAIN).unwrap();
+    std::fs::write(&comments_path, MANUAL_FORMATTING_COMMENTS).unwrap();
+
+    for (path, source) in [
+        (&main_path, MANUAL_FORMATTING_MAIN),
+        (&comments_path, MANUAL_FORMATTING_COMMENTS),
+    ] {
+        let uri = url::Url::from_file_path(path).unwrap().to_string();
         let mut client = Client::start("utf-16");
         client.open(&uri, source);
         assert_eq!(client.diagnostics(&uri, 1), json!([]));
