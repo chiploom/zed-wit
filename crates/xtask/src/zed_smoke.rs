@@ -30,7 +30,14 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     )?;
     run_status(
         "cargo",
-        &["test", "-p", "wit-language-server", "--test", "stdio", "--locked"],
+        &[
+            "test",
+            "-p",
+            "wit-language-server",
+            "--test",
+            "stdio",
+            "--locked",
+        ],
         &root,
         &[],
     )?;
@@ -42,7 +49,13 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     )?;
     run_status(
         "cargo",
-        &["build", "-p", "wit-language-server", "--release", "--locked"],
+        &[
+            "build",
+            "-p",
+            "wit-language-server",
+            "--release",
+            "--locked",
+        ],
         &root,
         &[("WIT_LANGUAGE_SERVER_BUILD_COMMIT", head.as_str())],
     )?;
@@ -60,11 +73,27 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     let stdout_log = profile.join("zed-foreground.stdout.log");
     let stderr_log = profile.join("zed-foreground.stderr.log");
     let before = matching_processes(&server)?;
-    let mut child = launch(zed, profile, &staged.workspace_file, &stdout_log, &stderr_log)?;
+    let mut child = launch(
+        zed,
+        profile,
+        &staged.workspace_file,
+        &stdout_log,
+        &stderr_log,
+    )?;
 
     let smoke = wait_for_server(&mut child, &server, &before, profile, timeout);
     stop_zed(&mut child, profile);
-    let server_pid = smoke?;
+    let server_pid = match smoke {
+        Ok(pid) => pid,
+        Err(error) => {
+            let logs = diagnostic_logs(profile, &stdout_log, &stderr_log);
+            return Err(if logs.is_empty() {
+                error
+            } else {
+                format!("{error}\n\nZed logs:\n{logs}")
+            });
+        }
+    };
     scan_logs(profile, &stdout_log, &stderr_log)?;
 
     let report = json!({
@@ -106,11 +135,14 @@ fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
             .map_err(|error| format!("remove {}: {error}", profile.display()))?;
     }
 
-    let extension_dir = profile.join("extensions/installed").join(EXTENSION_ID);
+    let extension_dir = profile.join("runtime-extension");
     fs::create_dir_all(&extension_dir)
         .map_err(|error| format!("create {}: {error}", extension_dir.display()))?;
 
-    copy_file(&root.join("extension.toml"), &extension_dir.join("extension.toml"))?;
+    copy_file(
+        &root.join("extension.toml"),
+        &extension_dir.join("extension.toml"),
+    )?;
     copy_dir(&root.join("languages"), &extension_dir.join("languages"))?;
     copy_dir(&root.join("snippets"), &extension_dir.join("snippets"))?;
 
@@ -120,6 +152,11 @@ fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
         .join("debug")
         .join("zed_wit.wasm");
     copy_file(&adapter, &extension_dir.join("extension.wasm"))?;
+
+    let installed_dir = profile.join("extensions/installed");
+    fs::create_dir_all(&installed_dir)
+        .map_err(|error| format!("create {}: {error}", installed_dir.display()))?;
+    link_dev_extension(&extension_dir, &installed_dir.join(EXTENSION_ID))?;
 
     let grammar_dir = extension_dir.join("grammars");
     fs::create_dir_all(&grammar_dir)
@@ -154,6 +191,22 @@ fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
         extension_dir,
         workspace_file,
     })
+}
+
+#[cfg(unix)]
+fn link_dev_extension(source: &Path, destination: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(source, destination).map_err(|error| {
+        format!(
+            "link dev extension {} to {}: {error}",
+            source.display(),
+            destination.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn link_dev_extension(_source: &Path, _destination: &Path) -> Result<(), String> {
+    Err("test-zed currently requires Unix symlink support".into())
 }
 
 fn compile_grammar(root: &Path, output_path: &Path) -> Result<(), String> {
@@ -201,8 +254,8 @@ fn tree_sitter_wit_root(root: &Path) -> Result<PathBuf, String> {
         ["metadata", "--format-version", "1", "--locked"],
         root,
     )?;
-    let metadata: Value =
-        serde_json::from_str(&metadata).map_err(|error| format!("parse cargo metadata: {error}"))?;
+    let metadata: Value = serde_json::from_str(&metadata)
+        .map_err(|error| format!("parse cargo metadata: {error}"))?;
     let packages = metadata["packages"]
         .as_array()
         .ok_or("cargo metadata omitted packages")?;
@@ -260,6 +313,7 @@ fn launch(
         .map_err(|error| format!("create {}: {error}", stderr_log.display()))?;
     Command::new(zed)
         .arg("--foreground")
+        .arg("--new")
         .arg("--user-data-dir")
         .arg(profile)
         .arg(workspace_file)
@@ -360,14 +414,7 @@ fn parse_process_snapshot(snapshot: &str) -> Vec<(u32, String)> {
 }
 
 fn scan_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> Result<(), String> {
-    let mut logs = String::new();
-    for path in [stdout_log, stderr_log] {
-        if let Ok(content) = fs::read_to_string(path) {
-            logs.push_str(&content);
-            logs.push('\n');
-        }
-    }
-    collect_logs(profile, &mut logs)?;
+    let logs = diagnostic_logs(profile, stdout_log, stderr_log);
 
     const FAILURES: &[&str] = &[
         "failed to load extension",
@@ -383,6 +430,20 @@ fn scan_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> Result<(),
         return Err(format!("Zed reported a WIT integration failure: {line}"));
     }
     Ok(())
+}
+
+fn diagnostic_logs(profile: &Path, stdout_log: &Path, stderr_log: &Path) -> String {
+    let mut logs = String::new();
+    for path in [stdout_log, stderr_log] {
+        if let Ok(content) = fs::read_to_string(path) {
+            logs.push_str(&content);
+            logs.push('\n');
+        }
+    }
+    let _ = collect_logs(profile, &mut logs);
+    let lines = logs.lines().collect::<Vec<_>>();
+    let start = lines.len().saturating_sub(120);
+    lines[start..].join("\n")
 }
 
 fn collect_logs(path: &Path, output: &mut String) -> Result<(), String> {
@@ -446,13 +507,11 @@ fn copy_dir(source: &Path, destination: &Path) -> Result<(), String> {
 }
 
 fn native_server(root: &Path) -> PathBuf {
-    root.join("target")
-        .join("release")
-        .join(if cfg!(windows) {
-            "wit-language-server.exe"
-        } else {
-            "wit-language-server"
-        })
+    root.join("target").join("release").join(if cfg!(windows) {
+        "wit-language-server.exe"
+    } else {
+        "wit-language-server"
+    })
 }
 
 fn run_status(

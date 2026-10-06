@@ -106,7 +106,7 @@ fn run() -> Result<(), String> {
                         .map_err(|error| format!("invalid --timeout-seconds {value:?}: {error}"))
                 })
                 .transpose()?
-                .unwrap_or(30);
+                .unwrap_or(60);
             if !(5..=180).contains(&timeout) {
                 return Err("--timeout-seconds must be between 5 and 180".into());
             }

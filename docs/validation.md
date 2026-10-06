@@ -77,6 +77,20 @@ cargo xtask collect-licenses --target aarch64-apple-darwin --output dist-validat
 The package was written under `dist-validation/` to avoid overwriting `dist/`.
 Temporary packaging output was removed after recording its results.
 
+## First automated Zed smoke trial at `d28af4836a25bc9a80f8cafaa0009e4621cebe0d`
+
+The user's first run of `cargo xtask test-zed` on this SHA confirmed the
+11 syntax/editing tests, 17 stdio protocol tests and 9 `xtask` tests passed.
+The real-Zed phase timed out after 30 seconds before the harness observed the
+native server process. The same run also showed `cargo fmt --check` differences
+in the newly added smoke source. The subsequent harness fix applies rustfmt's
+reported layout, forces `zed --new` for deterministic fresh-profile opening,
+stages the extension as a dev-extension symlink, increases the default timeout
+to 60 seconds and includes captured Zed logs in smoke failures.
+
+This trial is failure evidence for `d28af483...`, not qualification evidence
+for the subsequent fix.
+
 ## Exact local validation run at `1ab100abe7aa5a278828345bdc2283295b201fa4`
 
 On 2026-10-06, the user reran the full local gate on
