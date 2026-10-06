@@ -8,27 +8,38 @@ or end-to-end hosted installation.
 ## PR #6 semantic editor candidate
 
 - Validation date: 2026-10-06
-- Validated source HEAD: `38df08ab88d666c05a709af837038b0f3b24cf0a` (validation-document commit)
+- Validated implementation HEAD: `f4d87ec72467283c846d76e3b5cf5625915a4128`
+  (escaped-identifier and completion-context fixes plus validation-artifact
+  ignore rule).
 - Host: macOS ARM64 (`aarch64-apple-darwin`)
-- Rust: `rustc 1.99.0 (b940084d7 2026-09-28)`
-- Exact local gate: passed
-- Workspace tests: 59 passed (18 analysis, 4 language-server unit, 13 stdio
-  protocol, 11 syntax/editing, 7 xtask, 6 adapter/distribution); doctest suites
-  had no doctests.
-- Build identity: passed; release server reported
-  `wit-language-server 0.1.0+git.38df08ab88d666c05a709af837038b0f3b24cf0a`.
-- Host packaging: passed for `aarch64-apple-darwin`; package and 116-package
-  license report were produced. The packaged binary reported the same build
-  identity. Provenance recorded `source_dirty: false`, source revision
-  `38df08ab88d666c05a709af837038b0f3b24cf0a`, and SHA-256
-  `9c090c516b5928a537c8cb09bca51d3b6f021b23fc75a0afbc770b1120628ac2`.
-- Zed GUI qualification: not performed for this candidate; exact Zed version is
-  unavailable. See [manual testing](manual-testing.md).
-- Hosted CI: no run on this candidate was verified. Earlier hosted results below
-  are for the stated historical baseline only.
+- Rust: `rustc 1.99.0 (b940084d7 2026-09-28)`; Cargo 1.99.0
+- Exact local gate: passed on the implementation candidate. It includes
+  `cargo xtask check-no-python`, `cargo xtask check-dependencies`, formatting,
+  workspace clippy, workspace tests, workspace check, Wasm build, native
+  release build, and `git diff --check origin/main...HEAD`.
+- Workspace tests: 65 passed (21 `wit-analysis`, 4 language-server unit, 16
+  stdio protocol, 11 syntax/editing, 7 `xtask`, 6 adapter/distribution); no
+  doctests were present.
+- Build identity: passed on the implementation candidate; server reported
+  `wit-language-server 0.1.0+git.f4d87ec72467283c846d76e3b5cf5625915a4128`.
+- Host packaging: passed for `aarch64-apple-darwin`; packaged server reported
+  `wit-language-server 0.1.0+git.f4d87ec72467283c846d76e3b5cf5625915a4128`.
+  Package SHA-256:
+  `7846371107bbbb175ac2ce2b2793c9a345738790429bc245cd31ae8a7e44d3ee`.
+  The 116-package license report was produced. Packaging metadata recorded the
+  matching source revision and `source_dirty: true` because this validation
+  document was being edited; it is not clean-release provenance.
+- Zed: `zed --version` reports `Zed 1.22.0` on `/Applications/Zed.app`, but
+  interactive GUI testing was not available in this session. The requested
+  semantic/editor checklist remains pending; see [manual testing](manual-testing.md).
+- Hosted CI: no check runs were reported for this candidate. The only listed
+  branch run was an older failed run on `67b43f00d38af20d4ceafe085b6086c452096b6f`;
+  it is not a result for this candidate. Status: **BLOCKED — no hosted runner
+  execution on final SHA**.
 
-The complete gate passed again on this HEAD after the validation document was
-committed. Commands passed on that source HEAD:
+The complete gate passed on implementation HEAD `f4d87ec72467283c846d76e3b5cf5625915a4128`.
+After committing this evidence update, rerun the same complete gate against that
+new exact HEAD before updating the PR description. The exact commands are:
 
 ```sh
 cargo xtask check-no-python
@@ -45,9 +56,8 @@ cargo xtask package-release --target aarch64-apple-darwin --output dist-validati
 cargo xtask collect-licenses --target aarch64-apple-darwin --output dist-validation
 ```
 
-The default `dist/` already contained artifacts, so packaging was run to the
-fresh `dist-validation/` directory without overwriting them. Temporary package
-artifacts were removed after recording the evidence.
+The package was written under `dist-validation/` to avoid overwriting `dist/`.
+Temporary packaging output was removed after recording its results.
 
 ## Snapshot
 
