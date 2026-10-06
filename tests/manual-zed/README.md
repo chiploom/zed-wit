@@ -18,10 +18,11 @@ For the automated integration gate, run:
 cargo xtask test-zed
 ```
 
-It stages `semantic/main.wit` in an isolated real Zed profile and combines the
-extension/grammar/server startup smoke with the automated syntax/query/snippet
-and stdio LSP suites. The mutation steps below remain useful for targeted manual
-reproduction when an automated assertion fails.
+It copies the complete repository `tests/` tree into an isolated workspace,
+verifies that every `.wit` fixture was staged, opens all of those fixtures in a
+real stateless Zed instance, and combines that editor smoke with the complete
+workspace unit/integration and doctest suites. The mutation steps below remain
+useful for targeted manual reproduction when an automated assertion fails.
 
 ## Semantic editor
 
