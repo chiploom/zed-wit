@@ -46,13 +46,20 @@ mod supported {
         validate_linux_backend_option(linux_backend)?;
         let root = util::repo_root();
         let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
+        let drivers = prepare_input_drivers(&root, profile, linux_backend)?;
+        let drivers = preflight_input_drivers(drivers)?;
+        if drivers.is_empty() {
+            return Err(format!(
+                "no GUI input backend passed preflight{}",
+                input_permission_hint()
+            ));
+        }
 
-        eprintln!("[test-zed-gui] running deterministic and real-Zed qualification first");
+        eprintln!("[test-zed-gui] input backend preflight passed; running deterministic and real-Zed qualification");
         zed_smoke::run(zed, &profile.join("smoke"), timeout)?;
 
         let zed_path = zed_smoke::resolve_executable(zed)?;
         let server = zed_smoke::native_server(&root);
-        let drivers = prepare_input_drivers(&root, profile, linux_backend)?;
         let mut failures = Vec::new();
 
         for (attempt, driver) in drivers.iter().enumerate() {
@@ -254,6 +261,66 @@ mod supported {
                 })
             })
             .collect()
+    }
+
+    fn preflight_input_drivers(drivers: Vec<InputDriver>) -> Result<Vec<InputDriver>, String> {
+        let mut available = Vec::new();
+        let mut failures = Vec::new();
+        for driver in drivers {
+            match probe_input_driver(&driver) {
+                Ok(()) => {
+                    eprintln!(
+                        "[test-zed-gui] {} input backend preflight PASS",
+                        driver.backend
+                    );
+                    available.push(driver);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[test-zed-gui] {} input backend preflight failed: {error}",
+                        driver.backend
+                    );
+                    failures.push(format!("{}: {error}", driver.backend));
+                }
+            }
+        }
+
+        if available.is_empty() {
+            Err(format!(
+                "all GUI input backend preflights failed{}:\n{}",
+                input_permission_hint(),
+                failures.join("\n")
+            ))
+        } else {
+            Ok(available)
+        }
+    }
+
+    fn probe_input_driver(driver: &InputDriver) -> Result<(), String> {
+        let output = Command::new(&driver.executable)
+            .arg("probe")
+            .output()
+            .map_err(|error| {
+                format!(
+                    "launch {} input preflight {}: {error}",
+                    driver.backend,
+                    driver.executable.display()
+                )
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit status {}", output.status)
+        };
+        Err(detail)
     }
 
     fn selected_backend_features(
