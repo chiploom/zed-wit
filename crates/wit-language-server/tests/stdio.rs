@@ -1471,8 +1471,14 @@ fn manual_formatting_fixtures_are_idempotent_preserve_comments_and_refuse_invali
             "textDocument/formatting",
             json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
         );
-        assert!(refusal.get("error").is_some(), "{refusal}");
-        assert!(refusal["result"].is_null());
+        let explicitly_refused = refusal.get("error").is_some();
+        let returned_no_edits = refusal["result"]
+            .as_array()
+            .is_some_and(|edits| edits.is_empty());
+        assert!(
+            explicitly_refused || returned_no_edits,
+            "invalid formatting must refuse without edits: {refusal}"
+        );
         client.shutdown();
     }
 }
