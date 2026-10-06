@@ -99,6 +99,7 @@ fn run() -> Result<(), String> {
                     "timeout-seconds",
                     "settle-milliseconds",
                     "allow-input-injection",
+                    "linux-input-backend",
                 ],
             )?;
             let zed = options.remove("zed").unwrap_or_else(|| "zed".into());
@@ -139,6 +140,9 @@ fn run() -> Result<(), String> {
                 .transpose()
                 .map_err(|error| format!("invalid --allow-input-injection value: {error}"))?
                 .unwrap_or(false);
+            let linux_backend = options
+                .remove("linux-input-backend")
+                .unwrap_or_else(|| "auto".into());
             util::ensure_empty_options(options)?;
             zed_gui::run(
                 &zed,
@@ -146,6 +150,7 @@ fn run() -> Result<(), String> {
                 Duration::from_secs(timeout),
                 Duration::from_millis(settle),
                 allow_input,
+                &linux_backend,
             )
         }
         "test-zed" => {
@@ -190,6 +195,6 @@ Usage:
   cargo xtask verify-release-assets [--input <dir>]
   cargo xtask check-no-python
   cargo xtask test-zed [--zed <binary>] [--profile <dir>] [--timeout-seconds <5-180>]
-  cargo xtask test-zed-gui [--zed <binary>] [--profile <dir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] --allow-input-injection true"
+  cargo xtask test-zed-gui [--zed <binary>] [--profile <dir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] [--linux-input-backend <auto|x11|wayland|libei>] --allow-input-injection true"
     );
 }
