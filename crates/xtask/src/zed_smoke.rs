@@ -659,8 +659,9 @@ pub(crate) fn stop_zed(child: &mut Child) -> Result<(), String> {
         return Ok(());
     }
 
+    let pid_string = pid.to_string();
     let status = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .args(["/PID", pid_string.as_str(), "/T", "/F"])
         .status()
         .map_err(|error| format!("terminate isolated Zed process tree {pid}: {error}"))?;
     if !status.success()
@@ -803,7 +804,7 @@ fn process_snapshot() -> Result<Vec<(u32, String)>, String> {
             let command = process
                 .cmd()
                 .iter()
-                .map(|part| part.to_string_lossy())
+                .map(|part| part.to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join(" ");
             (pid.as_u32(), format!("{exe} {command}"))
