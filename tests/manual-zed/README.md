@@ -12,6 +12,17 @@ git restore tests/manual-zed
 Record the exact repository commit, Zed version, native server build identity,
 OS/architecture, observed result and evidence path for every scenario.
 
+For the automated integration gate, run:
+
+```sh
+cargo xtask test-zed
+```
+
+It stages `semantic/main.wit` in an isolated real Zed profile and combines the
+extension/grammar/server startup smoke with the automated syntax/query/snippet
+and stdio LSP suites. The mutation steps below remain useful for targeted manual
+reproduction when an automated assertion fails.
+
 ## Semantic editor
 
 Open `semantic/main.wit`.

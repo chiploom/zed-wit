@@ -3,8 +3,9 @@ mod licenses;
 mod release;
 mod repository_policy;
 mod util;
+mod zed_smoke;
 
-use std::{env, path::PathBuf, process::ExitCode};
+use std::{env, path::PathBuf, process::ExitCode, time::Duration};
 
 fn main() -> ExitCode {
     match run() {
@@ -88,6 +89,30 @@ fn run() -> Result<(), String> {
             }
             repository_policy::check_no_python()
         }
+        "test-zed" => {
+            let mut options = util::parse_options(rest, &["zed", "profile", "timeout-seconds"])?;
+            let zed = options.remove("zed").unwrap_or_else(|| "zed".into());
+            let profile = util::root_relative(
+                options
+                    .remove("profile")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("target/zed-smoke/profile")),
+            );
+            let timeout = options
+                .remove("timeout-seconds")
+                .map(|value| {
+                    value
+                        .parse::<u64>()
+                        .map_err(|error| format!("invalid --timeout-seconds {value:?}: {error}"))
+                })
+                .transpose()?
+                .unwrap_or(30);
+            if !(5..=180).contains(&timeout) {
+                return Err("--timeout-seconds must be between 5 and 180".into());
+            }
+            util::ensure_empty_options(options)?;
+            zed_smoke::run(&zed, &profile, Duration::from_secs(timeout))
+        }
         other => Err(format!(
             "unknown xtask command {other:?}; run `cargo xtask help`"
         )),
@@ -104,6 +129,7 @@ Usage:
   cargo xtask package-release --target <target> [--output <dir>]
   cargo xtask validate-release --tag <vX.Y.Z>
   cargo xtask verify-release-assets [--input <dir>]
-  cargo xtask check-no-python"
+  cargo xtask check-no-python
+  cargo xtask test-zed [--zed <binary>] [--profile <dir>] [--timeout-seconds <5-180>]"
     );
 }

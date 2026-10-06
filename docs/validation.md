@@ -77,6 +77,31 @@ cargo xtask collect-licenses --target aarch64-apple-darwin --output dist-validat
 The package was written under `dist-validation/` to avoid overwriting `dist/`.
 Temporary packaging output was removed after recording its results.
 
+## Exact local validation run at `1ab100abe7aa5a278828345bdc2283295b201fa4`
+
+On 2026-10-06, the user reran the full local gate on
+`1ab100abe7aa5a278828345bdc2283295b201fa4` after the reusable manual fixtures
+and Action-pin maintenance were present.
+
+Recorded results:
+
+- repository policy checks passed, including no-Python and dependency/license
+  validation;
+- both workflows referenced `taiki-e/install-action` v2.87.26 at
+  `f7e5d7c961414b23f5b25b2da9294395d08513ad`;
+- 67 workspace tests passed: 22 `wit-analysis`, 4 language-server unit, 17
+  stdio protocol, 11 syntax/editing, 7 `xtask`, and 6 adapter/distribution;
+- all workspace doctest targets completed with zero doctests and no failures;
+- workspace check, Wasm extension build and native release build passed;
+- the server reported
+  `wit-language-server 0.1.0+git.1ab100abe7aa5a278828345bdc2283295b201fa4`;
+- `git diff --check origin/main...HEAD` produced no error; and
+- Apple Silicon packaging and license collection completed with a 116-package
+  license report.
+
+This is exact evidence for that SHA. The later Zed-automation tooling still
+requires its own final gate before merge.
+
 ## User-provided Zed fixture diagnostics trace
 
 On 2026-10-06, the user supplied RPC logs from opening fixture files in Zed.

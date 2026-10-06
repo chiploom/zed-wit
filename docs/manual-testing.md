@@ -5,6 +5,38 @@ exact commit, OS/architecture, Zed version, server version/path, commands, obser
 result and artifact path for every executed row. Hosted and GUI results require
 fresh evidence; a unit test or configured workflow cannot stand in for them.
 
+## Automated qualification
+
+Run the repeatable local Zed integration gate from the repository root:
+
+```sh
+cargo xtask test-zed
+```
+
+The command combines deterministic protocol coverage with a real Zed process
+smoke test. It runs the syntax/query/snippet editing suite and stdio LSP suite,
+builds the Wasm adapter and exact native server, compiles the pinned WIT grammar,
+stages an isolated Zed profile, then launches
+`zed --foreground --user-data-dir ...`. The run passes only after Zed starts a
+new instance of the exact `target/release/wit-language-server` binary and the
+isolated logs contain no WIT extension, grammar, query or language-server startup
+failure.
+
+A successful run writes
+`target/zed-smoke/profile/zed-smoke-report.json` plus foreground logs. Override
+the executable/profile/timeout with `--zed`, `--profile` and
+`--timeout-seconds` when needed.
+
+The real-editor smoke currently supports macOS and Linux. Grammar compilation
+uses `WASI_SDK_PATH` first, then Zed's normal extension-build wasi-sdk cache.
+If neither exists, install/rebuild a dev extension once in Zed or point
+`WASI_SDK_PATH` at a wasi-sdk installation.
+
+Zed does not currently expose a supported CLI API for dispatching arbitrary
+editor actions or asserting hover/completion UI contents. Those semantics stay
+in deterministic LSP tests, while the real Zed smoke proves extension discovery,
+grammar/language activation, adapter loading, binary selection and server startup.
+
 ## Setup
 
 1. Build the native server with `cargo build -p wit-language-server --release --locked`
@@ -82,6 +114,21 @@ Run the install/download rows separately on macOS ARM64, macOS Intel, Linux ARM6
 GNU, Linux x86_64 GNU and Windows x86_64 MSVC. Keep pending rows explicit when the
 platform or release is unavailable. Do not claim editor/platform support from
 cross-compilation alone.
+
+## Remaining manual surface
+
+Keep manual checks only for behavior that cannot currently be asserted through
+Zed's supported command-line surface:
+
+- visual presentation of highlighting, hover, completion and code-action menus;
+- interactive snippet tab-stop behavior;
+- outline/panel presentation;
+- first/cached install from an actual published GitHub release;
+- controlled missing/corrupt hosted-release behavior; and
+- platform-specific GUI qualification where a real Zed session is required.
+
+Do not repeat semantic correctness manually when `cargo xtask test-zed` already
+passed the corresponding syntax and stdio assertions.
 
 ## Evidence record
 
