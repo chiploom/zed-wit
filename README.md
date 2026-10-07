@@ -45,8 +45,9 @@ completion, navigation, diagnostics, and **editor: format** to exercise the
 extension. Inspect **zed: open log** for startup or build failures.
 
 An existing registry WIT extension is overridden by the development install.
-Automatic native-server downloads use the published GitHub release that matches
-the extension version.
+Automatic native-server downloads use the published immutable LSP release pinned
+by the adapter; the LSP version can advance independently from the extension
+version.
 
 ## How it works
 
