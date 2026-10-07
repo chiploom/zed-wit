@@ -58,7 +58,9 @@ For publication:
    intended release commit. Audit locked dependency licenses and retain
    `Cargo.lock`.
 3. Ensure `Cargo.toml`, the native server manifest, `extension.toml`, the
-   adapter release version, changelog, and compatibility notes agree.
+   adapter release version, changelog, compatibility notes, and the nonempty
+   `docs/releases/vX.Y.Z.md` user-facing release notes agree. CD refuses a
+   release candidate without the matching release-notes file.
 4. Optionally dispatch **CD** from the default branch with the new `vX.Y.Z`
    tag and `publish=false` as a release-candidate dry run. Require the
    validation, five native builds, and combined artifact verification to pass.
@@ -74,8 +76,9 @@ For publication:
    or an unpublished draft release only when the tag still resolves to the
    validated SHA, then resumes publication without moving or deleting the tag.
 7. Download each published asset and sidecar, verify checksum, provenance and the
-   target-specific redistribution notice, and exercise fresh-install and cached
-   behavior in Zed. For example, run
+   target-specific redistribution notice, and run `cargo xtask test-zed-hosted`
+   on each available supported host to exercise first download, cached reuse,
+   corrupt-cache recovery, and missing-checksum recovery in real Zed. Also run
    `gh attestation verify <asset> --repo chiploom/zed-wit` against downloaded
    bytes. The adapter itself verifies SHA-256, not attestations.
 
