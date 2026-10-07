@@ -49,13 +49,41 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require unused release tag
+      - name: Require unused tag or resumable draft
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ github.sha }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+
+          if ! gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >tag-ref 2>/dev/null; then
+            exit 0
+          fi
+
+          if [ "$PUBLISH" != "true" ]; then
             echo "::error::Release tag $RELEASE_TAG already exists"
+            exit 1
+          fi
+
+          if ! gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' >draft-state 2>/dev/null; then
+            echo "::error::Tag $RELEASE_TAG exists without a resumable draft release"
+            exit 1
+          fi
+          if [ "$(cat draft-state)" != "true" ]; then
+            echo "::error::Release $RELEASE_TAG is already published"
+            exit 1
+          fi
+
+          remote_sha=$(jq -r '.object.sha' tag-ref)
+          object_type=$(jq -r '.object.type' tag-ref)
+          if [ "$object_type" = "tag" ]; then
+            remote_sha=$(gh api "repos/$GH_REPO/git/tags/$remote_sha" --jq '.object.sha')
+          fi
+          if [ "$remote_sha" != "$RELEASE_SHA" ]; then
+            echo "::error::Draft tag $RELEASE_TAG resolves to $remote_sha instead of $RELEASE_SHA"
             exit 1
           fi
 
