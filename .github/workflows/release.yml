@@ -350,9 +350,51 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      - name: Attest new LSP build provenance
+        if: ${{ inputs.operation == 'publish' }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*
+
+      - name: Write regeneration attestation predicate
+        if: ${{ inputs.operation == 'regenerate' }}
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          CONTROL_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          jq -n \
+            --arg repository "$REPOSITORY" \
+            --arg tag "$RELEASE_TAG" \
+            --arg source_revision "$RELEASE_SHA" \
+            --arg control_revision "$CONTROL_SHA" \
+            --arg workflow_ref "$WORKFLOW_REF" \
+            --arg run_id "$RUN_ID" \
+            '{
+              schema_version: 1,
+              operation: "regenerate",
+              artifact_source: {
+                repository: $repository,
+                tag: $tag,
+                revision: $source_revision
+              },
+              release_control: {
+                revision: $control_revision,
+                workflow_ref: $workflow_ref,
+                run_id: $run_id
+              }
+            }' > regeneration-predicate.json
+
+      - name: Attest regenerated LSP source binding
+        if: ${{ inputs.operation == 'regenerate' }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
+          predicate-type: https://github.com/chiploom/zed-wit/attestations/release-regeneration/v1
+          predicate-path: regeneration-predicate.json
 
   publish:
     name: Publish GitHub release
