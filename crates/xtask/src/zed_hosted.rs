@@ -305,14 +305,16 @@ fn is_language_server_executable(path: &Path) -> bool {
 }
 
 fn release_identity(root: &Path) -> Result<ReleaseIdentity, String> {
-    let source = fs::read_to_string(root.join("extension.toml"))
-        .map_err(|error| format!("read extension.toml: {error}"))?;
-    let manifest: toml::Value =
-        toml::from_str(&source).map_err(|error| format!("parse extension.toml: {error}"))?;
+    let manifest_path = root.join("crates/wit-language-server/Cargo.toml");
+    let source = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
+    let manifest: toml::Value = toml::from_str(&source)
+        .map_err(|error| format!("parse {}: {error}", manifest_path.display()))?;
     let version = manifest
-        .get("version")
+        .get("package")
+        .and_then(|package| package.get("version"))
         .and_then(toml::Value::as_str)
-        .ok_or("extension.toml omitted version")?
+        .ok_or("language-server manifest omitted package.version")?
         .to_owned();
     let tag = format!("v{version}");
     let output = util::command_output(
