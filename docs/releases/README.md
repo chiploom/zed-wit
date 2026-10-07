@@ -6,15 +6,20 @@ GitHub releases are scoped explicitly.
   the five native LSP binaries plus their checksums, provenance, redistribution
   notices, and project license files. This scope does not publish the Zed
   extension.
-- `extension`: Zed extension source release only. The tag and GitHub-generated
-  source archive represent the extension source, and CD verifies that the
-  extension builds for `wasm32-wasip2`. No native LSP binaries are attached.
-  This scope does not publish or replace the Zed extension registry entry.
-- `full`: the Git tag represents the full WIT-for-Zed source release together
-  with the native LSP assets. GitHub's source archive contains the extension
-  source at that tag; attached binary assets remain LSP artifacts. A full GitHub
-  release still does not publish or replace the Zed extension registry entry.
+- `extension`: Zed extension source release only. The protected
+  `v-extension-X.Y.Z` tag and GitHub-generated source archive represent the
+  extension source, and CD verifies that the extension builds for
+  `wasm32-wasip2`. No native LSP binaries are attached. Before publication, CD
+  requires the LSP version pinned by the adapter to already exist as a published,
+  immutable `vX.Y.Z` LSP release with every supported runtime binary and
+  checksum. This scope does not publish or replace the Zed extension registry
+  entry.
+
+LSP and extension versions are independent. LSP releases use protected
+`vX.Y.Z` tags; extension releases use protected `v-extension-X.Y.Z` tags.
+Both remain covered by the repository's `v*` release-tag ruleset.
 
 Release notes live at `docs/releases/<scope>/vX.Y.Z.md`. The CD workflow refuses
-to publish when the notes file for the selected scope and tag is missing or
-empty.
+to publish when the notes file for the selected scope/version is missing or
+empty. The workflow prepends the canonical scope notice to the GitHub Release
+body, so release-note files should not invent a different scope label.
