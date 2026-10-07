@@ -1,7 +1,8 @@
 # Architecture
 
-Audit date: 2026-10-07. This decision precedes product implementation. Exact
-upstream revisions and qualification results are recorded in
+Decision date: 2026-10-01. This decision preceded product implementation.
+The canonical grammar pin was requalified on 2026-10-07; exact upstream
+revisions and qualification results are recorded in
 [upstream compatibility](upstream-compatibility.md).
 
 ## Decisions
