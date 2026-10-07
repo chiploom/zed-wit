@@ -87,8 +87,10 @@ The workflow's `operation` input controls lifecycle behavior:
 
 - `validate` performs a dry run for a **new** tag and creates nothing.
 - `publish` qualifies and publishes a new tag/release. It may also resume an
-  interrupted draft when the existing tag still resolves to the validated
-  release commit.
+  existing unpublished draft when the tag still resolves to the validated
+  release commit. An existing tag with no draft is rejected because GitHub does
+  not expose a safe distinction between an interrupted tag-only publication and
+  a tag name permanently reserved by a deleted immutable release.
 
 Deleted immutable releases are not recoverable under the same tag name. GitHub
 reserves that tag name permanently after deletion, so publish a new corrected
@@ -126,10 +128,11 @@ For publication:
    attestations and upload the verified native asset set; extension releases
    publish source only. If `main` advanced after an earlier dry run, this
    publication run is the authoritative qualification.
-6. If publication is interrupted after tag creation, rerun CD from the same
-   validated commit with `operation=publish`. CD accepts an exact tag with no
-   release or an unpublished matching draft only when the tag still resolves to
-   the validated SHA, then resumes without moving or deleting the tag.
+6. If publication is interrupted after the draft exists, rerun CD from the same
+   validated commit with `operation=publish`. CD resumes only an unpublished
+   matching draft whose tag still resolves to the validated SHA. An existing tag
+   with no draft is rejected; investigate it manually rather than risking reuse
+   of a tag name reserved by a deleted immutable release.
 7. If a published immutable release is deleted, do **not** attempt to recreate it
    under the same tag. GitHub permanently reserves tag names previously used by
    immutable releases. Publish a corrected new version, then update any runtime
