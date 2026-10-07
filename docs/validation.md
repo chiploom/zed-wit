@@ -5,6 +5,21 @@ published native release. It is not a substitute for the reusable Zed
 qualification checklist in [manual testing](manual-testing.md), and it does not
 claim Zed registry publication.
 
+## v0.1.1 LSP recovery publication — 2026-10-07
+
+The immutable `v0.1.1` GitHub Release restores native LSP distribution after
+the deleted immutable `v0.1.0` release. The protected `v0.1.1` tag resolves
+directly to
+`4019fcc2b63c26702ad7d77839f76cfcb56bb065`.
+
+The release is published, non-prerelease, immutable, and contains the complete
+23-file distribution contract: five native binaries, one
+checksum/provenance/license bundle per binary, and the project MIT, Apache-2.0,
+and third-party notice files. The extension runtime pin now targets `0.1.1`.
+Hosted-delivery qualification against this recovery release remains a separate
+runtime check and should be recorded after
+`cargo xtask test-zed-hosted --timeout-seconds 180` passes.
+
 ## v0.1.0 LSP-only publication — 2026-10-07
 
 > Historical evidence: the immutable `v0.1.0` GitHub Release was later deleted.
