@@ -1,13 +1,14 @@
 # Architecture
 
-Audit date: 2026-10-01. This decision precedes product implementation. Exact
-upstream revisions and qualification results are recorded in
+Decision date: 2026-10-01. This decision preceded product implementation.
+The canonical grammar pin was requalified on 2026-10-07; exact upstream
+revisions and qualification results are recorded in
 [upstream compatibility](upstream-compatibility.md).
 
 ## Decisions
 
 The extension registers the canonical Bytecode Alliance Tree-sitter WIT grammar
-at `cdf07263b136054b413cab449ac7a1d059c27542` (ABI 15). Current Zed's
+at `f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6` (ABI 15). Current Zed's
 Tree-sitter runtime accepts ABI 13 through 15. Queries are owned here and tested
 against that exact generated parser. Tree-sitter supplies editing structure,
 not semantic validation: it still accepts legacy named results and does not
@@ -52,7 +53,7 @@ flowchart LR
 
 - [Zed language extension documentation](https://zed.dev/docs/extensions/languages)
   defines the manifest, queries and server boundary.
-- [Canonical grammar](https://github.com/bytecodealliance/tree-sitter-wit/tree/cdf07263b136054b413cab449ac7a1d059c27542)
+- [Canonical grammar](https://github.com/bytecodealliance/tree-sitter-wit/tree/f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6)
   represents async, stream, future, map, nested packages and feature annotations.
 - [Current WIT specification](https://github.com/WebAssembly/component-model/blob/a25fc0b372dd21f07f0242c46e98bd0f1ea0c0e1/design/mvp/WIT.md)
   and its milestones distinguish current syntax from gated features.

@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 tree-sitter = "=0.26.11"
-tree-sitter-wit = { git = "https://github.com/bytecodealliance/tree-sitter-wit", rev = "cdf07263b136054b413cab449ac7a1d059c27542" }
+tree-sitter-wit = { git = "https://github.com/bytecodealliance/tree-sitter-wit", rev = "f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6" }
 
 [dev-dependencies]
 serde_json = "1"

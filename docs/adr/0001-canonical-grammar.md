@@ -1,9 +1,9 @@
 # ADR 0001: Pin the canonical WIT grammar
 
-Status: accepted, 2026-10-01.
+Status: accepted, 2026-10-01; requalified 2026-10-07.
 
 Use Bytecode Alliance's `tree-sitter-wit` at
-`cdf07263b136054b413cab449ac7a1d059c27542` for Zed structure and native formatting.
+`f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6` for Zed structure and native formatting.
 Its generated ABI is 15, within the audited Zed runtime range 13–15. Own Zed
 queries locally and compile them against that exact generated parser.
 

@@ -2,12 +2,14 @@
 
 Audit date: 2026-10-06. These observations separate this repository's immutable
 pins from the latest upstream revisions checked; they do not claim that hosted CI,
-registry succession or every Zed UI/platform test has passed.
+registry succession or every Zed UI/platform test has passed. The dated 2026-10-07
+grammar requalification below is scoped to that dependency and does not refresh
+the other table rows.
 
 | Component                     | Repository pin / published dependency                                                                                                                                      | Latest upstream revision or release checked                                                                                                                   | Decision                                                                                       |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | WIT specification             | No repository dependency pin                                                                                                                                               | [`a25fc0b372dd21f07f0242c46e98bd0f1ea0c0e1`](https://github.com/WebAssembly/component-model/tree/a25fc0b372dd21f07f0242c46e98bd0f1ea0c0e1)                    | Track current syntax; distinguish proposals and feature gates.                                 |
-| Canonical WIT grammar         | Repository pin [`cdf07263b136054b413cab449ac7a1d059c27542`](https://github.com/bytecodealliance/tree-sitter-wit/tree/cdf07263b136054b413cab449ac7a1d059c27542); ABI 15     | Upstream main [`f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`](https://github.com/bytecodealliance/tree-sitter-wit/tree/f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6) | Keep this repository pin; newer upstream grammar requires deliberate query and fixture review. |
+| Canonical WIT grammar         | Repository pin [`f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`](https://github.com/bytecodealliance/tree-sitter-wit/tree/f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6); ABI 15     | Upstream main [`f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`](https://github.com/bytecodealliance/tree-sitter-wit/tree/f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6) | Adopt after requalification; upstream supertype changes preserve the concrete query surface.   |
 | Zed source and extension API  | Published `zed_extension_api` 0.7.0 (latest published)                                                                                                                     | Zed source [`6ec43d631972c29422e1915bd6fd597bffa5a88d`](https://github.com/zed-industries/zed/tree/6ec43d631972c29422e1915bd6fd597bffa5a88d)                  | Audited Tree-sitter accepts ABI 13–15; source API 0.8.0 is unpublished.                        |
 | Rust                          | Repository toolchain pin 1.99.0                                                                                                                                            | [Rust 1.99.0 channel manifest](https://static.rust-lang.org/dist/channel-rust-1.99.0.toml)                                                                    | Exact toolchain pin in `rust-toolchain.toml`.                                                  |
 | Semantic parser               | Published and pinned `wit-parser` 0.260.0                                                                                                                                  | wasm-tools main [`9e3a53fd6cfc59bbd5d56781f66e58c768bbaf1b`](https://github.com/bytecodealliance/wasm-tools/tree/9e3a53fd6cfc59bbd5d56781f66e58c768bbaf1b)    | Keep `wit-parser` as semantic authority; source audit does not update the package pin.         |
@@ -45,6 +47,36 @@ last changed in 2024 and has no audited native release assets.
 [`witcraft-lsp`](https://crates.io/crates/witcraft-lsp/0.1.0) 0.1.0 uses a different
 parser and has no audited published native assets. Neither provides the required
 maintained, distributable backend contract for this implementation.
+
+## 2026-10-07 grammar requalification
+
+Previous pin: [`cdf07263b136054b413cab449ac7a1d059c27542`](https://github.com/bytecodealliance/tree-sitter-wit/tree/cdf07263b136054b413cab449ac7a1d059c27542).
+Qualified pin: [`f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`](https://github.com/bytecodealliance/tree-sitter-wit/tree/f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6).
+
+The live upstream history contained exactly two grammar-affecting commits after the
+previous pin:
+
+- [`efd516f80394ad24bbf5c7573e492394cef9d1f3`](https://github.com/bytecodealliance/tree-sitter-wit/commit/efd516f80394ad24bbf5c7573e492394cef9d1f3)
+  makes `typedef_item` public and declares it as a supertype.
+- [`f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`](https://github.com/bytecodealliance/tree-sitter-wit/commit/f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6)
+  exposes `gate_item`, `statement`, `world_definition`, and `package_items`
+  as supertypes and renames the corresponding private wrapper rules.
+
+The generated parser remains ABI 15. The concrete declaration nodes, fields, and
+tokens used by this repository's Zed queries are unchanged, so
+`highlights.scm`, `indents.scm`, `outline.scm`, `textobjects.scm`,
+`overrides.scm`, and `brackets.scm` require no compatibility edits. A native
+query regression now proves that each newly public supertype can match its
+expected concrete subtype while the existing query suite still compiles against
+the exact pinned parser.
+
+Getter/setter sugar remains outside the upstream grammar at this revision. Its
+fixture must still produce a Tree-sitter error tree, and the narrowly scoped
+highlight recovery remains required. No semantic-parser, formatter, LSP, or
+feature-gate behavior is changed by this grammar requalification.
+
+Automated and real-Zed qualification must be rerun on the resulting branch before
+merge; this section does not treat unexecuted commands as passing evidence.
 
 ## Requalification
 

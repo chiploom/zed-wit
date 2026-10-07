@@ -10,7 +10,7 @@ pub const TARGETS: [&str; 5] = [
     "x86_64-pc-windows-msvc",
 ];
 
-const GRAMMAR_REV: &str = "cdf07263b136054b413cab449ac7a1d059c27542";
+const GRAMMAR_REV: &str = "f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6";
 
 pub fn ensure_target(target: &str) -> Result<(), String> {
     if TARGETS.contains(&target) {
