@@ -1,22 +1,32 @@
-name: Release native server
+name: CD
+
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing vX.Y.Z tag at the default branch dispatch commit
+        description: New stable vX.Y.Z tag to create after all release checks pass
         required: true
         type: string
+      publish:
+        description: Create the protected tag and GitHub release after validation
+        required: true
+        default: false
+        type: boolean
+
 permissions:
   contents: read
-cache-mode: read
+
 env:
   CARGO_INCREMENTAL: "0"
   RUSTUP_AUTO_INSTALL: "0"
+
 concurrency:
-  group: release-native-server
+  group: cd-release
   cancel-in-progress: false
+
 jobs:
   validate:
+    name: Validate release candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
@@ -27,41 +37,62 @@ jobs:
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          set -euo pipefail
           if [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
-            echo "::error::Release workflow must be dispatched from $DEFAULT_BRANCH"
+            echo "::error::CD must be dispatched from $DEFAULT_BRANCH"
             exit 1
           fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Require unused release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::Release tag $RELEASE_TAG already exists"
+            exit 1
+          fi
+
       - name: Install pinned toolchain
         run: rustup toolchain install
+
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: quality
           cache-bin: false
           save-if: false
+
       - name: Enforce repository automation policy
         run: |
           cargo xtask check-no-python
           cargo xtask check-dependencies
-      - name: Validate versions and immutable source
+
+      - name: Validate release identity
         id: validate
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: cargo xtask validate-release --tag "$RELEASE_TAG"
+
+      - run: cargo test -p xtask --locked
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo check --workspace --locked
+
       - name: Run doctests
         run: cargo test --doc --workspace --exclude xtask --locked
+
       - name: Build the Zed extension as Zed does
         run: cargo build --target wasm32-wasip2 --locked
 
   build:
+    name: Build / ${{ matrix.target }}
     needs: validate
     strategy:
       fail-fast: false
@@ -90,24 +121,35 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
+
       - name: Install pinned toolchain
         run: rustup toolchain install
+
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: release-${{ matrix.target }}
           cache-bin: false
           save-if: false
+
       - name: Install cargo-nextest
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest@0.9.146
           fallback: none
+
       - name: Run native tests
         run: cargo nextest run --workspace --exclude xtask --locked --target "$TARGET"
-      - run: cargo build -p wit-language-server --release --locked --target "$TARGET"
-      - run: cargo xtask package-release --target "$TARGET" --output dist
-      - run: cargo xtask collect-licenses --target "$TARGET" --output dist
+
+      - name: Build native language server
+        run: cargo build -p wit-language-server --release --locked --target "$TARGET"
+
+      - name: Package release asset
+        run: cargo xtask package-release --target "$TARGET" --output dist
+
+      - name: Collect target redistribution notices
+        run: cargo xtask collect-licenses --target "$TARGET" --output dist
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.target }}
@@ -115,9 +157,32 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish:
+  verify:
+    name: Verify release artifact set
     needs: [validate, build]
-    cache-mode: none
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - run: cargo xtask verify-release-assets --input dist
+
+  publish:
+    name: Publish GitHub release
+    if: ${{ inputs.publish }}
+    needs: [validate, build, verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release
@@ -130,30 +195,76 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.sha }}
           persist-credentials: false
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
+
       - name: Install pinned toolchain
         run: rustup toolchain install
+
       - name: Verify complete asset set
         run: cargo xtask verify-release-assets --input dist
+
       - name: Attest release artifacts
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*
-      - name: Publish immutable release assets
+
+      - name: Create or resume draft release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
         run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' >draft-state 2>/dev/null; then
+            if [ "$(cat draft-state)" != "true" ]; then
+              echo "::error::Release $RELEASE_TAG is already published"
+              exit 1
+            fi
+          else
+            if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "::error::Tag $RELEASE_TAG exists without a resumable draft release"
+              exit 1
+            fi
+
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --target "$RELEASE_SHA" \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+          fi
+
           remote_sha=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
           object_type=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.type')
-          if [ "$object_type" = tag ]; then
+          if [ "$object_type" = "tag" ]; then
             remote_sha=$(gh api "repos/$GH_REPO/git/tags/$remote_sha" --jq '.object.sha')
           fi
-          test "$remote_sha" = "$RELEASE_SHA"
-          gh release create "$RELEASE_TAG" dist/* LICENSE-MIT LICENSE-APACHE THIRD_PARTY_NOTICES.md --verify-tag --title "$RELEASE_TAG" --generate-notes
+          if [ "$remote_sha" != "$RELEASE_SHA" ]; then
+            echo "::error::Tag $RELEASE_TAG resolves to $remote_sha instead of $RELEASE_SHA"
+            exit 1
+          fi
+
+          gh release upload "$RELEASE_TAG" \
+            dist/* \
+            LICENSE-MIT \
+            LICENSE-APACHE \
+            THIRD_PARTY_NOTICES.md \
+            --clobber
+
+          gh release edit "$RELEASE_TAG" --draft=false
+
+      - name: Verify published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = "false"
+          test "$(gh release view "$RELEASE_TAG" --json tagName --jq '.tagName')" = "$RELEASE_TAG"
