@@ -261,8 +261,10 @@ mod tests {
             manifest["grammars"]["wit"]["rev"].as_str(),
             Some("cdf07263b136054b413cab449ac7a1d059c27542")
         );
-        let native: toml::Value =
-            toml::from_str(include_str!("../crates/wit-language-server/Cargo.toml")).unwrap();
-        assert_eq!(native["package"]["version"].as_str(), Some(SERVER_VERSION));
+        let root: toml::Value = toml::from_str(include_str!("../Cargo.toml")).unwrap();
+        assert_eq!(
+            root["package"]["metadata"]["zed-wit"]["runtime-lsp-version"].as_str(),
+            Some(SERVER_VERSION)
+        );
     }
 }
