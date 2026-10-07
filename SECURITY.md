@@ -1,15 +1,14 @@
 # Security policy
 
-This project has no published release yet. There is no supported release or
-promised response SLA. Once a release exists, security fixes target the latest
-release.
+The latest published release is supported for security fixes. There is no
+promised response SLA.
 
 Report a suspected vulnerability through the repository's **Security → Report a
 vulnerability** private reporting interface. Do not disclose vulnerability
 details, sensitive WIT sources, credentials, or exploit material in a public
 issue. If private reporting is unavailable, open an issue requesting a private
 reporting channel without including sensitive details. Maintainers should keep
-private vulnerability reporting enabled before the first release.
+private vulnerability reporting enabled for all supported releases.
 
 ## Trust boundaries
 
