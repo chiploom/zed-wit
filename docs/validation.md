@@ -20,8 +20,10 @@ binary, and the project MIT, Apache-2.0, and third-party notice files.
 
 The publish job re-verified all 20 target-specific artifacts immediately before
 publication and produced GitHub build-provenance attestation
-`53410060` for those 20 subjects through Sigstore/Rekor. Registry publication
-remains separate and is not claimed by this evidence.
+`53410060` for those 20 subjects through Sigstore/Rekor. Hosted delivery is
+qualified separately with `cargo xtask test-zed-hosted`, which uses a fresh
+isolated Zed profile and the published release matching `extension.toml`.
+Registry publication remains separate and is not claimed by this evidence.
 
 ## Public repository transition — 2026-10-07
 
