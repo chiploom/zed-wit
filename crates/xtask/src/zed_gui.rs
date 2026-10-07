@@ -45,6 +45,7 @@ mod supported {
 
         validate_linux_backend_option(linux_backend)?;
         let root = util::repo_root();
+        zed_smoke::validate_disposable_profile(&root, profile)?;
         let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
         let drivers = prepare_input_drivers(&root, profile, linux_backend)?;
         let drivers = preflight_input_drivers(drivers)?;
