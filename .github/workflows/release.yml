@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >tag-ref 2>/dev/null; then
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             exit 0
           fi
 
@@ -68,17 +68,17 @@ jobs:
             exit 1
           fi
 
-          if ! gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' >draft-state 2>/dev/null; then
+          if ! draft_state=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
             echo "::error::Tag $RELEASE_TAG exists without a resumable draft release"
             exit 1
           fi
-          if [ "$(cat draft-state)" != "true" ]; then
+          if [ "$draft_state" != "true" ]; then
             echo "::error::Release $RELEASE_TAG is already published"
             exit 1
           fi
 
-          remote_sha=$(jq -r '.object.sha' tag-ref)
-          object_type=$(jq -r '.object.type' tag-ref)
+          remote_sha=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
+          object_type=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.type')
           if [ "$object_type" = "tag" ]; then
             remote_sha=$(gh api "repos/$GH_REPO/git/tags/$remote_sha" --jq '.object.sha')
           fi
@@ -250,8 +250,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' >draft-state 2>/dev/null; then
-            if [ "$(cat draft-state)" != "true" ]; then
+          if draft_state=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [ "$draft_state" != "true" ]; then
               echo "::error::Release $RELEASE_TAG is already published"
               exit 1
             fi
