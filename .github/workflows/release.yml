@@ -193,8 +193,9 @@ jobs:
 
           jobs_json=$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100")
           publish_successes=$(jq '[.jobs[] | select(.name == "Publish GitHub release" and .conclusion == "success")] | length' <<<"$jobs_json")
-          if [ "$publish_successes" -ne 1 ]; then
-            echo "::error::Source run $SOURCE_RUN_ID is not a successful publication run"
+          verify_successes=$(jq '[.jobs[] | select(.name == "Verify release artifact set" and .conclusion == "success")] | length' <<<"$jobs_json")
+          if [ "$publish_successes" -ne 1 ] || [ "$verify_successes" -ne 1 ]; then
+            echo "::error::Source run $SOURCE_RUN_ID is not a fully verified successful publication run"
             exit 1
           fi
 
@@ -380,9 +381,26 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout release source
+        if: ${{ inputs.operation != 'regenerate' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
+
+      - name: Checkout release control
+        if: ${{ inputs.operation == 'regenerate' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Checkout protected release source
+        if: ${{ inputs.operation == 'regenerate' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          path: release-source
           persist-credentials: false
 
       - name: Install pinned toolchain
@@ -407,7 +425,19 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - run: cargo xtask verify-release-assets --input dist
+      - name: Verify current-run LSP artifacts
+        if: ${{ inputs.operation != 'regenerate' }}
+        run: cargo xtask verify-release-assets --input dist
+
+      - name: Verify restored LSP artifacts
+        if: ${{ inputs.operation == 'regenerate' }}
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          cargo xtask verify-restored-release-assets \
+            --input dist \
+            --source-root release-source \
+            --source-run-id "$SOURCE_RUN_ID"
 
   attest_lsp:
     name: Attest LSP release artifacts
@@ -556,10 +586,20 @@ jobs:
         if: ${{ inputs.scope == 'lsp' }}
         run: rustup toolchain install
 
-      - name: Verify complete LSP asset set
-        if: ${{ inputs.scope == 'lsp' }}
+      - name: Verify complete current-run LSP asset set
+        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'publish' }}
         working-directory: release-source
         run: cargo xtask verify-release-assets --input ../dist
+
+      - name: Verify complete restored LSP asset set
+        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'regenerate' }}
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          cargo xtask verify-restored-release-assets \
+            --input dist \
+            --source-root release-source \
+            --source-run-id "$SOURCE_RUN_ID"
 
       - name: Create or resume draft release
         env:
