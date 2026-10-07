@@ -100,6 +100,10 @@ cargo check --workspace --locked
 cargo build --target wasm32-wasip2 --locked
 ```
 
+After a matching GitHub release exists, `cargo xtask test-zed-hosted` exercises
+the real hosted download, cache reuse, and cache-recovery path in an isolated Zed
+profile.
+
 Read [CONTRIBUTING](CONTRIBUTING.md) for setup, fixtures, queries, and validation
 workflows; [architecture](docs/architecture.md) for component boundaries; and
 [manual testing](docs/manual-testing.md) for real-editor qualification.
