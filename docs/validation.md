@@ -5,9 +5,11 @@ published native release. It is not a substitute for the reusable Zed
 qualification checklist in [manual testing](manual-testing.md), and it does not
 claim Zed registry publication.
 
-## v0.1.0 publication — 2026-10-07
+## v0.1.0 LSP-only publication — 2026-10-07
 
-The first immutable GitHub release, `v0.1.0`, was published from
+The first immutable GitHub release, `v0.1.0`, published only the native WIT
+language server and its release metadata. It did not publish the Zed extension
+or modify the Zed extension registry. The release was published from
 `cb8dd60c7a0b74c93f1c5d62934ec8fb6d4d9d78` by CD
 [run 37559191579](https://github.com/chiploom/zed-wit/actions/runs/37559191579).
 
