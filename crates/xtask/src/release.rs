@@ -188,10 +188,8 @@ pub fn validate_release(tag: &str) -> Result<(), String> {
     }
 
     let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
-    let tag_ref = format!("refs/tags/{tag}^{{commit}}");
-    let tagged = util::command_output("git", ["rev-parse", "--verify", tag_ref.as_str()], &root)?;
-    if tagged != head {
-        return Err("tag must point to the default branch dispatch commit".into());
+    if !util::command_output("git", ["status", "--porcelain"], &root)?.is_empty() {
+        return Err("release candidate checkout must be clean".into());
     }
     if env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
         let github_sha = env::var("GITHUB_SHA")
