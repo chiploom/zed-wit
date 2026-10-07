@@ -67,6 +67,14 @@ fn stable_tag_version(tag: &str) -> Option<&str> {
     }
 }
 
+fn release_version_for_tag<'a>(tag: &'a str, project_version: &str) -> Result<&'a str, String> {
+    let version = stable_tag_version(tag).ok_or("expected stable SemVer tag vX.Y.Z")?;
+    if project_version != version {
+        return Err("tag and adapter/server/extension versions must agree".into());
+    }
+    Ok(version)
+}
+
 fn git_revision(root: &Path) -> Result<Option<String>, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--verify", "HEAD"])
@@ -182,10 +190,8 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
 
 pub fn validate_release(tag: &str) -> Result<(), String> {
     let root = util::repo_root();
-    let version = stable_tag_version(tag).ok_or("expected stable SemVer tag vX.Y.Z")?;
-    if project_version()? != version {
-        return Err("tag and adapter/server/extension versions must agree".into());
-    }
+    let project_version = project_version()?;
+    let version = release_version_for_tag(tag, &project_version)?;
 
     let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     if !util::command_output("git", ["status", "--porcelain"], &root)?.is_empty() {
@@ -403,6 +409,24 @@ mod tests {
         assert_eq!(stable_tag_version("v01.1.0"), None);
         assert_eq!(stable_tag_version("v1.0.0-rc.1"), None);
         assert_eq!(stable_tag_version("v1.0"), None);
+    }
+
+    #[test]
+    fn release_tag_must_match_project_version() {
+        assert_eq!(
+            release_version_for_tag("v0.1.0", "0.1.0").unwrap(),
+            "0.1.0"
+        );
+        assert!(
+            release_version_for_tag("v0.1.1", "0.1.0")
+                .unwrap_err()
+                .contains("versions must agree")
+        );
+        assert!(
+            release_version_for_tag("0.1.0", "0.1.0")
+                .unwrap_err()
+                .contains("stable SemVer")
+        );
     }
 
     #[test]
