@@ -4,7 +4,8 @@
 
 - Replace Python repository and release helpers with locked Rust `xtask` automation,
   including CI enforcement that rejects Python source, tooling/config/cache artifacts,
-  shebangs and workflow/script invocations.
+  shebangs and workflow/script invocations, and confine disposable Zed qualification
+  profiles to the repository `target/` tree before recursive cleanup.
 - Establish the Rust workspace for the Zed adapter, pinned WIT syntax,
   native analysis and stdio language server.
 - Add canonical grammar queries and parser-backed diagnostics with open-buffer
