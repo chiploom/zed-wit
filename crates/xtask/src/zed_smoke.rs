@@ -1110,9 +1110,9 @@ fn manual_scenarios(head: &str) -> Value {
         {"scenario":"type_typo_quick_fix","result":"passed","evidence":"manual semantic fixture mutation asserts the unique safe replacement action"},
         {"scenario":"unsupported_capabilities","result":"passed","evidence":"initialize assertions reject rename and workspace-symbol advertisement"},
         {"scenario":"local_override","result":"passed","evidence":format!("real Zed launched exact +git.{head} server from staged .zed/settings.json with WIT server binaries filtered from PATH; protocol tests assert matching serverInfo.version and startup logMessage")},
-        {"scenario":"first_hosted_install","result":"not-run","reason":"requires published matching release assets"},
-        {"scenario":"cached_install","result":"not-run","reason":"requires a successful first hosted install"},
-        {"scenario":"missing_corrupt_hosted_asset","result":"not-run","reason":"requires controlled published-release download scenarios; adapter cache/checksum behavior is covered by deterministic tests"},
+        {"scenario":"first_hosted_install","result":"separate-qualification-required","qualification_command":"cargo xtask test-zed-hosted","reason":"hosted delivery is intentionally isolated from the local-override smoke path"},
+        {"scenario":"cached_install","result":"separate-qualification-required","qualification_command":"cargo xtask test-zed-hosted","reason":"hosted cache reuse is qualified against the published release in a dedicated fresh profile"},
+        {"scenario":"missing_corrupt_hosted_cache","result":"separate-qualification-required","qualification_command":"cargo xtask test-zed-hosted","reason":"published-release corrupt-binary and missing-checksum recovery are qualified by the dedicated hosted test"},
         {"scenario":"editor_restart","result":"passed","evidence":"same isolated workspace/profile was relaunched and a second exact server PID started and stopped cleanly"}
     ])
 }
