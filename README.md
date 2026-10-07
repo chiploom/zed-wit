@@ -2,7 +2,9 @@
 
 WIT adds first-class [WebAssembly Interface Types (WIT)](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md) support to Zed. The extension combines syntax-aware editing with a native language server for diagnostics, formatting, completion, hover, navigation, references, and safe typo fixes.
 
-The repository is public, but the extension is still **unreleased** and is not yet published in the Zed extension registry.
+Version **0.1.0** is published on GitHub with native language-server binaries for
+the supported platforms. The extension is not yet published in the Zed extension
+registry.
 
 ## Features
 
@@ -43,16 +45,16 @@ completion, navigation, diagnostics, and **editor: format** to exercise the
 extension. Inspect **zed: open log** for startup or build failures.
 
 An existing registry WIT extension is overridden by the development install.
-Automatic native-server downloads require a published GitHub release; none
-exists yet.
+Automatic native-server downloads use the published GitHub release that matches
+the extension version.
 
 ## How it works
 
 The root Zed extension is a small Wasm adapter. It uses an explicitly configured
 language-server binary first, then `wit-language-server` on the worktree's
-`PATH`. After publication, it can download the exact native server version
-paired with the extension, verify the SHA-256 sidecar, and cache the executable
-in Zed's extension working directory.
+`PATH`. Otherwise it downloads the exact native server version paired with the
+extension, verifies the SHA-256 sidecar, and caches the executable in Zed's
+extension working directory.
 
 The native server uses upstream `wit-parser` semantics rather than maintaining a
 second WIT parser. Sibling `.wit` files form a package, dependency identities
@@ -98,6 +100,10 @@ cargo check --workspace --locked
 cargo build --target wasm32-wasip2 --locked
 ```
 
+After a matching GitHub release exists, `cargo xtask test-zed-hosted` exercises
+the real hosted download, cache reuse, and cache-recovery path in an isolated Zed
+profile.
+
 Read [CONTRIBUTING](CONTRIBUTING.md) for setup, fixtures, queries, and validation
 workflows; [architecture](docs/architecture.md) for component boundaries; and
 [manual testing](docs/manual-testing.md) for real-editor qualification.
@@ -109,9 +115,10 @@ implementation as its successor requires coordination with the existing
 maintainer and Zed under the [replacement policy](docs/publishing.md). No
 registry transfer or duplicate entry is assumed.
 
-GitHub release publication is also separate from registry publication. See
-[publishing](docs/publishing.md) for native assets, release protections, and the
-release gate.
+GitHub release publication is separate from registry publication. Version
+[`v0.1.0`](https://github.com/chiploom/zed-wit/releases/tag/v0.1.0) is published
+with immutable native assets. See [publishing](docs/publishing.md) for the release
+contract and registry succession gate.
 
 ## Acknowledgements and license
 

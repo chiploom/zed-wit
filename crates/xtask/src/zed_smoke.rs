@@ -335,6 +335,14 @@ pub(crate) fn write_isolated_settings(
 }
 
 pub(crate) fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
+    stage_with_server(root, profile, Some(server))
+}
+
+pub(crate) fn stage_hosted(root: &Path, profile: &Path) -> Result<Staged, String> {
+    stage_with_server(root, profile, None)
+}
+
+fn stage_with_server(root: &Path, profile: &Path, server: Option<&Path>) -> Result<Staged, String> {
     validate_disposable_profile(root, profile)?;
     if profile.exists() {
         log(format!(
@@ -382,28 +390,36 @@ pub(crate) fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged
     compile_grammar(root, &grammar_dir.join("wit.wasm"))?;
 
     let workspace_dir = profile.join("workspace");
-    fs::create_dir_all(workspace_dir.join(".zed"))
-        .map_err(|error| format!("create smoke workspace settings: {error}"))?;
-    let settings_path = workspace_dir.join(".zed/settings.json");
-    let settings = json!({
-        "lsp": {
-            "wit-language-server": {
-                "binary": {
-                    "path": server.to_string_lossy()
+    fs::create_dir_all(&workspace_dir)
+        .map_err(|error| format!("create smoke workspace: {error}"))?;
+
+    if let Some(server) = server {
+        let settings_dir = workspace_dir.join(".zed");
+        fs::create_dir_all(&settings_dir)
+            .map_err(|error| format!("create smoke workspace settings: {error}"))?;
+        let settings_path = settings_dir.join("settings.json");
+        let settings = json!({
+            "lsp": {
+                "wit-language-server": {
+                    "binary": {
+                        "path": server.to_string_lossy()
+                    }
                 }
             }
-        }
-    });
-    fs::write(
-        &settings_path,
-        serde_json::to_vec_pretty(&settings)
-            .map_err(|error| format!("encode {}: {error}", settings_path.display()))?,
-    )
-    .map_err(|error| format!("write {}: {error}", settings_path.display()))?;
-    log(format!(
-        "staged explicit LSP binary override: {}",
-        settings_path.display()
-    ));
+        });
+        fs::write(
+            &settings_path,
+            serde_json::to_vec_pretty(&settings)
+                .map_err(|error| format!("encode {}: {error}", settings_path.display()))?,
+        )
+        .map_err(|error| format!("write {}: {error}", settings_path.display()))?;
+        log(format!(
+            "staged explicit LSP binary override: {}",
+            settings_path.display()
+        ));
+    } else {
+        log("staged hosted-install workspace without an LSP binary override");
+    }
 
     let source_tests = root.join("tests");
     let staged_tests = workspace_dir.join("tests");
@@ -1090,9 +1106,9 @@ fn manual_scenarios(head: &str) -> Value {
         {"scenario":"type_typo_quick_fix","result":"passed","evidence":"manual semantic fixture mutation asserts the unique safe replacement action"},
         {"scenario":"unsupported_capabilities","result":"passed","evidence":"initialize assertions reject rename and workspace-symbol advertisement"},
         {"scenario":"local_override","result":"passed","evidence":format!("real Zed launched exact +git.{head} server from staged .zed/settings.json with WIT server binaries filtered from PATH; protocol tests assert matching serverInfo.version and startup logMessage")},
-        {"scenario":"first_hosted_install","result":"not-run","reason":"requires published matching release assets"},
-        {"scenario":"cached_install","result":"not-run","reason":"requires a successful first hosted install"},
-        {"scenario":"missing_corrupt_hosted_asset","result":"not-run","reason":"requires controlled published-release download scenarios; adapter cache/checksum behavior is covered by deterministic tests"},
+        {"scenario":"first_hosted_install","result":"separate-qualification-required","qualification_command":"cargo xtask test-zed-hosted","reason":"hosted delivery is intentionally isolated from the local-override smoke path"},
+        {"scenario":"cached_install","result":"separate-qualification-required","qualification_command":"cargo xtask test-zed-hosted","reason":"hosted cache reuse is qualified against the published release in a dedicated fresh profile"},
+        {"scenario":"missing_corrupt_hosted_cache","result":"separate-qualification-required","qualification_command":"cargo xtask test-zed-hosted","reason":"published-release corrupt-binary and missing-checksum recovery are qualified by the dedicated hosted test"},
         {"scenario":"editor_restart","result":"passed","evidence":"same isolated workspace/profile was relaunched and a second exact server PID started and stopped cleanly"}
     ])
 }

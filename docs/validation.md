@@ -1,9 +1,59 @@
 # Validation evidence
 
-This document records local evidence for the unreleased implementation. It is
-not a substitute for the manual Zed qualification checklist in
-[manual testing](manual-testing.md), and it does not claim registry publication
-or end-to-end hosted installation.
+This document records qualification evidence for the implementation and its
+published native release. It is not a substitute for the reusable Zed
+qualification checklist in [manual testing](manual-testing.md), and it does not
+claim Zed registry publication.
+
+## v0.1.0 publication — 2026-10-07
+
+The first immutable GitHub release, `v0.1.0`, was published from
+`cb8dd60c7a0b74c93f1c5d62934ec8fb6d4d9d78` by CD
+[run 37559191579](https://github.com/chiploom/zed-wit/actions/runs/37559191579).
+
+The release tag resolves directly to that commit. The publication run passed
+release-candidate validation, all five native build/test jobs, combined artifact
+verification, artifact attestation, tag creation, draft upload, and final
+publication verification. The immutable release contains the exact 23-file
+distribution contract: five binaries, one checksum/provenance/license bundle per
+binary, and the project MIT, Apache-2.0, and third-party notice files.
+
+The publish job re-verified all 20 target-specific artifacts immediately before
+publication and produced GitHub build-provenance attestation
+`53410060` for those 20 subjects through Sigstore/Rekor. Hosted delivery must be
+qualified separately with `cargo xtask test-zed-hosted`, which uses a fresh
+isolated Zed profile and the published release matching `extension.toml`.
+Record that run below before claiming hosted-delivery qualification. Registry
+publication remains separate and is not claimed by this evidence.
+
+### Hosted delivery qualification — macOS ARM64
+
+The dedicated hosted-release qualification passed on macOS ARM64 against
+`v0.1.0` using Zed 1.22.0. The test ran from post-release hardening head
+`950d4a29fb460f3b6fc70ffc09678e18980f02b5` while resolving the published
+release tag to
+`cb8dd60c7a0b74c93f1c5d62934ec8fb6d4d9d78`.
+
+`cargo xtask test-zed-hosted --timeout-seconds 180` used a fresh isolated Zed
+profile with no project-local LSP binary override and no WIT language server on
+`PATH`. Zed downloaded and launched
+`wit-language-server-aarch64-apple-darwin` from the published release. The
+downloaded executable's SHA-256 was
+`362aa98b73f082bb51479afbb100556486c8de259719d30d5683e45ef478cd5b`,
+which matches the immutable GitHub release asset digest.
+
+The same run passed all four hosted-delivery scenarios:
+
+- first hosted install downloaded, verified, and launched the published server;
+- cached install reused the verified binary and checksum without rewriting them;
+- deliberate executable corruption was detected and repaired with bytes matching
+  the original published digest; and
+- deletion of the checksum sidecar caused clean recovery, restoring the checksum
+  and launching the server with the published release build identity.
+
+This qualifies hosted delivery for macOS ARM64. It does not substitute for
+platform-specific hosted-delivery execution on macOS x86_64, Linux GNU ARM64,
+Linux GNU x86_64, or Windows x86_64 MSVC.
 
 ## Public repository transition — 2026-10-07
 
@@ -21,8 +71,10 @@ verified before publication.
 Hosted CI on public `main` completed successfully for
 `35daeb10e11369af4cdc1132728567be8d0f2410` in
 [run 37554729191](https://github.com/chiploom/zed-wit/actions/runs/37554729191).
-This establishes public hosted-CI evidence, but no GitHub release or Zed registry
-publication is claimed.
+At the time of the public transition this established hosted-CI evidence before
+the first GitHub release. The later `v0.1.0` publication evidence above supersedes
+the release-status portion of that historical record; Zed registry publication is
+still not claimed.
 
 ## Restricted Mode qualification correction — 2026-10-06
 
@@ -347,7 +399,7 @@ process for the existing `wit` entry documented in [publishing](publishing.md).
 
 ## Release gate
 
-Before the first release candidate is considered ready:
+Before each release candidate is considered ready:
 
 1. Keep CI green on the exact candidate commit.
 2. Complete and record the applicable manual Zed scenarios.
