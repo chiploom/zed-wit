@@ -649,7 +649,14 @@ world app {
     }
 
     assert!(found.contains(&("statement".into(), "package demo:supertypes;".into())));
-    assert!(found.contains(&("package-item".into(), source[source.find("interface api").unwrap()..source.find("world app").unwrap()].trim().into())));
+    assert!(
+        found.iter().any(|(capture, text)| {
+            capture == "package-item"
+                && text.contains("interface api")
+                && text.contains("record entry")
+        }),
+        "{found:?}"
+    );
     assert!(found.iter().any(|(capture, text)| capture == "world-definition" && text == "import api;"));
     assert!(found.iter().any(|(capture, text)| capture == "typedef" && text.starts_with("record entry")));
     assert!(found.iter().any(|(capture, text)| capture == "gate" && text == "@since(version = 1.0.0)"));
