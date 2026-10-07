@@ -351,8 +351,9 @@ Before the first release candidate is considered ready:
 
 1. Keep CI green on the exact candidate commit.
 2. Complete and record the applicable manual Zed scenarios.
-3. Verify public-repository security settings, release-environment protection,
-   and the active default-branch and `v*` tag rulesets.
+3. Verify public-repository security settings, immutable releases,
+   release-environment protection, and the active default-branch and `v*` tag
+   rulesets.
 4. Resolve the existing `wit` registry ownership/succession requirement.
 5. Dispatch the protected CD workflow from the default branch with a new stable
    `vX.Y.Z` tag name and `publish=false`; require the full five-target artifact
