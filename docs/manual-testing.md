@@ -193,15 +193,17 @@ temporary edits. Restore the directory after each qualification pass.
 | Type typo quick fix | Reference a uniquely similar missing named type, then an ambiguous or non-type unresolved name | Only the unique named-type typo gets a source-ranged quick fix | Automated |
 | Unsupported capabilities | Inspect initialize and editor commands | No unsupported rename or workspace symbols advertised | Automated |
 | Local override | Configure a trusted explicit native binary | Exact binary launches; no download needed; Zed server info reports the expected `+git.<commit>` build identity and View Logs contains the matching startup INFO message | Automated |
-| First hosted install | Remove test install cache after assets are published, restart server | Matching platform/version downloads and checksum passes | Release-gated |
-| Cached install | Restart with the verified installed executable | Server starts using the validated cache behavior | Release-gated |
-| Missing/corrupt asset | Exercise controlled missing/checksum/cache-corruption cases | Invalid cache is discarded and a clean download is attempted; unverified executable never starts | Release-gated |
+| First hosted install | Run `cargo xtask test-zed-hosted` with a fresh isolated profile | Matching published platform/version downloads, checksum passes, and exact release build identity launches | Automated post-release |
+| Cached install | Continue the same `test-zed-hosted` run | Second launch reuses the verified executable/checksum without rewriting the cache | Automated post-release |
+| Missing/corrupt cache | Continue the same `test-zed-hosted` run | Corrupt executable and missing checksum are rejected; clean published bytes/sidecar are restored before launch | Automated post-release |
 | Editor restart | Restart Zed with an open WIT package | Language server reconnects and recomputes diagnostics | Automated |
 
-Run the install/download rows separately on macOS ARM64, macOS Intel, Linux ARM64
-GNU, Linux x86_64 GNU and Windows x86_64 MSVC. Keep release-gated rows explicit when the
-platform or release is unavailable. Do not claim editor/platform support from
-cross-compilation alone.
+Run the hosted-install rows separately on macOS ARM64, macOS Intel, Linux ARM64
+GNU, Linux x86_64 GNU and Windows x86_64 MSVC when those hosts are available.
+`test-zed-hosted` uses an isolated profile, removes WIT language-server entries
+from `PATH`, omits any project-local binary override, and records
+`target/zed-hosted/profile/zed-hosted-report.json`. Do not claim
+editor/platform hosted-delivery qualification from cross-compilation alone.
 
 ## Remaining manual surface
 
@@ -211,12 +213,12 @@ appearance may still be inspected manually when desired, but it is presentation
 evidence rather than a correctness or merge gate because semantic captures are
 covered by deterministic query tests.
 
-The substantive qualification that still cannot run before publishing matching
-assets is release delivery:
-
-- first hosted install from an actual published GitHub release;
-- cached install of the verified downloaded executable; and
-- controlled missing/corrupt hosted-release behavior.
+Release delivery is qualified after publication with
+`cargo xtask test-zed-hosted`. The command exercises first download, cached
+reuse, corrupted executable recovery, and missing-checksum recovery against the
+published release that matches `extension.toml`. Platform-specific execution
+evidence is still required; the automation does not turn one host into evidence
+for another architecture or operating system.
 
 Do not substitute a manual GUI pass when `test-zed-gui` fails because the host
 denies input injection. Treat that as an environment/platform qualification
