@@ -633,11 +633,7 @@ world app {
     )
     .unwrap();
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(
-        &supertype_query,
-        tree.root_node(),
-        source.as_bytes(),
-    );
+    let mut matches = cursor.matches(&supertype_query, tree.root_node(), source.as_bytes());
     let mut found = BTreeSet::new();
     while let Some(matched) = matches.next() {
         for capture in matched.captures {
