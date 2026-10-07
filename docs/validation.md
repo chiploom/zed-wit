@@ -48,15 +48,15 @@ later qualification-tooling changes:
   attempts release every modifier that was successfully pressed and report any
   cleanup failure.
 
-Before merge, retain an exact-final-HEAD run of repository policy, formatting,
-workspace clippy/tests, native target tests/build identity, packaging/licenses,
-`cargo xtask test-zed`, and the macOS
+The PR #6 merge gate required an exact-final-HEAD run of repository policy,
+formatting, workspace clippy/tests, native target tests/build identity,
+packaging/licenses, `cargo xtask test-zed`, and the macOS
 `cargo xtask test-zed-gui --allow-input-injection true` qualification. Hosted
-GitHub Actions should also run on the exact candidate when account billing
-allows it; if that is operationally unavailable, record the exception rather
-than presenting historical hosted runs as final-candidate evidence. Published
-release install/cache/corruption scenarios remain release-gated and are not a
-PR merge prerequisite.
+GitHub Actions were also expected on the exact candidate when account billing
+allowed it; when operationally unavailable, the exception had to be recorded
+instead of presenting historical hosted runs as final-candidate evidence.
+Published release install/cache/corruption scenarios remained release-gated and
+were not a PR merge prerequisite.
 
 ## PR #6 semantic editor candidate
 
@@ -81,8 +81,8 @@ PR merge prerequisite.
   v2.87.26 in CI/release workflows, corrects this provenance record, and adds
   reusable manual qualification fixtures under `tests/manual-zed/`. Those
   changes do not modify extension or native-server executable source; the WIT
-  additions are test inputs only. Exact-candidate local validation and hosted CI
-  are still required before merge.
+  additions are test inputs only. At this point in the historical candidate
+  record, exact-candidate local validation and hosted CI were still pending.
 - Workspace tests: 67 passed (22 `wit-analysis`, 4 language-server unit, 17
   stdio protocol, 11 syntax/editing, 7 `xtask`, 6 adapter/distribution); no
   doctests were present.
@@ -97,9 +97,9 @@ PR merge prerequisite.
   evidence rather than exact-candidate GUI signoff. Semantic/editor checks remain
   pending; see [manual testing](manual-testing.md).
 - Hosted CI: no successful check run is recorded here for the exact final
-  candidate. Historical runs on other SHAs are not candidate evidence. Verify
-  the current PR head in GitHub Actions and require the exact-candidate workflow
-  to pass before merge.
+  candidate. Historical runs on other SHAs are not candidate evidence. At this
+  point, exact-candidate hosted CI was still pending and remained subject to
+  GitHub Actions availability.
 
 The complete gate passed on implementation HEAD
 `31d540950b1265dbe7ed4a8f9a694776b89f9bf6` and was rerun on
@@ -109,8 +109,8 @@ The self-hosted runner experiment was fully reverted. At
 tree remained unchanged from the pre-experiment candidate. The later v2.87.26
 Action-pin maintenance is workflow-only, while `tests/manual-zed/` and its
 documentation are qualification-only additions; none alter extension/server
-executable source. Run the complete gate and hosted CI on the exact final
-candidate before merge. Commands:
+executable source. The remaining exact-candidate gate at that point used the
+following commands, with hosted CI tracked separately when available:
 
 ```sh
 cargo xtask check-no-python
@@ -189,8 +189,9 @@ Recorded results:
 - Apple Silicon packaging and license collection completed with a 116-package
   license report.
 
-This is exact evidence for that SHA. The later Zed-automation tooling still
-requires its own final gate before merge.
+This is exact evidence for that SHA. At that point, the later Zed-automation
+tooling still required its own final gate; subsequent sections preserve the
+later qualification evidence separately.
 
 ## User-provided Zed fixture diagnostics trace
 
