@@ -2,7 +2,9 @@
 
 Audit date: 2026-10-06. These observations separate this repository's immutable
 pins from the latest upstream revisions checked; they do not claim that hosted CI,
-registry succession or every Zed UI/platform test has passed.
+registry succession or every Zed UI/platform test has passed. The dated 2026-10-07
+grammar requalification below is scoped to that dependency and does not refresh
+the other table rows.
 
 | Component                     | Repository pin / published dependency                                                                                                                                      | Latest upstream revision or release checked                                                                                                                   | Decision                                                                                       |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
