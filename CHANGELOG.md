@@ -13,9 +13,10 @@
 - Add Topiary document formatting and regression coverage.
 - Add WIT semantic completion, hover, definition, references and safe unresolved
   type typo quick fixes through the native language server.
-- Define five-platform native CI and a protected manual release workflow with
-  SHA-256 sidecars, verified per-target redistribution notices and artifact
-  attestations.
+- Define five-platform native CI and protected CD that validates release
+  candidates before tag creation, builds and verifies every native target, emits
+  SHA-256 sidecars and redistribution notices, attests artifacts, and publishes
+  resumable draft releases behind the `release` environment.
 - Run required pull-request CI even for documentation-only changes so protected
   branch status checks always report.
 - Document licensing, architecture, development testing and registry succession
