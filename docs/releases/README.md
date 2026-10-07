@@ -10,10 +10,10 @@ GitHub releases are scoped explicitly.
   `v-extension-X.Y.Z` tag and GitHub-generated source archive represent the
   extension source, and CD verifies that the extension builds for
   `wasm32-wasip2`. No native LSP binaries are attached. Before publication, CD
-  requires the LSP version pinned by the adapter to already exist as a published,
-  immutable `vX.Y.Z` LSP release with every supported runtime binary and
-  checksum. This scope does not publish or replace the Zed extension registry
-  entry.
+  requires the explicit `package.metadata.zed-wit.runtime-lsp-version` pin to
+  resolve to a published, non-prerelease, immutable `vX.Y.Z` LSP release with
+  every supported runtime binary and checksum. This scope does not publish or
+  replace the Zed extension registry entry.
 
 LSP and extension versions are independent. LSP releases use protected
 `vX.Y.Z` tags; extension releases use protected `v-extension-X.Y.Z` tags.
