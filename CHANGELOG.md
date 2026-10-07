@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Prepare WIT Language Server `v0.1.2` against the requalified Bytecode Alliance
+  WIT grammar at `f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`; no concrete
+  language-server behavior change is intended.
 - Requalify the pinned Bytecode Alliance WIT grammar at `f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`, covering its new public supertypes without changing concrete Zed queries.
 - Advance the Zed extension runtime LSP pin to the published immutable
   `v0.1.1` recovery release.
