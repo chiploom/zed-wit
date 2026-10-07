@@ -5,6 +5,25 @@ not a substitute for the manual Zed qualification checklist in
 [manual testing](manual-testing.md), and it does not claim registry publication
 or end-to-end hosted installation.
 
+## Public repository transition — 2026-10-07
+
+The repository is now public. The default branch is protected by an active
+ruleset that requires pull requests, conversation resolution, an up-to-date
+branch, the six PR CI checks, squash-only merging, and linear history while
+blocking deletion and non-fast-forward updates. A separate active `v*` tag
+ruleset prevents release-tag updates and deletion while allowing new release
+tags to be created.
+
+The GitHub `release` environment has been created for the publishing workflow.
+Its deployment/reviewer protections remain release-gate settings that must be
+verified before publication.
+
+Hosted CI on public `main` completed successfully for
+`35daeb10e11369af4cdc1132728567be8d0f2410` in
+[run 37554729191](https://github.com/chiploom/zed-wit/actions/runs/37554729191).
+This establishes public hosted-CI evidence, but no GitHub release or Zed registry
+publication is claimed.
+
 ## Restricted Mode qualification correction — 2026-10-06
 
 A final macOS qualification run exposed Zed's new-worktree trust modal even
@@ -319,12 +338,12 @@ The following remain pending and must not be inferred from the green CI matrix:
 - Corrupt/missing hosted asset behavior against a published release.
 - Execution of the protected release workflow and artifact attestations.
 - Registry succession from the existing `wit` extension.
-- Publication eligibility while this repository remains private.
+- Registry publication and succession remain pending even though the repository
+  is now public.
 
 Use [manual testing](manual-testing.md) for the editor qualification procedure.
-The repository must be public before a Zed registry submission, and the existing
-`wit` registry entry requires the succession process documented in
-[publishing](publishing.md).
+The repository is public; the remaining registry gate is the ownership/succession
+process for the existing `wit` entry documented in [publishing](publishing.md).
 
 ## Release gate
 
@@ -332,7 +351,8 @@ Before the first release candidate is considered ready:
 
 1. Keep CI green on the exact candidate commit.
 2. Complete and record the applicable manual Zed scenarios.
-3. Make the repository public before registry submission.
+3. Verify public-repository security settings, release-environment protection,
+   and the active default-branch and `v*` tag rulesets.
 4. Resolve the existing `wit` registry ownership/succession requirement.
 5. Create a stable `vX.Y.Z` tag whose version matches the adapter, extension,
    and native server manifests.

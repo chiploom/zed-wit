@@ -1,13 +1,15 @@
 # Security policy
 
-This project is unreleased. There is no supported published release or promised
-response SLA yet. Once a release exists, security fixes target the latest release.
+This project has no published release yet. There is no supported release or
+promised response SLA. Once a release exists, security fixes target the latest
+release.
 
 Report a suspected vulnerability through the repository's **Security → Report a
-vulnerability** private reporting interface, if enabled. If that interface is
-unavailable, open an issue requesting a private reporting channel without posting
-vulnerability details, sensitive WIT sources, credentials, or an exploit.
-Maintainers must enable private reporting before public release.
+vulnerability** private reporting interface. Do not disclose vulnerability
+details, sensitive WIT sources, credentials, or exploit material in a public
+issue. If private reporting is unavailable, open an issue requesting a private
+reporting channel without including sensitive details. Maintainers should keep
+private vulnerability reporting enabled before the first release.
 
 ## Trust boundaries
 
@@ -25,6 +27,6 @@ those attestations automatically.
 
 Pull-request CI receives read-only repository permissions, does not persist
 checkout credentials and has no publishing secrets. Release publishing requires
-the protected `release` environment. Environment approvals, branch/tag protection
-and private reporting are repository settings that must be configured by a
-maintainer; workflow YAML alone cannot enable them. See [publishing](docs/publishing.md).
+the protected `release` environment. Branch/tag rulesets, environment protection,
+and private reporting are repository settings rather than workflow behavior;
+verify them before every release. See [publishing](docs/publishing.md).

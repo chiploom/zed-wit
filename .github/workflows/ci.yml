@@ -11,16 +11,7 @@ on:
       - "!.github/dependabot.yml"
       - "!.editorconfig"
       - "!.gitignore"
-  pull_request:
-    paths:
-      - "**"
-      - "!**/*.md"
-      - ".github/licenses/**"
-      - "THIRD_PARTY_NOTICES.md"
-      - "!.github/ISSUE_TEMPLATE/**"
-      - "!.github/dependabot.yml"
-      - "!.editorconfig"
-      - "!.gitignore"
+  pull_request: {}
   workflow_dispatch:
 permissions:
   contents: read

@@ -1,7 +1,9 @@
 # Publishing and maintenance
 
-The project is unreleased. Defining a workflow does not create a GitHub release,
-configure repository protections, or grant permission to replace a registry entry.
+The repository is public, but the project is unreleased. Defining a workflow does
+not create a GitHub release or grant permission to replace the existing registry
+entry. Repository rulesets and release-environment protections are separate
+controls and must remain active for publication.
 
 ## Native assets
 
@@ -34,10 +36,12 @@ itself a cryptographic attestation.
 
 ## Release gate
 
-1. Configure protected default-branch reviews and `v*` tag rules. Configure the
-   GitHub `release` environment with required reviewers, prevent self-review and
-   restrict deployment branches to the default branch. Enable private security
-   reporting. These are manual repository settings; inspect them before release.
+1. Verify the active default-branch and `v*` tag rulesets and the GitHub
+   `release` environment before release. The release-tag ruleset must prevent
+   updates and deletion of existing `v*` tags while still allowing the release
+   process to create a new tag. Verify the environment's reviewer, self-review,
+   and deployment-branch restrictions as applicable, and keep private
+   vulnerability reporting enabled.
 2. Complete CI on the intended commit, including all five native targets and the
    adapter Wasm check. Complete and retain the [manual matrix](manual-testing.md).
    Run `cargo xtask check-dependencies` and audit the locked dependency licenses.
