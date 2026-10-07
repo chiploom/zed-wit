@@ -4,6 +4,7 @@ mod release;
 mod repository_policy;
 mod util;
 mod zed_gui;
+mod zed_hosted;
 mod zed_smoke;
 
 use std::{env, path::PathBuf, process::ExitCode, time::Duration};
@@ -177,6 +178,30 @@ fn run() -> Result<(), String> {
             util::ensure_empty_options(options)?;
             zed_smoke::run(&zed, &profile, Duration::from_secs(timeout))
         }
+        "test-zed-hosted" => {
+            let mut options = util::parse_options(rest, &["zed", "profile", "timeout-seconds"])?;
+            let zed = options.remove("zed").unwrap_or_else(|| "zed".into());
+            let profile = util::root_relative(
+                options
+                    .remove("profile")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("target/zed-hosted/profile")),
+            );
+            let timeout = options
+                .remove("timeout-seconds")
+                .map(|value| {
+                    value
+                        .parse::<u64>()
+                        .map_err(|error| format!("invalid --timeout-seconds {value:?}: {error}"))
+                })
+                .transpose()?
+                .unwrap_or(90);
+            if !(10..=300).contains(&timeout) {
+                return Err("--timeout-seconds must be between 10 and 300".into());
+            }
+            util::ensure_empty_options(options)?;
+            zed_hosted::run(&zed, &profile, Duration::from_secs(timeout))
+        }
         other => Err(format!(
             "unknown xtask command {other:?}; run `cargo xtask help`"
         )),
@@ -195,6 +220,7 @@ Usage:
   cargo xtask verify-release-assets [--input <dir>]
   cargo xtask check-no-python
   cargo xtask test-zed [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>]
+  cargo xtask test-zed-hosted [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <10-300>]
   cargo xtask test-zed-gui [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] [--linux-input-backend <auto|x11|wayland|libei>] --allow-input-injection true"
     );
 }
