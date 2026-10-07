@@ -1,9 +1,10 @@
 # Publishing and maintenance
 
-The repository is public, but the project is unreleased. Defining a workflow does
-not create a GitHub release or grant permission to replace the existing registry
-entry. Repository rulesets and release-environment protections are separate
-controls and must remain active for publication.
+The repository is public and `v0.1.0` is published as an immutable GitHub
+release. GitHub release publication does not grant permission to replace the
+existing Zed registry entry. Repository rulesets, immutable releases, and
+release-environment protections remain part of the release contract for every
+subsequent version.
 
 ## Native assets
 
