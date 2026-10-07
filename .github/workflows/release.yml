@@ -718,7 +718,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+          release_json=$(gh release view "$RELEASE_TAG" --json isDraft,tagName,name,assets)
+          if [ "$(jq -r '.isDraft' <<<"$release_json")" != "true" ]; then
+            echo "::error::Release $RELEASE_TAG is not an unpublished draft"
+            exit 1
+          fi
+          if [ "$(jq -r '.tagName' <<<"$release_json")" != "$RELEASE_TAG" ]; then
+            echo "::error::Draft release tag does not match $RELEASE_TAG"
+            exit 1
+          fi
+
           assets=$(jq -r '.assets[].name' <<<"$release_json")
           asset_count=$(jq '.assets | length' <<<"$release_json")
 
