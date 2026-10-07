@@ -441,7 +441,14 @@ jobs:
 
   attest_lsp:
     name: Attest LSP release artifacts
-    if: ${{ inputs.scope == 'lsp' && inputs.operation != 'validate' }}
+    if: >-
+      ${{
+        always() &&
+        inputs.scope == 'lsp' &&
+        inputs.operation != 'validate' &&
+        needs.validate.result == 'success' &&
+        needs.verify_lsp.result == 'success'
+      }}
     needs: [validate, verify_lsp]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

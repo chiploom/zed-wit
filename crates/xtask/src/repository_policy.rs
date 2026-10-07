@@ -238,4 +238,21 @@ mod tests {
         assert!(contains_python_invocation("uv run pytest"));
         assert!(!contains_python_invocation("cargo xtask check-no-python"));
     }
+
+    #[test]
+    fn regeneration_attestation_overrides_skipped_build_propagation() {
+        let root = util::repo_root();
+        let workflow = fs::read_to_string(root.join(".github/workflows/release.yml")).unwrap();
+        let start = workflow.find("  attest_lsp:\n").unwrap();
+        let end = workflow[start..]
+            .find("\n  publish:\n")
+            .map(|offset| start + offset)
+            .unwrap();
+        let job = &workflow[start..end];
+
+        assert!(job.contains("always()"));
+        assert!(job.contains("needs.validate.result == 'success'"));
+        assert!(job.contains("needs.verify_lsp.result == 'success'"));
+        assert!(job.contains("inputs.operation != 'validate'"));
+    }
 }
