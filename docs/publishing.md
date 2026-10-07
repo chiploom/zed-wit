@@ -49,9 +49,10 @@ or GitHub Release.
 For publication:
 
 1. Verify the active default-branch and `v*` tag rulesets, the protected GitHub
-   `release` environment, and private vulnerability reporting. Existing `v*`
-   tags must be non-updatable and non-deletable; creation must remain available
-   to the CD job.
+   `release` environment, private vulnerability reporting, and repository
+   **immutable releases**. Existing `v*` tags must be non-updatable and
+   non-deletable; creation must remain available to the CD job. Immutable releases
+   lock the published release assets and associated tag after publication.
 2. Complete normal CI and the applicable [manual matrix](manual-testing.md) on the
    intended release commit. Audit locked dependency licenses and retain
    `Cargo.lock`.
@@ -62,14 +63,15 @@ For publication:
    validation, five native builds, and combined artifact verification to pass.
 5. Dispatch **CD** from the intended release commit with the same tag and
    `publish=true`. The protected publish job runs the full gate again, generates
-   artifact attestations, creates a draft release targeted at the validated
-   commit, verifies the resulting tag resolves to that exact commit, uploads the
-   complete asset set, then publishes the draft. If `main` advanced after an
-   earlier dry run, this publication run is the authoritative qualification.
-6. If publication is interrupted after the draft/tag is created, rerun CD from
-   the same validated commit with `publish=true`. CD accepts only a draft release
-   whose protected tag still resolves to the validated SHA and resumes asset
-   upload; it never moves or deletes the tag.
+   artifact attestations, explicitly creates the protected lightweight tag at the
+   validated SHA, verifies that binding, creates a draft release from the existing
+   tag, uploads the complete asset set, then publishes the draft. If `main`
+   advanced after an earlier dry run, this publication run is the authoritative
+   qualification.
+6. If publication is interrupted after tag creation, rerun CD from the same
+   validated commit with `publish=true`. CD accepts an exact tag with no release
+   or an unpublished draft release only when the tag still resolves to the
+   validated SHA, then resumes publication without moving or deleting the tag.
 7. Download each published asset and sidecar, verify checksum, provenance and the
    target-specific redistribution notice, and exercise fresh-install and cached
    behavior in Zed. For example, run
