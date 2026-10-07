@@ -117,9 +117,10 @@ registry transfer or duplicate entry is assumed.
 
 GitHub release publication is separate from registry publication. Version
 [`v0.1.0`](https://github.com/chiploom/zed-wit/releases/tag/v0.1.0) is an
-immutable **LSP-only** release. Future CD runs explicitly choose `lsp`,
-`extension`, or `full` scope. See [publishing](docs/publishing.md) for the
-scope contract and registry succession gate.
+immutable **LSP-only** release. Future CD runs explicitly choose `lsp` or
+`extension` scope. LSP and extension versions can advance independently; the
+extension pins a published LSP version. See [publishing](docs/publishing.md) for
+the scope contract and registry succession gate.
 
 ## Acknowledgements and license
 
