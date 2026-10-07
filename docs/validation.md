@@ -412,9 +412,10 @@ Before each release candidate is considered ready:
 4. Resolve the existing `wit` registry ownership/succession requirement.
 5. Dispatch the protected CD workflow from the default branch with the intended
    scope and tag format (`vX.Y.Z` for LSP or `v-extension-X.Y.Z` for the Zed
-   extension), with `publish=false`; require every scope-applicable gate to pass.
+   extension), with `operation=validate`; require every scope-applicable gate to
+   pass.
 6. Dispatch CD again from the same commit with the same scope/tag and
-   `publish=true`; allow the protected publish job to create the immutable
+   `operation=publish`; allow the protected publish job to create the immutable
    release tag only after all applicable build and verification jobs pass.
 7. For LSP releases, verify the published five-target asset set, checksums,
    provenance, licenses, tag-to-commit binding and attestations. For extension
