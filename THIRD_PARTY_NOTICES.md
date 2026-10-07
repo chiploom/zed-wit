@@ -5,7 +5,7 @@ retains its own license; the project license does not replace these terms.
 
 ## Canonical Tree-sitter WIT grammar
 
-Source: https://github.com/bytecodealliance/tree-sitter-wit/tree/cdf07263b136054b413cab449ac7a1d059c27542
+Source: https://github.com/bytecodealliance/tree-sitter-wit/tree/f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6
 
 The pinned Git dependency supplies the embedded parser and grammar from this
 revision. The Zed grammar registration uses the same revision. Preserve its
