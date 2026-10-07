@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Requalify the pinned Bytecode Alliance WIT grammar at `f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`, covering its new public supertypes without changing concrete Zed queries.
 - Advance the Zed extension runtime LSP pin to the published immutable
   `v0.1.1` recovery release.
 - Prepare the `v0.1.1` LSP recovery release after the immutable `v0.1.0`
