@@ -16,21 +16,15 @@ on:
         required: true
         type: string
       operation:
-        description: validate = dry run; publish = new release; regenerate = restore a missing release from an existing protected tag
+        description: validate = dry run; publish = new release
         required: true
         default: validate
         type: choice
         options:
           - validate
           - publish
-          - regenerate
-      source_run_id:
-        description: Original successful CD run ID; required for LSP regeneration
-        required: false
-        type: string
 
 permissions:
-  actions: read
   contents: read
 
 env:
@@ -90,17 +84,10 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_SCOPE: ${{ inputs.scope }}
-          RELEASE_OPERATION: ${{ inputs.operation }}
         run: |
-          set -euo pipefail
-          mode=new
-          if [ "$RELEASE_OPERATION" = "regenerate" ]; then
-            mode=regenerate
-          fi
           cargo xtask validate-release \
             --tag "$RELEASE_TAG" \
-            --scope "$RELEASE_SCOPE" \
-            --mode "$mode"
+            --scope "$RELEASE_SCOPE"
 
       - name: Validate tag and recovery state
         env:
@@ -131,12 +118,6 @@ jobs:
                 exit 0
               fi
               ;;
-            regenerate)
-              if [ "$tag_exists" != "true" ]; then
-                echo "::error::Regeneration requires existing protected tag $RELEASE_TAG"
-                exit 1
-              fi
-              ;;
             *)
               echo "::error::Unsupported release operation: $RELEASE_OPERATION"
               exit 1
@@ -162,56 +143,6 @@ jobs:
               echo "::error::Draft $RELEASE_TAG has a different release scope/title"
               exit 1
             fi
-          fi
-
-      - name: Validate LSP regeneration source run
-        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'regenerate' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_SHA: ${{ steps.validate.outputs.sha }}
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-        run: |
-          set -euo pipefail
-
-          if ! [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::LSP regeneration requires a numeric source_run_id"
-            exit 1
-          fi
-
-          run_json=$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID")
-          test "$(jq -r '.status' <<<"$run_json")" = "completed"
-          test "$(jq -r '.conclusion' <<<"$run_json")" = "success"
-          test "$(jq -r '.event' <<<"$run_json")" = "workflow_dispatch"
-          test "$(jq -r '.path' <<<"$run_json")" = ".github/workflows/release.yml"
-
-          source_sha=$(jq -r '.head_sha' <<<"$run_json")
-          if [ "$source_sha" != "$RELEASE_SHA" ]; then
-            echo "::error::Source run $SOURCE_RUN_ID used $source_sha instead of release source $RELEASE_SHA"
-            exit 1
-          fi
-
-          jobs_json=$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100")
-          publish_successes=$(jq '[.jobs[] | select(.name == "Publish GitHub release" and .conclusion == "success")] | length' <<<"$jobs_json")
-          verify_successes=$(jq '[.jobs[] | select((.name == "Verify release artifact set" or .name == "Verify LSP release artifact set") and .conclusion == "success")] | length' <<<"$jobs_json")
-          if [ "$publish_successes" -ne 1 ] || [ "$verify_successes" -ne 1 ]; then
-            echo "::error::Source run $SOURCE_RUN_ID is not a fully verified successful publication run"
-            exit 1
-          fi
-
-          artifacts_json=$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100")
-          expected=$(printf '%s\n' \
-            release-aarch64-apple-darwin \
-            release-x86_64-apple-darwin \
-            release-aarch64-unknown-linux-gnu \
-            release-x86_64-unknown-linux-gnu \
-            release-x86_64-pc-windows-msvc | sort)
-          actual=$(jq -r '.artifacts[] | select(.name | startswith("release-")) | select(.expired == false) | .name' <<<"$artifacts_json" | sort)
-
-          if [ "$actual" != "$expected" ]; then
-            echo "::error::Source run $SOURCE_RUN_ID does not contain the exact five unexpired LSP release artifacts"
-            printf 'Expected:\n%s\nActual:\n%s\n' "$expected" "$actual"
-            exit 1
           fi
 
       - name: Require scoped user-facing release notes
@@ -300,7 +231,7 @@ jobs:
 
   build_lsp:
     name: Build LSP / ${{ matrix.target }}
-    if: ${{ inputs.scope == 'lsp' && inputs.operation != 'regenerate' }}
+    if: ${{ inputs.scope == 'lsp' }}
     needs: validate
     strategy:
       fail-fast: false
@@ -367,179 +298,64 @@ jobs:
 
   verify_lsp:
     name: Verify LSP release artifact set
-    if: >-
-      ${{
-        always() &&
-        inputs.scope == 'lsp' &&
-        needs.validate.result == 'success' &&
-        (
-          (inputs.operation == 'regenerate' && needs.build_lsp.result == 'skipped') ||
-          (inputs.operation != 'regenerate' && needs.build_lsp.result == 'success')
-        )
-      }}
+    if: ${{ inputs.scope == 'lsp' }}
     needs: [validate, build_lsp]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout release source
-        if: ${{ inputs.operation != 'regenerate' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.validate.outputs.sha }}
-          persist-credentials: false
-
-      - name: Checkout release control
-        if: ${{ inputs.operation == 'regenerate' }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Checkout protected release source
-        if: ${{ inputs.operation == 'regenerate' }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-          path: release-source
           persist-credentials: false
 
       - name: Install pinned toolchain
         run: rustup toolchain install
 
-      - name: Download current-run LSP artifacts
-        if: ${{ inputs.operation != 'regenerate' }}
+      - name: Download LSP artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
 
-      - name: Restore original LSP artifacts
-        if: ${{ inputs.operation == 'regenerate' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run_id }}
-          pattern: release-*
-          path: dist
-          merge-multiple: true
-
-      - name: Verify current-run LSP artifacts
-        if: ${{ inputs.operation != 'regenerate' }}
+      - name: Verify LSP artifacts
         run: cargo xtask verify-release-assets --input dist
-
-      - name: Verify restored LSP artifacts
-        if: ${{ inputs.operation == 'regenerate' }}
-        env:
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-        run: |
-          cargo xtask verify-restored-release-assets \
-            --input dist \
-            --source-root release-source \
-            --source-run-id "$SOURCE_RUN_ID"
 
   attest_lsp:
     name: Attest LSP release artifacts
-    if: >-
-      ${{
-        always() &&
-        inputs.scope == 'lsp' &&
-        inputs.operation != 'validate' &&
-        needs.validate.result == 'success' &&
-        needs.verify_lsp.result == 'success'
-      }}
+    if: ${{ inputs.scope == 'lsp' && inputs.operation == 'publish' }}
     needs: [validate, verify_lsp]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      actions: read
       contents: read
       id-token: write
       attestations: write
     steps:
-      - name: Download current-run LSP artifacts
-        if: ${{ inputs.operation == 'publish' }}
+      - name: Download LSP artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
 
-      - name: Restore original LSP artifacts
-        if: ${{ inputs.operation == 'regenerate' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run_id }}
-          pattern: release-*
-          path: dist
-          merge-multiple: true
-
-      - name: Attest new LSP build provenance
-        if: ${{ inputs.operation == 'publish' }}
+      - name: Attest LSP build provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*
-
-      - name: Write regeneration attestation predicate
-        if: ${{ inputs.operation == 'regenerate' }}
-        env:
-          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
-          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-          CONTROL_SHA: ${{ github.sha }}
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          RUN_ID: ${{ github.run_id }}
-          REPOSITORY: ${{ github.repository }}
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-        run: |
-          jq -n \
-            --arg repository "$REPOSITORY" \
-            --arg tag "$RELEASE_TAG" \
-            --arg source_revision "$RELEASE_SHA" \
-            --arg control_revision "$CONTROL_SHA" \
-            --arg workflow_ref "$WORKFLOW_REF" \
-            --arg run_id "$RUN_ID" \
-            --arg source_run_id "$SOURCE_RUN_ID" \
-            '{
-              schema_version: 1,
-              operation: "regenerate",
-              artifact_source: {
-                repository: $repository,
-                tag: $tag,
-                revision: $source_revision,
-                original_cd_run_id: $source_run_id
-              },
-              release_control: {
-                revision: $control_revision,
-                workflow_ref: $workflow_ref,
-                run_id: $run_id
-              }
-            }' > regeneration-predicate.json
-
-      - name: Attest regenerated LSP source binding
-        if: ${{ inputs.operation == 'regenerate' }}
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: dist/*
-          predicate-type: https://github.com/chiploom/zed-wit/attestations/release-regeneration/v1
-          predicate-path: regeneration-predicate.json
 
   publish:
     name: Publish GitHub release
     if: >-
       ${{
-        inputs.operation != 'validate' &&
+        inputs.operation == 'publish' &&
         always() &&
         needs.validate.result == 'success' &&
         (
           (
             inputs.scope == 'lsp' &&
-            (
-              (inputs.operation == 'regenerate' && needs.build_lsp.result == 'skipped') ||
-              (inputs.operation == 'publish' && needs.build_lsp.result == 'success')
-            ) &&
+            needs.build_lsp.result == 'success' &&
             needs.verify_lsp.result == 'success' &&
             needs.attest_lsp.result == 'success'
           ) ||
@@ -554,7 +370,6 @@ jobs:
     timeout-minutes: 15
     environment: release
     permissions:
-      actions: read
       contents: write
     steps:
       - name: Checkout release control metadata
@@ -570,21 +385,10 @@ jobs:
           path: release-source
           persist-credentials: false
 
-      - name: Download current-run LSP artifacts
-        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'publish' }}
+      - name: Download LSP artifacts
+        if: ${{ inputs.scope == 'lsp' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: release-*
-          path: dist
-          merge-multiple: true
-
-      - name: Restore original LSP artifacts
-        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'regenerate' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run_id }}
           pattern: release-*
           path: dist
           merge-multiple: true
@@ -593,20 +397,10 @@ jobs:
         if: ${{ inputs.scope == 'lsp' }}
         run: rustup toolchain install
 
-      - name: Verify complete current-run LSP asset set
-        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'publish' }}
+      - name: Verify complete LSP asset set
+        if: ${{ inputs.scope == 'lsp' }}
         working-directory: release-source
         run: cargo xtask verify-release-assets --input ../dist
-
-      - name: Verify complete restored LSP asset set
-        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'regenerate' }}
-        env:
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-        run: |
-          cargo xtask verify-restored-release-assets \
-            --input dist \
-            --source-root release-source \
-            --source-run-id "$SOURCE_RUN_ID"
 
       - name: Create or resume draft release
         env:
@@ -617,15 +411,10 @@ jobs:
           RELEASE_SCOPE: ${{ needs.validate.outputs.scope }}
           RELEASE_TITLE: ${{ needs.validate.outputs.title }}
           RELEASE_NOTES: ${{ needs.validate.outputs.notes }}
-          RELEASE_OPERATION: ${{ inputs.operation }}
         run: |
           set -euo pipefail
 
           if ! gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            if [ "$RELEASE_OPERATION" = "regenerate" ]; then
-              echo "::error::Regeneration cannot create missing tag $RELEASE_TAG"
-              exit 1
-            fi
             gh api --method POST "repos/$GH_REPO/git/refs" \
               -f ref="refs/tags/$RELEASE_TAG" \
               -f sha="$RELEASE_SHA" >/dev/null
