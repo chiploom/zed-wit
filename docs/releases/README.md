@@ -23,3 +23,13 @@ Release notes live at `docs/releases/<scope>/vX.Y.Z.md`. The CD workflow refuses
 to publish when the notes file for the selected scope/version is missing or
 empty. The workflow prepends the canonical scope notice to the GitHub Release
 body, so release-note files should not invent a different scope label.
+
+## Regeneration
+
+Deleted LSP GitHub Releases may be restored only while the original successful
+publication run's `release-*` artifacts remain available. CD validates that
+source run against the protected tag SHA and restores the original artifact
+bytes. It does not rebuild LSP binaries for an existing release tag.
+
+If those Actions artifacts have expired, create a new version rather than
+publishing newly built bytes under the old tag.
