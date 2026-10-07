@@ -1200,9 +1200,7 @@ mod tests {
         ));
         fs::create_dir_all(root.join("target")).unwrap();
 
-        assert!(
-            validate_disposable_profile(&root, &root.join("target/zed-smoke/profile")).is_ok()
-        );
+        assert!(validate_disposable_profile(&root, &root.join("target/zed-smoke/profile")).is_ok());
         for profile in [
             root.clone(),
             root.join("target"),
@@ -1238,9 +1236,7 @@ mod tests {
         fs::create_dir_all(&outside).unwrap();
         symlink(&outside, root.join("target/escape")).unwrap();
 
-        assert!(
-            validate_disposable_profile(&root, &root.join("target/escape/profile")).is_err()
-        );
+        assert!(validate_disposable_profile(&root, &root.join("target/escape/profile")).is_err());
 
         fs::remove_dir_all(root).unwrap();
     }
