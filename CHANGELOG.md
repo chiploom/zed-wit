@@ -10,8 +10,9 @@
   that remain valid after publication.
 - Require version-specific user-facing release notes for future CD publications.
 - Add explicit independent `lsp` and `extension` CD release scopes, decouple
-  adapter and server versions, and require extension releases to reference a
-  complete published immutable LSP release.
+  adapter and server versions through an explicit runtime LSP pin, require
+  extension releases to reference a complete published immutable LSP release,
+  and support regenerating a deleted GitHub Release from its protected tag.
 
 ## 0.1.0 - 2026-10-07
 
