@@ -356,8 +356,7 @@ pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String
                 ReleaseValidationMode::New => (extension_version()?, runtime_lsp_version()?),
                 ReleaseValidationMode::Regenerate => {
                     let adapter_manifest = read_toml_at(&root, &source_sha, "Cargo.toml")?;
-                    let extension_manifest =
-                        read_toml_at(&root, &source_sha, "extension.toml")?;
+                    let extension_manifest = read_toml_at(&root, &source_sha, "extension.toml")?;
                     (
                         extension_version_from(&adapter_manifest, &extension_manifest)?,
                         runtime_lsp_version_from(&adapter_manifest)?,
@@ -662,12 +661,8 @@ runtime-lsp-version = "0.7.3-rc.1"
             "0.2.0"
         );
         assert_eq!(
-            release_version_for_scope(
-                ReleaseScope::Extension,
-                "v-extension-1.4.0",
-                "1.4.0",
-            )
-            .unwrap(),
+            release_version_for_scope(ReleaseScope::Extension, "v-extension-1.4.0", "1.4.0",)
+                .unwrap(),
             "1.4.0"
         );
         assert!(
@@ -689,12 +684,8 @@ runtime-lsp-version = "0.7.3-rc.1"
             "2.0.0"
         );
         assert_eq!(
-            release_version_for_scope(
-                ReleaseScope::Extension,
-                "v-extension-9.1.0",
-                "9.1.0",
-            )
-            .unwrap(),
+            release_version_for_scope(ReleaseScope::Extension, "v-extension-9.1.0", "9.1.0",)
+                .unwrap(),
             "9.1.0"
         );
     }
