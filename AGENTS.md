@@ -1,7 +1,7 @@
 # Agent index
 
-This is an independent WIT extension for Zed, maintained by Chiploom. Add no
-Chiploom-specific syntax, semantics, services or dependencies. <!-- user-specified -->
+This is an independent, general-purpose WIT extension for Zed. Add no
+project-specific syntax, semantics, services or dependencies. <!-- user-specified -->
 
 Read [architecture](docs/architecture.md) before changing boundaries and
 [CONTRIBUTING](CONTRIBUTING.md) for setup, validation and update workflows.
