@@ -148,10 +148,32 @@ jobs:
             echo "::error::Required LSP release $SERVER_TAG is not published"
             exit 1
           fi
+          if [ "$(jq -r '.prerelease' <<<"$release_json")" != "false" ]; then
+            echo "::error::Required LSP release $SERVER_TAG is a prerelease"
+            exit 1
+          fi
           if [ "$(jq -r '.immutable' <<<"$release_json")" != "true" ]; then
             echo "::error::Required LSP release $SERVER_TAG is not immutable"
             exit 1
           fi
+
+          assets=$(jq -r '.assets[].name' <<<"$release_json")
+          for asset in \
+            wit-language-server-aarch64-apple-darwin \
+            wit-language-server-x86_64-apple-darwin \
+            wit-language-server-aarch64-unknown-linux-gnu \
+            wit-language-server-x86_64-unknown-linux-gnu \
+            wit-language-server-x86_64-pc-windows-msvc.exe
+          do
+            if ! grep -Fxq "$asset" <<<"$assets"; then
+              echo "::error::Required LSP release $SERVER_TAG is missing $asset"
+              exit 1
+            fi
+            if ! grep -Fxq "$asset.sha256" <<<"$assets"; then
+              echo "::error::Required LSP release $SERVER_TAG is missing $asset.sha256"
+              exit 1
+            fi
+          done
 
       - run: cargo test -p xtask --locked
       - run: cargo fmt --all -- --check
