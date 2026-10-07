@@ -413,10 +413,7 @@ mod tests {
 
     #[test]
     fn release_tag_must_match_project_version() {
-        assert_eq!(
-            release_version_for_tag("v0.1.0", "0.1.0").unwrap(),
-            "0.1.0"
-        );
+        assert_eq!(release_version_for_tag("v0.1.0", "0.1.0").unwrap(), "0.1.0");
         assert!(
             release_version_for_tag("v0.1.1", "0.1.0")
                 .unwrap_err()
