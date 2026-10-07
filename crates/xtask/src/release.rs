@@ -9,6 +9,7 @@ const MAX_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReleaseScope {
     Lsp,
+    Extension,
     Full,
 }
 
@@ -16,9 +17,10 @@ impl ReleaseScope {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
             "lsp" => Ok(Self::Lsp),
+            "extension" => Ok(Self::Extension),
             "full" => Ok(Self::Full),
             _ => Err(format!(
-                "unsupported release scope {value:?}; expected lsp or full"
+                "unsupported release scope {value:?}; expected lsp, extension, or full"
             )),
         }
     }
@@ -26,6 +28,7 @@ impl ReleaseScope {
     fn as_str(self) -> &'static str {
         match self {
             Self::Lsp => "lsp",
+            Self::Extension => "extension",
             Self::Full => "full",
         }
     }
@@ -33,6 +36,7 @@ impl ReleaseScope {
     fn title(self, tag: &str) -> String {
         match self {
             Self::Lsp => format!("WIT Language Server {tag}"),
+            Self::Extension => format!("WIT for Zed Extension {tag}"),
             Self::Full => format!("WIT for Zed {tag}"),
         }
     }
@@ -482,6 +486,17 @@ mod tests {
             "docs/releases/lsp/v0.2.0.md"
         );
 
+        let extension = ReleaseScope::parse("extension").unwrap();
+        assert_eq!(extension.as_str(), "extension");
+        assert_eq!(
+            extension.title("v0.2.0"),
+            "WIT for Zed Extension v0.2.0"
+        );
+        assert_eq!(
+            extension.notes_path("v0.2.0"),
+            "docs/releases/extension/v0.2.0.md"
+        );
+
         let full = ReleaseScope::parse("full").unwrap();
         assert_eq!(full.as_str(), "full");
         assert_eq!(full.title("v0.2.0"), "WIT for Zed v0.2.0");
@@ -490,7 +505,7 @@ mod tests {
             "docs/releases/full/v0.2.0.md"
         );
 
-        assert!(ReleaseScope::parse("extension").is_err());
+        assert!(ReleaseScope::parse("server").is_err());
     }
 
     #[test]
