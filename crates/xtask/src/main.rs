@@ -217,7 +217,7 @@ Usage:
   cargo xtask check-dependencies [--target <target>]
   cargo xtask collect-licenses --target <target> [--output <dir>]
   cargo xtask package-release --target <target> [--output <dir>]
-  cargo xtask validate-release --tag <vX.Y.Z> --scope <lsp|full>
+  cargo xtask validate-release --tag <vX.Y.Z> --scope <lsp|extension|full>
   cargo xtask verify-release-assets [--input <dir>]
   cargo xtask check-no-python
   cargo xtask test-zed [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>]
