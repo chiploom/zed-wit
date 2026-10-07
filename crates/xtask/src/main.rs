@@ -69,11 +69,12 @@ fn run() -> Result<(), String> {
             release::package_release(&target, &output)
         }
         "validate-release" => {
-            let mut options = util::parse_options(rest, &["tag", "scope"])?;
+            let mut options = util::parse_options(rest, &["tag", "scope", "mode"])?;
             let tag = util::required_option(&mut options, "tag")?;
             let scope = util::required_option(&mut options, "scope")?;
+            let mode = options.remove("mode").unwrap_or_else(|| "new".into());
             util::ensure_empty_options(options)?;
-            release::validate_release(&tag, &scope)
+            release::validate_release(&tag, &scope, &mode)
         }
         "verify-release-assets" => {
             let mut options = util::parse_options(rest, &["input"])?;
@@ -217,7 +218,7 @@ Usage:
   cargo xtask check-dependencies [--target <target>]
   cargo xtask collect-licenses --target <target> [--output <dir>]
   cargo xtask package-release --target <target> [--output <dir>]
-  cargo xtask validate-release --tag <vX.Y.Z|v-extension-X.Y.Z> --scope <lsp|extension>
+  cargo xtask validate-release --tag <vX.Y.Z|v-extension-X.Y.Z> --scope <lsp|extension> [--mode <new|regenerate>]
   cargo xtask verify-release-assets [--input <dir>]
   cargo xtask check-no-python
   cargo xtask test-zed [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>]
