@@ -49,6 +49,10 @@ jobs:
         run: cargo test --doc --workspace --exclude xtask --locked
       - name: Build the Zed extension as Zed does
         run: cargo build --target wasm32-wasip2 --locked
+      - name: Verify working tree remains clean
+        run: |
+          git diff --check
+          test -z "$(git status --short)"
 
   native-tests:
     name: Tests / ${{ matrix.target }}
