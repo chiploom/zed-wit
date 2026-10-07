@@ -143,6 +143,10 @@ jobs:
               echo "::error::Draft $RELEASE_TAG has a different release scope/title"
               exit 1
             fi
+          else
+            echo "::error::Existing tag $RELEASE_TAG has no resumable draft release"
+            echo "::error::If this tag was used by a deleted immutable release, GitHub permanently reserves the tag name; publish a new version instead"
+            exit 1
           fi
 
       - name: Require scoped user-facing release notes
