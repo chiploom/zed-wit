@@ -12,6 +12,24 @@ enum ReleaseScope {
     Extension,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReleaseValidationMode {
+    New,
+    Regenerate,
+}
+
+impl ReleaseValidationMode {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "new" => Ok(Self::New),
+            "regenerate" => Ok(Self::Regenerate),
+            _ => Err(format!(
+                "unsupported release validation mode {value:?}; expected new or regenerate"
+            )),
+        }
+    }
+}
+
 impl ReleaseScope {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
@@ -57,11 +75,11 @@ fn package_version(manifest: &toml::Value, label: &str) -> Result<String, String
         .ok_or_else(|| format!("{label} omitted package.version"))
 }
 
-fn extension_version() -> Result<String, String> {
-    let root = util::repo_root();
-    let adapter_manifest = read_toml(&root.join("Cargo.toml"))?;
-    let extension_manifest = read_toml(&root.join("extension.toml"))?;
-    let adapter_version = package_version(&adapter_manifest, "Cargo.toml")?;
+fn extension_version_from(
+    adapter_manifest: &toml::Value,
+    extension_manifest: &toml::Value,
+) -> Result<String, String> {
+    let adapter_version = package_version(adapter_manifest, "Cargo.toml")?;
     let manifest_version = extension_manifest
         .get("version")
         .and_then(toml::Value::as_str)
@@ -73,10 +91,65 @@ fn extension_version() -> Result<String, String> {
     Ok(adapter_version)
 }
 
+fn extension_version() -> Result<String, String> {
+    let root = util::repo_root();
+    extension_version_from(
+        &read_toml(&root.join("Cargo.toml"))?,
+        &read_toml(&root.join("extension.toml"))?,
+    )
+}
+
+fn server_version_from(manifest: &toml::Value) -> Result<String, String> {
+    package_version(manifest, "language-server manifest")
+}
+
 fn server_version() -> Result<String, String> {
     let root = util::repo_root();
-    let manifest = read_toml(&root.join("crates/wit-language-server/Cargo.toml"))?;
-    package_version(&manifest, "language-server manifest")
+    server_version_from(&read_toml(
+        &root.join("crates/wit-language-server/Cargo.toml"),
+    )?)
+}
+
+fn runtime_lsp_version_from(manifest: &toml::Value) -> Result<String, String> {
+    let version = manifest
+        .get("package")
+        .and_then(|package| package.get("metadata"))
+        .and_then(|metadata| metadata.get("zed-wit"))
+        .and_then(|metadata| metadata.get("runtime-lsp-version"))
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| {
+            "Cargo.toml omitted package.metadata.zed-wit.runtime-lsp-version".to_owned()
+        })?;
+
+    if stable_version(version).is_none() {
+        return Err(format!(
+            "runtime LSP pin {version:?} must be stable SemVer X.Y.Z"
+        ));
+    }
+    Ok(version.to_owned())
+}
+
+pub(crate) fn runtime_lsp_version() -> Result<String, String> {
+    let root = util::repo_root();
+    runtime_lsp_version_from(&read_toml(&root.join("Cargo.toml"))?)
+}
+
+fn read_toml_at(root: &Path, revision: &str, path: &str) -> Result<toml::Value, String> {
+    let spec = format!("{revision}:{path}");
+    let output = Command::new("git")
+        .args(["show", &spec])
+        .current_dir(root)
+        .output()
+        .map_err(|error| format!("run git show {spec}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git show {spec} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let source = String::from_utf8(output.stdout)
+        .map_err(|error| format!("git show {spec} returned non-UTF-8 data: {error}"))?;
+    toml::from_str(&source).map_err(|error| format!("parse {spec}: {error}"))
 }
 
 fn stable_version(version: &str) -> Option<&str> {
@@ -237,27 +310,60 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
+pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String> {
     let root = util::repo_root();
     let scope = ReleaseScope::parse(scope)?;
-    let extension_version = extension_version()?;
-    let server_version = server_version()?;
-    let version = release_version_for_scope(scope, tag, &extension_version, &server_version)?;
-    let title = scope.title(version);
-    let notes = scope.notes_path(version);
-    let server_tag = format!("v{server_version}");
+    let mode = ReleaseValidationMode::parse(mode)?;
 
-    let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
+    let control_head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     if !util::command_output("git", ["status", "--porcelain"], &root)?.is_empty() {
-        return Err("release candidate checkout must be clean".into());
+        return Err("release control checkout must be clean".into());
     }
     if env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
         let github_sha = env::var("GITHUB_SHA")
             .map_err(|_| "GITHUB_ACTIONS is true but GITHUB_SHA is missing")?;
-        if github_sha != head {
-            return Err("GITHUB_SHA does not match the validated release commit".into());
+        if github_sha != control_head {
+            return Err("GITHUB_SHA does not match the release control checkout".into());
         }
     }
+
+    let (source_sha, extension_version, server_version, runtime_lsp_version) = match mode {
+        ReleaseValidationMode::New => (
+            control_head.clone(),
+            extension_version()?,
+            server_version()?,
+            runtime_lsp_version()?,
+        ),
+        ReleaseValidationMode::Regenerate => {
+            let source_sha =
+                util::command_output("git", ["rev-parse", &format!("{tag}^{{commit}}")], &root)?;
+            let adapter_manifest = read_toml_at(&root, &source_sha, "Cargo.toml")?;
+            let extension_manifest = read_toml_at(&root, &source_sha, "extension.toml")?;
+            let server_manifest =
+                read_toml_at(&root, &source_sha, "crates/wit-language-server/Cargo.toml")?;
+            let extension_version =
+                extension_version_from(&adapter_manifest, &extension_manifest)?;
+            let server_version = server_version_from(&server_manifest)?;
+            let runtime_lsp_version = match scope {
+                ReleaseScope::Lsp => server_version.clone(),
+                ReleaseScope::Extension => runtime_lsp_version_from(&adapter_manifest)?,
+            };
+            (
+                source_sha,
+                extension_version,
+                server_version,
+                runtime_lsp_version,
+            )
+        }
+    };
+
+    let version = release_version_for_scope(scope, tag, &extension_version, &server_version)?;
+    let title = scope.title(version);
+    let notes = scope.notes_path(version);
+    let server_tag = match scope {
+        ReleaseScope::Lsp => format!("v{server_version}"),
+        ReleaseScope::Extension => format!("v{runtime_lsp_version}"),
+    };
 
     if let Ok(output_path) = env::var("GITHUB_OUTPUT") {
         let mut output = OpenOptions::new()
@@ -266,8 +372,12 @@ pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
             .map_err(|error| format!("open GITHUB_OUTPUT {output_path}: {error}"))?;
         writeln!(
             output,
-            "sha={head}\ntag={tag}\nscope={}\nversion={version}\ntitle={title}\nnotes={notes}\nserver_version={server_version}\nserver_tag={server_tag}",
-            scope.as_str()
+            "sha={source_sha}\ntag={tag}\nscope={}\nversion={version}\ntitle={title}\nnotes={notes}\nserver_version={server_version}\nserver_tag={server_tag}\nmode={}",
+            scope.as_str(),
+            match mode {
+                ReleaseValidationMode::New => "new",
+                ReleaseValidationMode::Regenerate => "regenerate",
+            }
         )
         .map_err(|error| format!("write GITHUB_OUTPUT {output_path}: {error}"))?;
     } else if env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
@@ -284,7 +394,12 @@ pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
             "notes": notes,
             "server_version": server_version,
             "server_tag": server_tag,
-            "sha": head,
+            "runtime_lsp_version": runtime_lsp_version,
+            "sha": source_sha,
+            "mode": match mode {
+                ReleaseValidationMode::New => "new",
+                ReleaseValidationMode::Regenerate => "regenerate",
+            },
             "result": "passed",
         }))
         .map_err(|error| format!("serialize release validation: {error}"))?
@@ -471,6 +586,48 @@ mod tests {
         assert_eq!(stable_version("01.1.0"), None);
         assert_eq!(stable_version("1.0.0-rc.1"), None);
         assert_eq!(stable_version("1.0"), None);
+    }
+
+    #[test]
+    fn runtime_lsp_pin_is_explicit_and_stable() {
+        let manifest: toml::Value = toml::from_str(
+            r#"
+[package]
+name = "zed-wit"
+version = "1.2.0"
+
+[package.metadata.zed-wit]
+runtime-lsp-version = "0.7.3"
+"#,
+        )
+        .unwrap();
+        assert_eq!(runtime_lsp_version_from(&manifest).unwrap(), "0.7.3");
+
+        let invalid: toml::Value = toml::from_str(
+            r#"
+[package]
+name = "zed-wit"
+version = "1.2.0"
+
+[package.metadata.zed-wit]
+runtime-lsp-version = "0.7.3-rc.1"
+"#,
+        )
+        .unwrap();
+        assert!(runtime_lsp_version_from(&invalid).is_err());
+    }
+
+    #[test]
+    fn release_validation_modes_are_explicit() {
+        assert_eq!(
+            ReleaseValidationMode::parse("new").unwrap(),
+            ReleaseValidationMode::New
+        );
+        assert_eq!(
+            ReleaseValidationMode::parse("regenerate").unwrap(),
+            ReleaseValidationMode::Regenerate
+        );
+        assert!(ReleaseValidationMode::parse("restore").is_err());
     }
 
     #[test]
