@@ -12,7 +12,8 @@
 - Add explicit independent `lsp` and `extension` CD release scopes, decouple
   adapter and server versions through an explicit runtime LSP pin, require
   extension releases to reference a complete published immutable LSP release,
-  and support regenerating a deleted GitHub Release from its protected tag.
+  and support byte-preserving regeneration of a deleted GitHub Release from the
+  original successful publication run and protected tag.
 
 ## 0.1.0 - 2026-10-07
 
