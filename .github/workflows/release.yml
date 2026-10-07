@@ -448,6 +448,60 @@ jobs:
             THIRD_PARTY_NOTICES.md \
             --clobber
 
+      - name: Verify draft asset scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_SCOPE: ${{ needs.validate.outputs.scope }}
+        run: |
+          set -euo pipefail
+
+          release_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+          assets=$(jq -r '.assets[].name' <<<"$release_json")
+          asset_count=$(jq '.assets | length' <<<"$release_json")
+
+          case "$RELEASE_SCOPE" in
+            extension)
+              if [ "$asset_count" -ne 0 ]; then
+                echo "::error::Extension release $RELEASE_TAG must not contain attached assets"
+                exit 1
+              fi
+              ;;
+            lsp)
+              if [ "$asset_count" -ne 23 ]; then
+                echo "::error::LSP release $RELEASE_TAG must contain exactly 23 assets; found $asset_count"
+                exit 1
+              fi
+
+              for asset in LICENSE-MIT LICENSE-APACHE THIRD_PARTY_NOTICES.md; do
+                if ! grep -Fxq "$asset" <<<"$assets"; then
+                  echo "::error::LSP release $RELEASE_TAG is missing $asset"
+                  exit 1
+                fi
+              done
+
+              for binary in \
+                wit-language-server-aarch64-apple-darwin \
+                wit-language-server-x86_64-apple-darwin \
+                wit-language-server-aarch64-unknown-linux-gnu \
+                wit-language-server-x86_64-unknown-linux-gnu \
+                wit-language-server-x86_64-pc-windows-msvc.exe
+              do
+                for asset in "$binary" "$binary.sha256" "$binary.provenance.json" "$binary.licenses.txt"; do
+                  if ! grep -Fxq "$asset" <<<"$assets"; then
+                    echo "::error::LSP release $RELEASE_TAG is missing $asset"
+                    exit 1
+                  fi
+                done
+              done
+              ;;
+            *)
+              echo "::error::Unsupported release scope: $RELEASE_SCOPE"
+              exit 1
+              ;;
+          esac
+
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -479,3 +533,9 @@ jobs:
           test "$(jq -r '.tagName' <<<"$release_json")" = "$RELEASE_TAG"
           test "$(jq -r '.name' <<<"$release_json")" = "$RELEASE_TITLE"
           jq -r '.body' <<<"$release_json" | grep -Fq "$scope_marker"
+
+          published_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+          case "$RELEASE_SCOPE" in
+            extension) test "$(jq '.assets | length' <<<"$published_json")" -eq 0 ;;
+            lsp) test "$(jq '.assets | length' <<<"$published_json")" -eq 23 ;;
+          esac
