@@ -118,9 +118,10 @@ For publication:
    `operation=publish`. The protected publish job reruns the applicable gate,
    explicitly creates the protected lightweight tag at the validated SHA,
    verifies that binding, creates a scoped draft release, then publishes it.
-   LSP releases additionally attest and upload the verified native asset set;
-   extension releases publish source only. If `main` advanced after an earlier
-   dry run, this publication run is the authoritative qualification.
+   New LSP releases additionally generate standard SLSA build-provenance
+   attestations and upload the verified native asset set; extension releases
+   publish source only. If `main` advanced after an earlier dry run, this
+   publication run is the authoritative qualification.
 6. If publication is interrupted after tag creation, rerun CD from the same
    validated commit with `operation=publish`. CD accepts an exact tag with no
    release or an unpublished matching draft only when the tag still resolves to
@@ -130,14 +131,21 @@ For publication:
    and tag plus `operation=regenerate`. CD resolves and validates the existing
    tag commit, rebuilds the release from that source, uses the current scoped
    release notes, recreates the draft, verifies its scope-specific asset set, and
-   republishes it without changing the tag.
+   republishes it without changing the tag. Because the workflow itself runs from
+   current protected `main`, regenerated LSP artifacts use a signed custom
+   regeneration attestation that explicitly records the protected source tag and
+   source revision instead of claiming normal SLSA provenance from the control
+   commit.
 8. For LSP releases, download each published asset and sidecar, verify checksum,
    provenance and target-specific redistribution notices, and run
    `cargo xtask test-zed-hosted` on each available supported host. Also run
    `gh attestation verify <asset> --repo chiploom/zed-wit` against downloaded
-   bytes. For extension releases, verify the tagged source installs as a
-   development extension and resolves the already-published pinned LSP. The
-   adapter itself verifies SHA-256, not attestations.
+   bytes. For regenerated LSP releases, also require predicate type
+   `https://github.com/chiploom/zed-wit/attestations/release-regeneration/v1`
+   and verify that its `artifact_source.tag` and `artifact_source.revision`
+   match the protected release tag. For extension releases, verify the tagged
+   source installs as a development extension and resolves the already-published
+   pinned LSP. The adapter itself verifies SHA-256, not attestations.
 
 Checksums and executable bytes come from the same GitHub origin. They detect
 corruption and asset mismatch, not a compromised publishing account. Immutable
