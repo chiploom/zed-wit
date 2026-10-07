@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn manifests_agree_on_distribution_identity() {
         let manifest: toml::Value = toml::from_str(include_str!("../extension.toml")).unwrap();
-        assert_eq!(manifest["version"].as_str(), Some(SERVER_VERSION));
+        assert_eq!(manifest["version"].as_str(), Some(env!("CARGO_PKG_VERSION")));
         assert_eq!(manifest["schema_version"].as_integer(), Some(1));
         assert_eq!(
             manifest["grammars"]["wit"]["rev"].as_str(),
