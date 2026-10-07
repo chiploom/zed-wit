@@ -246,32 +246,22 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
 }
 
 pub(crate) fn validate_disposable_profile(root: &Path, profile: &Path) -> Result<(), String> {
-    fn normalize_without_parent(path: &Path) -> Result<PathBuf, String> {
-        let mut normalized = PathBuf::new();
-        for component in path.components() {
-            match component {
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    return Err(format!(
-                        "Zed qualification profile must not contain '..': {}",
-                        path.display()
-                    ));
-                }
-                other => normalized.push(other.as_os_str()),
-            }
-        }
-        Ok(normalized)
+    if profile
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(format!(
+            "Zed qualification profile must not contain '..': {}",
+            profile.display()
+        ));
     }
 
-    let root = normalize_without_parent(root)?;
     let target = root.join("target");
-    let profile_path = if profile.is_absolute() {
+    let profile = if profile.is_absolute() {
         profile.to_path_buf()
     } else {
         root.join(profile)
     };
-    let profile = normalize_without_parent(&profile_path)?;
-
     let relative = profile.strip_prefix(&target).map_err(|_| {
         format!(
             "Zed qualification profile must be a disposable subdirectory of {}; got {}",
