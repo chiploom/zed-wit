@@ -30,6 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Install pinned toolchain
         run: rustup toolchain install
@@ -42,6 +43,12 @@ jobs:
       - run: cargo xtask check-no-python
       - run: cargo xtask check-dependencies
       - run: cargo test -p xtask --locked
+      - name: Validate protected v0.1.0 regeneration contract
+        run: |
+          cargo xtask validate-release \
+            --tag v0.1.0 \
+            --scope lsp \
+            --mode regenerate
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo check --workspace --locked
