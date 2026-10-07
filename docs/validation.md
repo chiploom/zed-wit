@@ -26,6 +26,35 @@ isolated Zed profile and the published release matching `extension.toml`.
 Record that run below before claiming hosted-delivery qualification. Registry
 publication remains separate and is not claimed by this evidence.
 
+### Hosted delivery qualification — macOS ARM64
+
+The dedicated hosted-release qualification passed on macOS ARM64 against
+`v0.1.0` using Zed 1.22.0. The test ran from post-release hardening head
+`950d4a29fb460f3b6fc70ffc09678e18980f02b5` while resolving the published
+release tag to
+`cb8dd60c7a0b74c93f1c5d62934ec8fb6d4d9d78`.
+
+`cargo xtask test-zed-hosted --timeout-seconds 180` used a fresh isolated Zed
+profile with no project-local LSP binary override and no WIT language server on
+`PATH`. Zed downloaded and launched
+`wit-language-server-aarch64-apple-darwin` from the published release. The
+downloaded executable's SHA-256 was
+`362aa98b73f082bb51479afbb100556486c8de259719d30d5683e45ef478cd5b`,
+which matches the immutable GitHub release asset digest.
+
+The same run passed all four hosted-delivery scenarios:
+
+- first hosted install downloaded, verified, and launched the published server;
+- cached install reused the verified binary and checksum without rewriting them;
+- deliberate executable corruption was detected and repaired with bytes matching
+  the original published digest; and
+- deletion of the checksum sidecar caused clean recovery, restoring the checksum
+  and launching the server with the published release build identity.
+
+This qualifies hosted delivery for macOS ARM64. It does not substitute for
+platform-specific hosted-delivery execution on macOS x86_64, Linux GNU ARM64,
+Linux GNU x86_64, or Windows x86_64 MSVC.
+
 ## Public repository transition — 2026-10-07
 
 The repository is now public. The default branch is protected by an active
