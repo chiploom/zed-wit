@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Advance the Zed extension runtime LSP pin to the published immutable
+  `v0.1.1` recovery release.
 - Prepare the `v0.1.1` LSP recovery release after the immutable `v0.1.0`
   GitHub Release was deleted. GitHub permanently reserves the `v0.1.0` tag
   name, so distribution must continue with a new patch version.
