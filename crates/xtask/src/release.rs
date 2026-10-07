@@ -341,8 +341,7 @@ pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String
             let extension_manifest = read_toml_at(&root, &source_sha, "extension.toml")?;
             let server_manifest =
                 read_toml_at(&root, &source_sha, "crates/wit-language-server/Cargo.toml")?;
-            let extension_version =
-                extension_version_from(&adapter_manifest, &extension_manifest)?;
+            let extension_version = extension_version_from(&adapter_manifest, &extension_manifest)?;
             let server_version = server_version_from(&server_manifest)?;
             let runtime_lsp_version = match scope {
                 ReleaseScope::Lsp => server_version.clone(),
