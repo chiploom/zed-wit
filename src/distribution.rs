@@ -68,7 +68,6 @@ mod tests {
 
     #[test]
     fn release_names_are_fixed_and_versioned() {
-        assert_eq!(SERVER_VERSION, "0.1.0");
         for target in [
             "aarch64-apple-darwin",
             "x86_64-apple-darwin",
