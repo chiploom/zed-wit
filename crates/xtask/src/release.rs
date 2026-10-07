@@ -168,25 +168,32 @@ fn stable_version(version: &str) -> Option<&str> {
     }
 }
 
-fn release_version_for_scope<'a>(
-    scope: ReleaseScope,
-    tag: &'a str,
-    extension_version: &str,
-    server_version: &str,
-) -> Result<&'a str, String> {
-    let (prefix, expected_version, expected_tag) = match scope {
-        ReleaseScope::Lsp => ("v", server_version, "vX.Y.Z"),
-        ReleaseScope::Extension => ("v-extension-", extension_version, "v-extension-X.Y.Z"),
+fn tag_version_for_scope(scope: ReleaseScope, tag: &str) -> Result<&str, String> {
+    let (prefix, expected_tag) = match scope {
+        ReleaseScope::Lsp => ("v", "vX.Y.Z"),
+        ReleaseScope::Extension => ("v-extension-", "v-extension-X.Y.Z"),
     };
-    let version = tag
-        .strip_prefix(prefix)
+    tag.strip_prefix(prefix)
         .and_then(stable_version)
         .ok_or_else(|| {
             format!(
                 "expected stable {expected_tag} tag for {} release",
                 scope.as_str()
             )
-        })?;
+        })
+}
+
+fn release_version_for_scope<'a>(
+    scope: ReleaseScope,
+    tag: &'a str,
+    extension_version: &str,
+    server_version: &str,
+) -> Result<&'a str, String> {
+    let version = tag_version_for_scope(scope, tag)?;
+    let expected_version = match scope {
+        ReleaseScope::Lsp => server_version,
+        ReleaseScope::Extension => extension_version,
+    };
 
     if version != expected_version {
         return Err(format!(
@@ -314,6 +321,9 @@ pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String
     let root = util::repo_root();
     let scope = ReleaseScope::parse(scope)?;
     let mode = ReleaseValidationMode::parse(mode)?;
+
+    // Validate the user-provided ref syntax before passing it to any Git command.
+    tag_version_for_scope(scope, tag)?;
 
     let control_head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     if !util::command_output("git", ["status", "--porcelain"], &root)?.is_empty() {
@@ -627,6 +637,21 @@ runtime-lsp-version = "0.7.3-rc.1"
             ReleaseValidationMode::Regenerate
         );
         assert!(ReleaseValidationMode::parse("restore").is_err());
+    }
+
+    #[test]
+    fn scope_tag_syntax_is_validated_before_resolution() {
+        assert_eq!(
+            tag_version_for_scope(ReleaseScope::Lsp, "v0.1.0").unwrap(),
+            "0.1.0"
+        );
+        assert_eq!(
+            tag_version_for_scope(ReleaseScope::Extension, "v-extension-2.3.4").unwrap(),
+            "2.3.4"
+        );
+        for invalid in ["--help", "main", "v1.0", "v1.0.0-rc.1", "v-extension-main"] {
+            assert!(tag_version_for_scope(ReleaseScope::Lsp, invalid).is_err());
+        }
     }
 
     #[test]
