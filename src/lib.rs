@@ -111,7 +111,7 @@ impl WitExtension {
                 let _ = remove_file_if_exists(&binary_staging);
                 let _ = remove_file_if_exists(&checksum_staging);
                 let message = format!(
-                    "Install WIT server v{SERVER_VERSION} for {target}: {error}. Before this version is released, build the server locally and set lsp.wit-language-server.binary.path (see README)."
+                    "Install WIT server v{SERVER_VERSION} for {target}: {error}. Build the server locally or set lsp.wit-language-server.binary.path to a trusted local binary (see README)."
                 );
                 zed::set_language_server_installation_status(
                     id,
