@@ -103,16 +103,17 @@ fn release_version_for_scope<'a>(
 ) -> Result<&'a str, String> {
     let (prefix, expected_version, expected_tag) = match scope {
         ReleaseScope::Lsp => ("v", server_version, "vX.Y.Z"),
-        ReleaseScope::Extension => (
-            "v-extension-",
-            extension_version,
-            "v-extension-X.Y.Z",
-        ),
+        ReleaseScope::Extension => ("v-extension-", extension_version, "v-extension-X.Y.Z"),
     };
     let version = tag
         .strip_prefix(prefix)
         .and_then(stable_version)
-        .ok_or_else(|| format!("expected stable {expected_tag} tag for {} release", scope.as_str()))?;
+        .ok_or_else(|| {
+            format!(
+                "expected stable {expected_tag} tag for {} release",
+                scope.as_str()
+            )
+        })?;
 
     if version != expected_version {
         return Err(format!(
@@ -241,8 +242,7 @@ pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
     let scope = ReleaseScope::parse(scope)?;
     let extension_version = extension_version()?;
     let server_version = server_version()?;
-    let version =
-        release_version_for_scope(scope, tag, &extension_version, &server_version)?;
+    let version = release_version_for_scope(scope, tag, &extension_version, &server_version)?;
     let title = scope.title(version);
     let notes = scope.notes_path(version);
     let server_tag = format!("v{server_version}");
@@ -476,8 +476,7 @@ mod tests {
     #[test]
     fn scope_tags_match_their_independent_versions() {
         assert_eq!(
-            release_version_for_scope(ReleaseScope::Lsp, "v0.2.0", "1.4.0", "0.2.0")
-                .unwrap(),
+            release_version_for_scope(ReleaseScope::Lsp, "v0.2.0", "1.4.0", "0.2.0").unwrap(),
             "0.2.0"
         );
         assert_eq!(
@@ -496,13 +495,8 @@ mod tests {
                 .contains("does not match")
         );
         assert!(
-            release_version_for_scope(
-                ReleaseScope::Extension,
-                "v1.4.0",
-                "1.4.0",
-                "0.2.0",
-            )
-            .unwrap_err()
+            release_version_for_scope(ReleaseScope::Extension, "v1.4.0", "1.4.0", "0.2.0",)
+                .unwrap_err()
                 .contains("v-extension-X.Y.Z")
         );
     }
@@ -512,17 +506,11 @@ mod tests {
         let lsp = ReleaseScope::parse("lsp").unwrap();
         assert_eq!(lsp.as_str(), "lsp");
         assert_eq!(lsp.title("0.2.0"), "WIT Language Server v0.2.0");
-        assert_eq!(
-            lsp.notes_path("0.2.0"),
-            "docs/releases/lsp/v0.2.0.md"
-        );
+        assert_eq!(lsp.notes_path("0.2.0"), "docs/releases/lsp/v0.2.0.md");
 
         let extension = ReleaseScope::parse("extension").unwrap();
         assert_eq!(extension.as_str(), "extension");
-        assert_eq!(
-            extension.title("1.4.0"),
-            "WIT for Zed Extension v1.4.0"
-        );
+        assert_eq!(extension.title("1.4.0"), "WIT for Zed Extension v1.4.0");
         assert_eq!(
             extension.notes_path("1.4.0"),
             "docs/releases/extension/v1.4.0.md"
