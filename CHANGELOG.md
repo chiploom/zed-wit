@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Update public documentation and security guidance for the published `v0.1.0`
+  release.
+- Add post-release hosted-install qualification for first download, verified cache
+  reuse, and corrupt/missing cache recovery in isolated Zed profiles.
+- Replace stale pre-release download failure guidance with recovery instructions
+  that remain valid after publication.
+- Require version-specific user-facing release notes for future CD publications.
+
+## 0.1.0 - 2026-10-07
+
 - Replace Python repository and release helpers with locked Rust `xtask` automation,
   including CI enforcement that rejects Python source, tooling/config/cache artifacts,
   shebangs and workflow/script invocations, and confine disposable Zed qualification
@@ -20,4 +30,4 @@
 - Run required pull-request CI even for documentation-only changes so protected
   branch status checks always report.
 - Document licensing, architecture, development testing and registry succession
-  gates. No hosted release or registry publication is claimed by this entry.
+  gates.
