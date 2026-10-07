@@ -7,7 +7,7 @@
 - Prepare the `v0.1.1` LSP recovery release after the immutable `v0.1.0`
   GitHub Release was deleted. GitHub permanently reserves the `v0.1.0` tag
   name, so distribution must continue with a new patch version.
-- Update public documentation and security guidance for the published `v0.1.0`
+- Update public documentation and security guidance for the historical `v0.1.0`
   release.
 - Add post-release hosted-install qualification for first download, verified cache
   reuse, and corrupt/missing cache recovery in isolated Zed profiles.
