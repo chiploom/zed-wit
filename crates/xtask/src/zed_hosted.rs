@@ -1,4 +1,4 @@
-use crate::{util, zed_smoke};
+use crate::{release, util, zed_smoke};
 use serde_json::json;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -305,15 +305,7 @@ fn is_language_server_executable(path: &Path) -> bool {
 }
 
 fn release_identity(root: &Path) -> Result<ReleaseIdentity, String> {
-    let source = fs::read_to_string(root.join("extension.toml"))
-        .map_err(|error| format!("read extension.toml: {error}"))?;
-    let manifest: toml::Value =
-        toml::from_str(&source).map_err(|error| format!("parse extension.toml: {error}"))?;
-    let version = manifest
-        .get("version")
-        .and_then(toml::Value::as_str)
-        .ok_or("extension.toml omitted version")?
-        .to_owned();
+    let version = release::runtime_lsp_version()?;
     let tag = format!("v{version}");
     let output = util::command_output(
         "git",

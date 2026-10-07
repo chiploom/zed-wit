@@ -2,9 +2,10 @@
 
 WIT adds first-class [WebAssembly Interface Types (WIT)](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md) support to Zed. The extension combines syntax-aware editing with a native language server for diagnostics, formatting, completion, hover, navigation, references, and safe typo fixes.
 
-Version **0.1.0** is published on GitHub with native language-server binaries for
-the supported platforms. The extension is not yet published in the Zed extension
-registry.
+The protected **v0.1.0** tag is the **LSP-only release identity** for the first
+native language-server release. Its GitHub Release can be regenerated from that
+tag if the release record is missing. It is not a Zed-extension release, and the
+extension is not yet published in the Zed extension registry.
 
 ## Features
 
@@ -45,8 +46,10 @@ completion, navigation, diagnostics, and **editor: format** to exercise the
 extension. Inspect **zed: open log** for startup or build failures.
 
 An existing registry WIT extension is overridden by the development install.
-Automatic native-server downloads use the published GitHub release that matches
-the extension version.
+Automatic native-server downloads use the published immutable LSP release
+explicitly pinned by `package.metadata.zed-wit.runtime-lsp-version` in the root
+manifest. The LSP package version can advance independently without changing
+what the extension downloads.
 
 ## How it works
 
@@ -116,9 +119,11 @@ maintainer and Zed under the [replacement policy](docs/publishing.md). No
 registry transfer or duplicate entry is assumed.
 
 GitHub release publication is separate from registry publication. Version
-[`v0.1.0`](https://github.com/chiploom/zed-wit/releases/tag/v0.1.0) is published
-with immutable native assets. See [publishing](docs/publishing.md) for the release
-contract and registry succession gate.
+`v0.1.0` is the protected **LSP-only** release tag. When its GitHub Release
+record exists, repository immutable-release policy protects the published
+assets. Future CD runs explicitly choose `lsp` or `extension` scope. LSP and extension versions can advance independently; the
+extension pins a published LSP version. See [publishing](docs/publishing.md) for
+the scope contract and registry succession gate.
 
 ## Acknowledgements and license
 

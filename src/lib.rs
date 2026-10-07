@@ -252,14 +252,19 @@ mod tests {
     #[test]
     fn manifests_agree_on_distribution_identity() {
         let manifest: toml::Value = toml::from_str(include_str!("../extension.toml")).unwrap();
-        assert_eq!(manifest["version"].as_str(), Some(SERVER_VERSION));
+        assert_eq!(
+            manifest["version"].as_str(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
         assert_eq!(manifest["schema_version"].as_integer(), Some(1));
         assert_eq!(
             manifest["grammars"]["wit"]["rev"].as_str(),
             Some("cdf07263b136054b413cab449ac7a1d059c27542")
         );
-        let native: toml::Value =
-            toml::from_str(include_str!("../crates/wit-language-server/Cargo.toml")).unwrap();
-        assert_eq!(native["package"]["version"].as_str(), Some(SERVER_VERSION));
+        let root: toml::Value = toml::from_str(include_str!("../Cargo.toml")).unwrap();
+        assert_eq!(
+            root["package"]["metadata"]["zed-wit"]["runtime-lsp-version"].as_str(),
+            Some(SERVER_VERSION)
+        );
     }
 }

@@ -216,7 +216,8 @@ covered by deterministic query tests.
 Release delivery is qualified after publication with
 `cargo xtask test-zed-hosted`. The command exercises first download, cached
 reuse, corrupted executable recovery, and missing-checksum recovery against the
-published release that matches `extension.toml`. Platform-specific execution
+published LSP release that matches `crates/wit-language-server/Cargo.toml`.
+Platform-specific execution
 evidence is still required; the automation does not turn one host into evidence
 for another architecture or operating system.
 

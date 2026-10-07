@@ -5,9 +5,11 @@ published native release. It is not a substitute for the reusable Zed
 qualification checklist in [manual testing](manual-testing.md), and it does not
 claim Zed registry publication.
 
-## v0.1.0 publication — 2026-10-07
+## v0.1.0 LSP-only publication — 2026-10-07
 
-The first immutable GitHub release, `v0.1.0`, was published from
+The first immutable GitHub release, `v0.1.0`, published only the native WIT
+language server and its release metadata. It did not publish the Zed extension
+or modify the Zed extension registry. The release was published from
 `cb8dd60c7a0b74c93f1c5d62934ec8fb6d4d9d78` by CD
 [run 37559191579](https://github.com/chiploom/zed-wit/actions/runs/37559191579).
 
@@ -22,7 +24,8 @@ The publish job re-verified all 20 target-specific artifacts immediately before
 publication and produced GitHub build-provenance attestation
 `53410060` for those 20 subjects through Sigstore/Rekor. Hosted delivery must be
 qualified separately with `cargo xtask test-zed-hosted`, which uses a fresh
-isolated Zed profile and the published release matching `extension.toml`.
+isolated Zed profile and the published LSP release matching
+`crates/wit-language-server/Cargo.toml`.
 Record that run below before claiming hosted-delivery qualification. Registry
 publication remains separate and is not claimed by this evidence.
 
@@ -407,12 +410,14 @@ Before each release candidate is considered ready:
    release-environment protection, and the active default-branch and `v*` tag
    rulesets.
 4. Resolve the existing `wit` registry ownership/succession requirement.
-5. Dispatch the protected CD workflow from the default branch with a new stable
-   `vX.Y.Z` tag name and `publish=false`; require the full five-target artifact
-   gate to pass.
-6. Dispatch CD again from the same commit with `publish=true`; allow the protected
-   publish job to create the immutable release tag only after all build and
-   verification jobs pass.
-7. Verify the published five-target asset set, checksums, provenance, licenses,
-   tag-to-commit binding, and attestations.
-8. Re-test first install and cached install in Zed against the published assets.
+5. Dispatch the protected CD workflow from the default branch with the intended
+   scope and tag format (`vX.Y.Z` for LSP or `v-extension-X.Y.Z` for the Zed
+   extension), with `operation=validate`; require every scope-applicable gate to
+   pass.
+6. Dispatch CD again from the same commit with the same scope/tag and
+   `operation=publish`; allow the protected publish job to create the immutable
+   release tag only after all applicable build and verification jobs pass.
+7. For LSP releases, verify the published five-target asset set, checksums,
+   provenance, licenses, tag-to-commit binding and attestations. For extension
+   releases, verify the tagged source and the pinned immutable LSP dependency.
+8. Re-test the applicable Zed installation path against the published release.

@@ -1,17 +1,57 @@
 # Publishing and maintenance
 
-The repository is public and `v0.1.0` is published as an immutable GitHub
-release. GitHub release publication does not grant permission to replace the
-existing Zed registry entry. Repository rulesets, immutable releases, and
+The repository is public and protected tag `v0.1.0` identifies the first
+LSP-only release. If its GitHub Release record is missing, use the documented
+`regenerate` operation to recreate it from the protected tag. GitHub release
+publication does not grant permission to replace the existing Zed registry
+entry. Repository rulesets, immutable releases, and
 release-environment protections remain part of the release contract for every
 subsequent version.
 
+## Release scopes
+
+CD supports two independent release streams:
+
+| Scope | Tag format | Version source | GitHub release payload | Zed registry publication |
+| --- | --- | --- | --- | --- |
+| `lsp` | `vX.Y.Z` | `crates/wit-language-server/Cargo.toml` | Five native LSP binaries plus checksums, provenance, redistribution notices and project licenses | No |
+| `extension` | `v-extension-X.Y.Z` | `extension.toml` + adapter crate | Tagged extension source; no native LSP binaries attached | No |
+
+The adapter and `extension.toml` versions remain aligned with each other, but
+the native language-server version is independent. The extension's runtime LSP is
+an explicit pin at
+`package.metadata.zed-wit.runtime-lsp-version` in the root `Cargo.toml`.
+The adapter embeds that pin at build time and downloads the corresponding
+`vX.Y.Z` LSP release.
+
+Changing `crates/wit-language-server/Cargo.toml` therefore does **not** change
+the extension's runtime dependency. Publish and qualify the new LSP release
+first. Then update the runtime pin in a separate extension change, test the
+hosted install path, and release the extension when appropriate. This ordering
+prevents protected `main` from ever pointing the extension at an unpublished
+LSP version.
+
+An `extension` release does not duplicate LSP binaries. Before CD can publish
+it, the explicitly pinned LSP release must already be published,
+non-prerelease, immutable, and contain every supported server binary plus
+checksum.
+
+Both tag formats begin with `v`, so the existing protected `v*` tag ruleset
+covers both streams. GitHub extension releases still do not publish or replace
+the Zed extension registry entry; registry succession remains a separate process.
+
+Protected tag `v0.1.0` represents an **LSP-only** release. A corresponding
+GitHub Release, when present, contains the native language server and its
+metadata; it is not a published Zed extension.
+
 ## Native assets
 
-The adapter expects the raw executable at
-`https://github.com/chiploom/zed-wit/releases/download/v0.1.0/<asset>` and its
-`<asset>.sha256` sidecar. Update adapter and manifest versions together for future
-releases. Archives are not interchangeable with these raw downloads.
+The adapter expects each server executable at
+`https://github.com/chiploom/zed-wit/releases/download/v<RUNTIME_LSP_VERSION>/<asset>`
+and its `<asset>.sha256` sidecar. The runtime version comes from the explicit
+root-manifest pin, not from the native server crate's current package version.
+Extension version bumps do not require a new LSP release when the pin is
+unchanged. Archives are not interchangeable with these raw downloads.
 
 | Platform | Target | Asset |
 | --- | --- | --- |
@@ -37,15 +77,27 @@ itself a cryptographic attestation.
 
 ## Release gate
 
-The CD workflow is dispatched from the protected default branch with a new stable
-`vX.Y.Z` tag name. The tag must match the adapter, extension, and native-server
-version; it does not exist before the workflow begins.
+The CD workflow is dispatched from the protected default branch with either
+`lsp` or `extension` scope. LSP releases use `vX.Y.Z`; extension releases use
+`v-extension-X.Y.Z`. The selected tag must match the version source for that
+scope and must not already identify a published release.
 
-Set the workflow's `publish` input to `false` for a release-candidate dry run.
-A dry run executes repository policy, formatting, clippy/check/doctests, the Wasm
-adapter build, native tests on all five release targets, packaging, redistribution
-notice generation, and complete artifact-set verification without creating a tag
-or GitHub Release.
+The workflow's `operation` input controls lifecycle behavior:
+
+- `validate` performs a dry run for a **new** tag and creates nothing.
+- `publish` qualifies and publishes a new tag/release. It may also resume an
+  interrupted draft when the existing tag still resolves to the validated
+  release commit.
+- `regenerate` requires an **existing protected tag** and, for LSP releases,
+  the original successful publication run ID. It restores the exact original
+  unexpired release artifact bundles rather than rebuilding binaries. It never
+  creates, updates, or deletes the tag.
+
+All operations execute repository policy, formatting, clippy/check/doctests, and
+release identity validation. The `lsp` scope runs native tests on all five
+release targets, packages the server assets/notices, and verifies the complete
+LSP artifact set. The `extension` scope verifies the referenced immutable LSP
+dependency and builds the Zed extension for `wasm32-wasip2`.
 
 For publication:
 
@@ -57,30 +109,54 @@ For publication:
 2. Complete normal CI and the applicable [manual matrix](manual-testing.md) on the
    intended release commit. Audit locked dependency licenses and retain
    `Cargo.lock`.
-3. Ensure `Cargo.toml`, the native server manifest, `extension.toml`, the
-   adapter release version, changelog, compatibility notes, and the nonempty
-   `docs/releases/vX.Y.Z.md` user-facing release notes agree. CD refuses a
-   release candidate without the matching release-notes file.
-4. Optionally dispatch **CD** from the default branch with the new `vX.Y.Z`
-   tag and `publish=false` as a release-candidate dry run. Require the
-   validation, five native builds, and combined artifact verification to pass.
-5. Dispatch **CD** from the intended release commit with the same tag and
-   `publish=true`. The protected publish job runs the full gate again, generates
-   artifact attestations, explicitly creates the protected lightweight tag at the
-   validated SHA, verifies that binding, creates a draft release from the existing
-   tag, uploads the complete asset set, then publishes the draft. If `main`
-   advanced after an earlier dry run, this publication run is the authoritative
-   qualification.
+3. Ensure the selected scope's version source, changelog, compatibility notes,
+   and nonempty `docs/releases/<scope>/vX.Y.Z.md` user-facing release notes
+   agree. For extension releases, also verify the adapter's pinned LSP version is
+   intentional; CD independently verifies that the referenced LSP release exists
+   and is immutable.
+4. Optionally dispatch **CD** from the default branch with the intended scope,
+   its matching tag format, and `operation=validate` as a release-candidate dry
+   run. Require every job applicable to that scope to pass.
+5. Dispatch **CD** from the intended release commit with the same scope/tag and
+   `operation=publish`. The protected publish job reruns the applicable gate,
+   explicitly creates the protected lightweight tag at the validated SHA,
+   verifies that binding, creates a scoped draft release, then publishes it.
+   New LSP releases additionally generate standard SLSA build-provenance
+   attestations and upload the verified native asset set; extension releases
+   publish source only. If `main` advanced after an earlier dry run, this
+   publication run is the authoritative qualification.
 6. If publication is interrupted after tag creation, rerun CD from the same
-   validated commit with `publish=true`. CD accepts an exact tag with no release
-   or an unpublished draft release only when the tag still resolves to the
-   validated SHA, then resumes publication without moving or deleting the tag.
-7. Download each published asset and sidecar, verify checksum, provenance and the
-   target-specific redistribution notice, and run `cargo xtask test-zed-hosted`
-   on each available supported host to exercise first download, cached reuse,
-   corrupt-cache recovery, and missing-checksum recovery in real Zed. Also run
+   validated commit with `operation=publish`. CD accepts an exact tag with no
+   release or an unpublished matching draft only when the tag still resolves to
+   the validated SHA, then resumes without moving or deleting the tag.
+7. If a published GitHub Release is later deleted while its protected tag
+   remains, dispatch CD from current protected `main` with the original scope
+   and tag plus `operation=regenerate`. For an LSP release, also provide the
+   original successful publication run ID. CD requires that run to be a
+   successful `workflow_dispatch` execution of the CD workflow at the exact
+   protected tag SHA, requires its **Publish GitHub release** job to have
+   succeeded, and requires the exact five unexpired `release-*` artifact
+   bundles. It then restores those exact original bytes, uses license files from
+   the protected tag source, applies the current scoped release notes, recreates
+   the draft, verifies its asset set, and republishes it without changing the
+   tag. Regenerated LSP artifacts receive a signed custom regeneration
+   attestation recording the protected source tag/revision and original CD run
+   instead of claiming normal SLSA provenance from the current control commit.
+
+   If the original Actions artifacts have expired, do **not** rebuild and
+   republish different binaries under the same tag. Publish a corrected new
+   version instead. New CD release artifacts are retained for 90 days to extend
+   the byte-preserving recovery window.
+8. For LSP releases, download each published asset and sidecar, verify checksum,
+   provenance and target-specific redistribution notices, and run
+   `cargo xtask test-zed-hosted` on each available supported host. Also run
    `gh attestation verify <asset> --repo chiploom/zed-wit` against downloaded
-   bytes. The adapter itself verifies SHA-256, not attestations.
+   bytes. For regenerated LSP releases, also require predicate type
+   `https://github.com/chiploom/zed-wit/attestations/release-regeneration/v1`
+   and verify that its `artifact_source.tag` and `artifact_source.revision`
+   match the protected release tag. For extension releases, verify the tagged
+   source installs as a development extension and resolves the already-published
+   pinned LSP. The adapter itself verifies SHA-256, not attestations.
 
 Checksums and executable bytes come from the same GitHub origin. They detect
 corruption and asset mismatch, not a compromised publishing account. Immutable
