@@ -335,6 +335,18 @@ pub(crate) fn write_isolated_settings(
 }
 
 pub(crate) fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
+    stage_with_server(root, profile, Some(server))
+}
+
+pub(crate) fn stage_hosted(root: &Path, profile: &Path) -> Result<Staged, String> {
+    stage_with_server(root, profile, None)
+}
+
+fn stage_with_server(
+    root: &Path,
+    profile: &Path,
+    server: Option<&Path>,
+) -> Result<Staged, String> {
     validate_disposable_profile(root, profile)?;
     if profile.exists() {
         log(format!(
@@ -382,28 +394,36 @@ pub(crate) fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged
     compile_grammar(root, &grammar_dir.join("wit.wasm"))?;
 
     let workspace_dir = profile.join("workspace");
-    fs::create_dir_all(workspace_dir.join(".zed"))
-        .map_err(|error| format!("create smoke workspace settings: {error}"))?;
-    let settings_path = workspace_dir.join(".zed/settings.json");
-    let settings = json!({
-        "lsp": {
-            "wit-language-server": {
-                "binary": {
-                    "path": server.to_string_lossy()
+    fs::create_dir_all(&workspace_dir)
+        .map_err(|error| format!("create smoke workspace: {error}"))?;
+
+    if let Some(server) = server {
+        let settings_dir = workspace_dir.join(".zed");
+        fs::create_dir_all(&settings_dir)
+            .map_err(|error| format!("create smoke workspace settings: {error}"))?;
+        let settings_path = settings_dir.join("settings.json");
+        let settings = json!({
+            "lsp": {
+                "wit-language-server": {
+                    "binary": {
+                        "path": server.to_string_lossy()
+                    }
                 }
             }
-        }
-    });
-    fs::write(
-        &settings_path,
-        serde_json::to_vec_pretty(&settings)
-            .map_err(|error| format!("encode {}: {error}", settings_path.display()))?,
-    )
-    .map_err(|error| format!("write {}: {error}", settings_path.display()))?;
-    log(format!(
-        "staged explicit LSP binary override: {}",
-        settings_path.display()
-    ));
+        });
+        fs::write(
+            &settings_path,
+            serde_json::to_vec_pretty(&settings)
+                .map_err(|error| format!("encode {}: {error}", settings_path.display()))?,
+        )
+        .map_err(|error| format!("write {}: {error}", settings_path.display()))?;
+        log(format!(
+            "staged explicit LSP binary override: {}",
+            settings_path.display()
+        ));
+    } else {
+        log("staged hosted-install workspace without an LSP binary override");
+    }
 
     let source_tests = root.join("tests");
     let staged_tests = workspace_dir.join("tests");
