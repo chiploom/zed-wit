@@ -186,15 +186,9 @@ fn tag_version_for_scope(scope: ReleaseScope, tag: &str) -> Result<&str, String>
 fn release_version_for_scope<'a>(
     scope: ReleaseScope,
     tag: &'a str,
-    extension_version: &str,
-    server_version: &str,
+    expected_version: &str,
 ) -> Result<&'a str, String> {
     let version = tag_version_for_scope(scope, tag)?;
-    let expected_version = match scope {
-        ReleaseScope::Lsp => server_version,
-        ReleaseScope::Extension => extension_version,
-    };
-
     if version != expected_version {
         return Err(format!(
             "{} release tag version {version} does not match expected version {expected_version}",
@@ -337,42 +331,50 @@ pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String
         }
     }
 
-    let (source_sha, extension_version, server_version, runtime_lsp_version) = match mode {
-        ReleaseValidationMode::New => (
-            control_head.clone(),
-            extension_version()?,
-            server_version()?,
-            runtime_lsp_version()?,
-        ),
+    let source_sha = match mode {
+        ReleaseValidationMode::New => control_head.clone(),
         ReleaseValidationMode::Regenerate => {
-            let source_sha =
-                util::command_output("git", ["rev-parse", &format!("{tag}^{{commit}}")], &root)?;
-            let adapter_manifest = read_toml_at(&root, &source_sha, "Cargo.toml")?;
-            let extension_manifest = read_toml_at(&root, &source_sha, "extension.toml")?;
-            let server_manifest =
-                read_toml_at(&root, &source_sha, "crates/wit-language-server/Cargo.toml")?;
-            let extension_version = extension_version_from(&adapter_manifest, &extension_manifest)?;
-            let server_version = server_version_from(&server_manifest)?;
-            let runtime_lsp_version = match scope {
-                ReleaseScope::Lsp => server_version.clone(),
-                ReleaseScope::Extension => runtime_lsp_version_from(&adapter_manifest)?,
+            util::command_output("git", ["rev-parse", &format!("{tag}^{{commit}}")], &root)?
+        }
+    };
+
+    let (version, server_tag, runtime_lsp_version) = match scope {
+        ReleaseScope::Lsp => {
+            let server_version = match mode {
+                ReleaseValidationMode::New => server_version()?,
+                ReleaseValidationMode::Regenerate => server_version_from(&read_toml_at(
+                    &root,
+                    &source_sha,
+                    "crates/wit-language-server/Cargo.toml",
+                )?)?,
             };
+            let version = release_version_for_scope(scope, tag, &server_version)?.to_owned();
+            (version, format!("v{server_version}"), None)
+        }
+        ReleaseScope::Extension => {
+            let (extension_version, runtime_lsp_version) = match mode {
+                ReleaseValidationMode::New => (extension_version()?, runtime_lsp_version()?),
+                ReleaseValidationMode::Regenerate => {
+                    let adapter_manifest = read_toml_at(&root, &source_sha, "Cargo.toml")?;
+                    let extension_manifest =
+                        read_toml_at(&root, &source_sha, "extension.toml")?;
+                    (
+                        extension_version_from(&adapter_manifest, &extension_manifest)?,
+                        runtime_lsp_version_from(&adapter_manifest)?,
+                    )
+                }
+            };
+            let version = release_version_for_scope(scope, tag, &extension_version)?.to_owned();
             (
-                source_sha,
-                extension_version,
-                server_version,
-                runtime_lsp_version,
+                version,
+                format!("v{runtime_lsp_version}"),
+                Some(runtime_lsp_version),
             )
         }
     };
 
-    let version = release_version_for_scope(scope, tag, &extension_version, &server_version)?;
-    let title = scope.title(version);
-    let notes = scope.notes_path(version);
-    let server_tag = match scope {
-        ReleaseScope::Lsp => format!("v{server_version}"),
-        ReleaseScope::Extension => format!("v{runtime_lsp_version}"),
-    };
+    let title = scope.title(&version);
+    let notes = scope.notes_path(&version);
 
     if let Ok(output_path) = env::var("GITHUB_OUTPUT") {
         let mut output = OpenOptions::new()
@@ -381,7 +383,7 @@ pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String
             .map_err(|error| format!("open GITHUB_OUTPUT {output_path}: {error}"))?;
         writeln!(
             output,
-            "sha={source_sha}\ntag={tag}\nscope={}\nversion={version}\ntitle={title}\nnotes={notes}\nserver_version={server_version}\nserver_tag={server_tag}\nmode={}",
+            "sha={source_sha}\ntag={tag}\nscope={}\nversion={version}\ntitle={title}\nnotes={notes}\nserver_tag={server_tag}\nmode={}",
             scope.as_str(),
             match mode {
                 ReleaseValidationMode::New => "new",
@@ -401,7 +403,6 @@ pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String
             "scope": scope.as_str(),
             "title": title,
             "notes": notes,
-            "server_version": server_version,
             "server_tag": server_tag,
             "runtime_lsp_version": runtime_lsp_version,
             "sha": source_sha,
@@ -657,7 +658,7 @@ runtime-lsp-version = "0.7.3-rc.1"
     #[test]
     fn scope_tags_match_their_independent_versions() {
         assert_eq!(
-            release_version_for_scope(ReleaseScope::Lsp, "v0.2.0", "1.4.0", "0.2.0").unwrap(),
+            release_version_for_scope(ReleaseScope::Lsp, "v0.2.0", "0.2.0").unwrap(),
             "0.2.0"
         );
         assert_eq!(
@@ -665,20 +666,36 @@ runtime-lsp-version = "0.7.3-rc.1"
                 ReleaseScope::Extension,
                 "v-extension-1.4.0",
                 "1.4.0",
-                "0.2.0",
             )
             .unwrap(),
             "1.4.0"
         );
         assert!(
-            release_version_for_scope(ReleaseScope::Lsp, "v0.2.1", "1.4.0", "0.2.0")
+            release_version_for_scope(ReleaseScope::Lsp, "v0.2.1", "0.2.0")
                 .unwrap_err()
                 .contains("does not match")
         );
         assert!(
-            release_version_for_scope(ReleaseScope::Extension, "v1.4.0", "1.4.0", "0.2.0",)
+            release_version_for_scope(ReleaseScope::Extension, "v1.4.0", "1.4.0")
                 .unwrap_err()
                 .contains("v-extension-X.Y.Z")
+        );
+    }
+
+    #[test]
+    fn scope_version_validation_is_independent() {
+        assert_eq!(
+            release_version_for_scope(ReleaseScope::Lsp, "v2.0.0", "2.0.0").unwrap(),
+            "2.0.0"
+        );
+        assert_eq!(
+            release_version_for_scope(
+                ReleaseScope::Extension,
+                "v-extension-9.1.0",
+                "9.1.0",
+            )
+            .unwrap(),
+            "9.1.0"
         );
     }
 
