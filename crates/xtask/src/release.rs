@@ -104,9 +104,9 @@ fn release_version_for_scope<'a>(
     let (prefix, expected_version, expected_tag) = match scope {
         ReleaseScope::Lsp => ("v", server_version, "vX.Y.Z"),
         ReleaseScope::Extension => (
-            "extension-v",
+            "v-extension-",
             extension_version,
-            "extension-vX.Y.Z",
+            "v-extension-X.Y.Z",
         ),
     };
     let version = tag
@@ -483,7 +483,7 @@ mod tests {
         assert_eq!(
             release_version_for_scope(
                 ReleaseScope::Extension,
-                "extension-v1.4.0",
+                "v-extension-1.4.0",
                 "1.4.0",
                 "0.2.0",
             )
@@ -503,7 +503,7 @@ mod tests {
                 "0.2.0",
             )
             .unwrap_err()
-                .contains("extension-vX.Y.Z")
+                .contains("v-extension-X.Y.Z")
         );
     }
 
