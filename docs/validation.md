@@ -24,7 +24,8 @@ The publish job re-verified all 20 target-specific artifacts immediately before
 publication and produced GitHub build-provenance attestation
 `53410060` for those 20 subjects through Sigstore/Rekor. Hosted delivery must be
 qualified separately with `cargo xtask test-zed-hosted`, which uses a fresh
-isolated Zed profile and the published release matching `extension.toml`.
+isolated Zed profile and the published LSP release matching
+`crates/wit-language-server/Cargo.toml`.
 Record that run below before claiming hosted-delivery qualification. Registry
 publication remains separate and is not claimed by this evidence.
 
