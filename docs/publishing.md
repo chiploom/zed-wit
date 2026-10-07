@@ -1,8 +1,10 @@
 # Publishing and maintenance
 
-The repository is public and `v0.1.0` is published as an immutable GitHub
-release. GitHub release publication does not grant permission to replace the
-existing Zed registry entry. Repository rulesets, immutable releases, and
+The repository is public and protected tag `v0.1.0` identifies the first
+LSP-only release. If its GitHub Release record is missing, use the documented
+`regenerate` operation to recreate it from the protected tag. GitHub release
+publication does not grant permission to replace the existing Zed registry
+entry. Repository rulesets, immutable releases, and
 release-environment protections remain part of the release contract for every
 subsequent version.
 
@@ -38,9 +40,9 @@ Both tag formats begin with `v`, so the existing protected `v*` tag ruleset
 covers both streams. GitHub extension releases still do not publish or replace
 the Zed extension registry entry; registry succession remains a separate process.
 
-The existing `v0.1.0` release is an **LSP-only** release. Its attached assets
-are the native language server and its metadata; it is not a published Zed
-extension.
+Protected tag `v0.1.0` represents an **LSP-only** release. A corresponding
+GitHub Release, when present, contains the native language server and its
+metadata; it is not a published Zed extension.
 
 ## Native assets
 
