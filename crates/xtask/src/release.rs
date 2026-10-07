@@ -103,11 +103,14 @@ fn server_version_from(manifest: &toml::Value) -> Result<String, String> {
     package_version(manifest, "language-server manifest")
 }
 
-fn server_version() -> Result<String, String> {
-    let root = util::repo_root();
+fn server_version_at(root: &Path) -> Result<String, String> {
     server_version_from(&read_toml(
         &root.join("crates/wit-language-server/Cargo.toml"),
     )?)
+}
+
+fn server_version() -> Result<String, String> {
+    server_version_at(&util::repo_root())
 }
 
 fn runtime_lsp_version_from(manifest: &toml::Value) -> Result<String, String> {
@@ -453,6 +456,7 @@ fn verify_provenance(
     version: &str,
     lock_digest: &str,
     revision: Option<&str>,
+    expected_workflow_run: Option<&str>,
 ) -> Result<(), String> {
     ensure_regular_nonempty(path)?;
     let text =
@@ -499,22 +503,25 @@ fn verify_provenance(
             path.display()
         ));
     }
-    if let Ok(run_id) = env::var("GITHUB_RUN_ID")
-        && value.get("workflow_run").and_then(Value::as_str) != Some(run_id.as_str())
+    if let Some(run_id) = expected_workflow_run
+        && value.get("workflow_run").and_then(Value::as_str) != Some(run_id)
     {
         return Err(format!(
-            "{} workflow run does not match the verifier",
+            "{} workflow run does not match expected source run {run_id}",
             path.display()
         ));
     }
     Ok(())
 }
 
-pub fn verify_release_assets(input: &Path) -> Result<(), String> {
-    let root = util::repo_root();
-    let version = server_version()?;
-    let lock_digest = util::sha256_file(&root.join("Cargo.lock"))?;
-    let revision = git_revision(&root)?;
+fn verify_release_assets_against(
+    input: &Path,
+    source_root: &Path,
+    expected_workflow_run: Option<&str>,
+) -> Result<(), String> {
+    let version = server_version_at(source_root)?;
+    let lock_digest = util::sha256_file(&source_root.join("Cargo.lock"))?;
+    let revision = git_revision(source_root)?;
     let mut expected = BTreeSet::new();
 
     for target in TARGETS {
@@ -559,6 +566,7 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
             &version,
             &lock_digest,
             revision.as_deref(),
+            expected_workflow_run,
         )?;
     }
 
@@ -582,6 +590,31 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
     }
     println!("verified {} release artifacts", actual.len());
     Ok(())
+}
+
+pub fn verify_release_assets(input: &Path) -> Result<(), String> {
+    let root = util::repo_root();
+    let expected_workflow_run = env::var("GITHUB_RUN_ID").ok();
+    verify_release_assets_against(input, &root, expected_workflow_run.as_deref())
+}
+
+pub fn verify_restored_release_assets(
+    input: &Path,
+    source_root: &Path,
+    source_run_id: &str,
+) -> Result<(), String> {
+    if source_run_id.is_empty() || !source_run_id.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("source run ID must contain only decimal digits".into());
+    }
+    let revision = git_revision(source_root)?
+        .ok_or_else(|| format!("{} is not a Git checkout", source_root.display()))?;
+    if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(format!(
+            "{} has invalid Git revision {revision:?}",
+            source_root.display()
+        ));
+    }
+    verify_release_assets_against(input, source_root, Some(source_run_id))
 }
 
 #[cfg(test)]
