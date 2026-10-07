@@ -1,60 +1,28 @@
 use std::{env, fs, path::PathBuf};
 
-fn package_version(source: &str) -> Option<&str> {
-    let mut in_package = false;
-    for raw in source.lines() {
-        let line = raw.trim();
-        if line.starts_with('[') {
-            in_package = line == "[package]";
-            continue;
-        }
-        if !in_package {
-            continue;
-        }
-        let Some(value) = line.strip_prefix("version") else {
-            continue;
-        };
-        let Some(value) = value.trim_start().strip_prefix('=') else {
-            continue;
-        };
-        let value = value.trim();
-        return value.strip_prefix('"')?.strip_suffix('"');
-    }
-    None
-}
-
 fn main() {
     let root = PathBuf::from(
         env::var_os("CARGO_MANIFEST_DIR").expect("Cargo must set CARGO_MANIFEST_DIR"),
     );
-    let server_manifest = root.join("crates/wit-language-server/Cargo.toml");
-    println!("cargo::rerun-if-changed={}", server_manifest.display());
+    let manifest_path = root.join("Cargo.toml");
+    println!("cargo::rerun-if-changed={}", manifest_path.display());
 
-    let source = fs::read_to_string(&server_manifest)
-        .unwrap_or_else(|error| panic!("read {}: {error}", server_manifest.display()));
-    let version = package_version(&source)
-        .unwrap_or_else(|| panic!("{} omitted [package] version", server_manifest.display()));
+    let source = fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", manifest_path.display()));
+    let manifest: toml::Value = toml::from_str(&source)
+        .unwrap_or_else(|error| panic!("parse {}: {error}", manifest_path.display()));
+    let version = manifest
+        .get("package")
+        .and_then(|package| package.get("metadata"))
+        .and_then(|metadata| metadata.get("zed-wit"))
+        .and_then(|metadata| metadata.get("runtime-lsp-version"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or_else(|| {
+            panic!(
+                "{} omitted package.metadata.zed-wit.runtime-lsp-version",
+                manifest_path.display()
+            )
+        });
 
     println!("cargo::rustc-env=WIT_LANGUAGE_SERVER_VERSION={version}");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_only_package_version() {
-        let source = r#"
-[workspace]
-version = "9.9.9"
-
-[package]
-name = "server"
-version = "1.2.3"
-
-[dependencies]
-other = "4"
-"#;
-        assert_eq!(package_version(source), Some("1.2.3"));
-    }
 }
