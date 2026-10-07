@@ -87,6 +87,23 @@ fn run() -> Result<(), String> {
             util::ensure_empty_options(options)?;
             release::verify_release_assets(&input)
         }
+        "verify-restored-release-assets" => {
+            let mut options =
+                util::parse_options(rest, &["input", "source-root", "source-run-id"])?;
+            let input = util::root_relative(
+                options
+                    .remove("input")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("dist")),
+            );
+            let source_root = util::root_relative(PathBuf::from(util::required_option(
+                &mut options,
+                "source-root",
+            )?));
+            let source_run_id = util::required_option(&mut options, "source-run-id")?;
+            util::ensure_empty_options(options)?;
+            release::verify_restored_release_assets(&input, &source_root, &source_run_id)
+        }
         "check-no-python" => {
             if !rest.is_empty() {
                 return Err("check-no-python accepts no arguments".into());
@@ -220,6 +237,7 @@ Usage:
   cargo xtask package-release --target <target> [--output <dir>]
   cargo xtask validate-release --tag <vX.Y.Z|v-extension-X.Y.Z> --scope <lsp|extension> [--mode <new|regenerate>]
   cargo xtask verify-release-assets [--input <dir>]
+  cargo xtask verify-restored-release-assets [--input <dir>] --source-root <dir> --source-run-id <id>
   cargo xtask check-no-python
   cargo xtask test-zed [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>]
   cargo xtask test-zed-hosted [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <10-300>]
