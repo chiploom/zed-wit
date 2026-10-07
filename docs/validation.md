@@ -336,7 +336,7 @@ The following remain pending and must not be inferred from the green CI matrix:
   screenshots/log paths, and every checklist row marked with evidence.
 - End-to-end automatic native-server download from an actual GitHub release.
 - Corrupt/missing hosted asset behavior against a published release.
-- Execution of the protected release workflow and artifact attestations.
+- Execution of the protected CD workflow and artifact attestations.
 - Registry succession from the existing `wit` extension.
 - Registry publication and succession remain pending even though the repository
   is now public.
