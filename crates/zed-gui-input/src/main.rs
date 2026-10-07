@@ -91,7 +91,7 @@ fn input_device() -> Result<Enigo, String> {
     {
         let mut input = input;
         input.set_delay(20);
-        return Ok(input);
+        Ok(input);
     }
     #[cfg(not(target_os = "linux"))]
     Ok(input)
