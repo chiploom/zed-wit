@@ -16,5 +16,7 @@
 - Define five-platform native CI and a protected manual release workflow with
   SHA-256 sidecars, verified per-target redistribution notices and artifact
   attestations.
+- Run required pull-request CI even for documentation-only changes so protected
+  branch status checks always report.
 - Document licensing, architecture, development testing and registry succession
   gates. No hosted release or registry publication is claimed by this entry.
