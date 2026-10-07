@@ -259,7 +259,7 @@ mod tests {
         assert_eq!(manifest["schema_version"].as_integer(), Some(1));
         assert_eq!(
             manifest["grammars"]["wit"]["rev"].as_str(),
-            Some("cdf07263b136054b413cab449ac7a1d059c27542")
+            Some("f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6")
         );
         let root: toml::Value = toml::from_str(include_str!("../Cargo.toml")).unwrap();
         assert_eq!(
