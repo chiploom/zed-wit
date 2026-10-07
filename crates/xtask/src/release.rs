@@ -10,7 +10,6 @@ const MAX_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 enum ReleaseScope {
     Lsp,
     Extension,
-    Full,
 }
 
 impl ReleaseScope {
@@ -18,9 +17,8 @@ impl ReleaseScope {
         match value {
             "lsp" => Ok(Self::Lsp),
             "extension" => Ok(Self::Extension),
-            "full" => Ok(Self::Full),
             _ => Err(format!(
-                "unsupported release scope {value:?}; expected lsp, extension, or full"
+                "unsupported release scope {value:?}; expected lsp or extension"
             )),
         }
     }
@@ -29,20 +27,18 @@ impl ReleaseScope {
         match self {
             Self::Lsp => "lsp",
             Self::Extension => "extension",
-            Self::Full => "full",
         }
     }
 
-    fn title(self, tag: &str) -> String {
+    fn title(self, version: &str) -> String {
         match self {
-            Self::Lsp => format!("WIT Language Server {tag}"),
-            Self::Extension => format!("WIT for Zed Extension {tag}"),
-            Self::Full => format!("WIT for Zed {tag}"),
+            Self::Lsp => format!("WIT Language Server v{version}"),
+            Self::Extension => format!("WIT for Zed Extension v{version}"),
         }
     }
 
-    fn notes_path(self, tag: &str) -> String {
-        format!("docs/releases/{}/{tag}.md", self.as_str())
+    fn notes_path(self, version: &str) -> String {
+        format!("docs/releases/{}/v{version}.md", self.as_str())
     }
 }
 
@@ -52,46 +48,38 @@ fn read_toml(path: &Path) -> Result<toml::Value, String> {
     toml::from_str(&source).map_err(|error| format!("parse {}: {error}", path.display()))
 }
 
-fn project_versions() -> Result<BTreeSet<String>, String> {
-    let root = util::repo_root();
-    let root_manifest = read_toml(&root.join("Cargo.toml"))?;
-    let server_manifest = read_toml(&root.join("crates/wit-language-server/Cargo.toml"))?;
-    let extension_manifest = read_toml(&root.join("extension.toml"))?;
+fn package_version(manifest: &toml::Value, label: &str) -> Result<String, String> {
+    manifest
+        .get("package")
+        .and_then(|package| package.get("version"))
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| format!("{label} omitted package.version"))
+}
 
-    let root_version = root_manifest
-        .get("package")
-        .and_then(|package| package.get("version"))
-        .and_then(toml::Value::as_str)
-        .ok_or_else(|| "Cargo.toml omitted package.version".to_owned())?;
-    let server_version = server_manifest
-        .get("package")
-        .and_then(|package| package.get("version"))
-        .and_then(toml::Value::as_str)
-        .ok_or_else(|| "language-server manifest omitted package.version".to_owned())?;
-    let extension_version = extension_manifest
+fn extension_version() -> Result<String, String> {
+    let root = util::repo_root();
+    let adapter_manifest = read_toml(&root.join("Cargo.toml"))?;
+    let extension_manifest = read_toml(&root.join("extension.toml"))?;
+    let adapter_version = package_version(&adapter_manifest, "Cargo.toml")?;
+    let manifest_version = extension_manifest
         .get("version")
         .and_then(toml::Value::as_str)
         .ok_or_else(|| "extension.toml omitted version".to_owned())?;
 
-    Ok([root_version, server_version, extension_version]
-        .into_iter()
-        .map(str::to_owned)
-        .collect())
-}
-
-fn project_version() -> Result<String, String> {
-    let versions = project_versions()?;
-    if versions.len() != 1 {
-        return Err("extension, adapter and native server versions differ".into());
+    if adapter_version != manifest_version {
+        return Err("adapter crate and extension.toml versions differ".into());
     }
-    versions
-        .into_iter()
-        .next()
-        .ok_or_else(|| "project version set is empty".to_owned())
+    Ok(adapter_version)
 }
 
-fn stable_tag_version(tag: &str) -> Option<&str> {
-    let version = tag.strip_prefix('v')?;
+fn server_version() -> Result<String, String> {
+    let root = util::repo_root();
+    let manifest = read_toml(&root.join("crates/wit-language-server/Cargo.toml"))?;
+    package_version(&manifest, "language-server manifest")
+}
+
+fn stable_version(version: &str) -> Option<&str> {
     let parts = version.split('.').collect::<Vec<_>>();
     if parts.len() != 3 {
         return None;
@@ -107,10 +95,30 @@ fn stable_tag_version(tag: &str) -> Option<&str> {
     }
 }
 
-fn release_version_for_tag<'a>(tag: &'a str, project_version: &str) -> Result<&'a str, String> {
-    let version = stable_tag_version(tag).ok_or("expected stable SemVer tag vX.Y.Z")?;
-    if project_version != version {
-        return Err("tag and adapter/server/extension versions must agree".into());
+fn release_version_for_scope<'a>(
+    scope: ReleaseScope,
+    tag: &'a str,
+    extension_version: &str,
+    server_version: &str,
+) -> Result<&'a str, String> {
+    let (prefix, expected_version, expected_tag) = match scope {
+        ReleaseScope::Lsp => ("v", server_version, "vX.Y.Z"),
+        ReleaseScope::Extension => (
+            "extension-v",
+            extension_version,
+            "extension-vX.Y.Z",
+        ),
+    };
+    let version = tag
+        .strip_prefix(prefix)
+        .and_then(stable_version)
+        .ok_or_else(|| format!("expected stable {expected_tag} tag for {} release", scope.as_str()))?;
+
+    if version != expected_version {
+        return Err(format!(
+            "{} release tag version {version} does not match expected version {expected_version}",
+            scope.as_str()
+        ));
     }
     Ok(version)
 }
@@ -174,7 +182,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
         return Err("release exceeds the adapter's 128 MiB binary size limit".into());
     }
 
-    let version = project_version()?;
+    let version = server_version()?;
     fs::create_dir_all(output).map_err(|error| format!("create {}: {error}", output.display()))?;
     let artifact = output.join(&name);
     let checksum = output.join(format!("{name}.sha256"));
@@ -231,10 +239,13 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
 pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
     let root = util::repo_root();
     let scope = ReleaseScope::parse(scope)?;
-    let project_version = project_version()?;
-    let version = release_version_for_tag(tag, &project_version)?;
-    let title = scope.title(tag);
-    let notes = scope.notes_path(tag);
+    let extension_version = extension_version()?;
+    let server_version = server_version()?;
+    let version =
+        release_version_for_scope(scope, tag, &extension_version, &server_version)?;
+    let title = scope.title(version);
+    let notes = scope.notes_path(version);
+    let server_tag = format!("v{server_version}");
 
     let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     if !util::command_output("git", ["status", "--porcelain"], &root)?.is_empty() {
@@ -255,7 +266,7 @@ pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
             .map_err(|error| format!("open GITHUB_OUTPUT {output_path}: {error}"))?;
         writeln!(
             output,
-            "sha={head}\ntag={tag}\nscope={}\ntitle={title}\nnotes={notes}",
+            "sha={head}\ntag={tag}\nscope={}\nversion={version}\ntitle={title}\nnotes={notes}\nserver_version={server_version}\nserver_tag={server_tag}",
             scope.as_str()
         )
         .map_err(|error| format!("write GITHUB_OUTPUT {output_path}: {error}"))?;
@@ -271,6 +282,8 @@ pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
             "scope": scope.as_str(),
             "title": title,
             "notes": notes,
+            "server_version": server_version,
+            "server_tag": server_tag,
             "sha": head,
             "result": "passed",
         }))
@@ -375,7 +388,7 @@ fn verify_provenance(
 
 pub fn verify_release_assets(input: &Path) -> Result<(), String> {
     let root = util::repo_root();
-    let version = project_version()?;
+    let version = server_version()?;
     let lock_digest = util::sha256_file(&root.join("Cargo.lock"))?;
     let revision = git_revision(&root)?;
     let mut expected = BTreeSet::new();
@@ -452,27 +465,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stable_tag_validation() {
-        assert_eq!(stable_tag_version("v0.1.0"), Some("0.1.0"));
-        assert_eq!(stable_tag_version("v10.20.30"), Some("10.20.30"));
-        assert_eq!(stable_tag_version("0.1.0"), None);
-        assert_eq!(stable_tag_version("v01.1.0"), None);
-        assert_eq!(stable_tag_version("v1.0.0-rc.1"), None);
-        assert_eq!(stable_tag_version("v1.0"), None);
+    fn stable_release_versions_are_strict() {
+        assert_eq!(stable_version("0.1.0"), Some("0.1.0"));
+        assert_eq!(stable_version("10.20.30"), Some("10.20.30"));
+        assert_eq!(stable_version("01.1.0"), None);
+        assert_eq!(stable_version("1.0.0-rc.1"), None);
+        assert_eq!(stable_version("1.0"), None);
     }
 
     #[test]
-    fn release_tag_must_match_project_version() {
-        assert_eq!(release_version_for_tag("v0.1.0", "0.1.0").unwrap(), "0.1.0");
-        assert!(
-            release_version_for_tag("v0.1.1", "0.1.0")
-                .unwrap_err()
-                .contains("versions must agree")
+    fn scope_tags_match_their_independent_versions() {
+        assert_eq!(
+            release_version_for_scope(ReleaseScope::Lsp, "v0.2.0", "1.4.0", "0.2.0")
+                .unwrap(),
+            "0.2.0"
+        );
+        assert_eq!(
+            release_version_for_scope(
+                ReleaseScope::Extension,
+                "extension-v1.4.0",
+                "1.4.0",
+                "0.2.0",
+            )
+            .unwrap(),
+            "1.4.0"
         );
         assert!(
-            release_version_for_tag("0.1.0", "0.1.0")
+            release_version_for_scope(ReleaseScope::Lsp, "v0.2.1", "1.4.0", "0.2.0")
                 .unwrap_err()
-                .contains("stable SemVer")
+                .contains("does not match")
+        );
+        assert!(
+            release_version_for_scope(
+                ReleaseScope::Extension,
+                "v1.4.0",
+                "1.4.0",
+                "0.2.0",
+            )
+            .unwrap_err()
+                .contains("extension-vX.Y.Z")
         );
     }
 
@@ -480,32 +511,24 @@ mod tests {
     fn release_scope_controls_title_and_notes_path() {
         let lsp = ReleaseScope::parse("lsp").unwrap();
         assert_eq!(lsp.as_str(), "lsp");
-        assert_eq!(lsp.title("v0.2.0"), "WIT Language Server v0.2.0");
+        assert_eq!(lsp.title("0.2.0"), "WIT Language Server v0.2.0");
         assert_eq!(
-            lsp.notes_path("v0.2.0"),
+            lsp.notes_path("0.2.0"),
             "docs/releases/lsp/v0.2.0.md"
         );
 
         let extension = ReleaseScope::parse("extension").unwrap();
         assert_eq!(extension.as_str(), "extension");
         assert_eq!(
-            extension.title("v0.2.0"),
-            "WIT for Zed Extension v0.2.0"
+            extension.title("1.4.0"),
+            "WIT for Zed Extension v1.4.0"
         );
         assert_eq!(
-            extension.notes_path("v0.2.0"),
-            "docs/releases/extension/v0.2.0.md"
+            extension.notes_path("1.4.0"),
+            "docs/releases/extension/v1.4.0.md"
         );
 
-        let full = ReleaseScope::parse("full").unwrap();
-        assert_eq!(full.as_str(), "full");
-        assert_eq!(full.title("v0.2.0"), "WIT for Zed v0.2.0");
-        assert_eq!(
-            full.notes_path("v0.2.0"),
-            "docs/releases/full/v0.2.0.md"
-        );
-
-        assert!(ReleaseScope::parse("server").is_err());
+        assert!(ReleaseScope::parse("full").is_err());
     }
 
     #[test]
