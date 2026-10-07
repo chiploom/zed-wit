@@ -448,15 +448,19 @@ fn verify_license_notices(path: &Path, target: &str, lock_digest: &str) -> Resul
     Ok(())
 }
 
+struct ProvenanceExpectation<'a> {
+    version: &'a str,
+    lock_digest: &'a str,
+    revision: Option<&'a str>,
+    workflow_run: Option<&'a str>,
+}
+
 fn verify_provenance(
     path: &Path,
     asset: &str,
     target: &str,
     digest: &str,
-    version: &str,
-    lock_digest: &str,
-    revision: Option<&str>,
-    expected_workflow_run: Option<&str>,
+    expected: &ProvenanceExpectation<'_>,
 ) -> Result<(), String> {
     ensure_regular_nonempty(path)?;
     let text =
@@ -467,9 +471,9 @@ fn verify_provenance(
     for (key, expected) in [
         ("artifact", asset),
         ("sha256", digest),
-        ("version", version),
+        ("version", expected.version),
         ("target", target),
-        ("cargo_lock_sha256", lock_digest),
+        ("cargo_lock_sha256", expected.lock_digest),
     ] {
         let actual = json_string(&value, key, path)?;
         if actual != expected {
@@ -495,7 +499,7 @@ fn verify_provenance(
     if json_string(&value, "rustc", path)?.trim().is_empty() {
         return Err(format!("{} has empty rustc provenance", path.display()));
     }
-    if let Some(revision) = revision
+    if let Some(revision) = expected.revision
         && json_string(&value, "source_revision", path)? != revision
     {
         return Err(format!(
@@ -503,7 +507,7 @@ fn verify_provenance(
             path.display()
         ));
     }
-    if let Some(run_id) = expected_workflow_run
+    if let Some(run_id) = expected.workflow_run
         && value.get("workflow_run").and_then(Value::as_str) != Some(run_id)
     {
         return Err(format!(
@@ -522,6 +526,12 @@ fn verify_release_assets_against(
     let version = server_version_at(source_root)?;
     let lock_digest = util::sha256_file(&source_root.join("Cargo.lock"))?;
     let revision = git_revision(source_root)?;
+    let provenance = ProvenanceExpectation {
+        version: &version,
+        lock_digest: &lock_digest,
+        revision: revision.as_deref(),
+        workflow_run: expected_workflow_run,
+    };
     let mut expected = BTreeSet::new();
 
     for target in TARGETS {
@@ -563,10 +573,7 @@ fn verify_release_assets_against(
             &name,
             target,
             &digest,
-            &version,
-            &lock_digest,
-            revision.as_deref(),
-            expected_workflow_run,
+            &provenance,
         )?;
     }
 
