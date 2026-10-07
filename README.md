@@ -37,9 +37,9 @@ The project-local settings example points Zed at
 Windows, change the untracked `.zed/settings.json` path to
 `target/release/wit-language-server.exe`.
 
-The version output includes the Git commit captured at build time, for example
-`0.1.1+git.<commit>`. The same build identity is exposed through LSP
-`serverInfo.version` and emitted once through `window/logMessage`.
+The version output includes the package version plus the Git commit captured at
+build time, for example `X.Y.Z+git.<commit>`. The same build identity is exposed
+through LSP `serverInfo.version` and emitted once through `window/logMessage`.
 
 In Zed, run **zed: install dev extension** from the command palette and select
 the repository root. Open a `.wit` file, then use the outline panel,
