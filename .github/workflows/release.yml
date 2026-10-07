@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       operation:
-        description: validate = dry run; publish = new release; regenerate = recreate a missing release from an existing protected tag
+        description: validate = dry run; publish = new release; regenerate = restore a missing release from an existing protected tag
         required: true
         default: validate
         type: choice
@@ -24,6 +24,10 @@ on:
           - validate
           - publish
           - regenerate
+      source_run_id:
+        description: Original successful CD run ID; required for LSP regeneration
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -159,6 +163,48 @@ jobs:
             fi
           fi
 
+      - name: Validate LSP regeneration source run
+        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'regenerate' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ steps.validate.outputs.sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::LSP regeneration requires a numeric source_run_id"
+            exit 1
+          fi
+
+          run_json=$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID")
+          test "$(jq -r '.status' <<<"$run_json")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$run_json")" = "success"
+          test "$(jq -r '.event' <<<"$run_json")" = "workflow_dispatch"
+          test "$(jq -r '.path' <<<"$run_json")" = ".github/workflows/release.yml"
+
+          source_sha=$(jq -r '.head_sha' <<<"$run_json")
+          if [ "$source_sha" != "$RELEASE_SHA" ]; then
+            echo "::error::Source run $SOURCE_RUN_ID used $source_sha instead of release source $RELEASE_SHA"
+            exit 1
+          fi
+
+          artifacts_json=$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100")
+          expected=$(printf '%s\n' \
+            release-aarch64-apple-darwin \
+            release-x86_64-apple-darwin \
+            release-aarch64-unknown-linux-gnu \
+            release-x86_64-unknown-linux-gnu \
+            release-x86_64-pc-windows-msvc | sort)
+          actual=$(jq -r '.artifacts[] | select(.name | startswith("release-")) | select(.expired == false) | .name' <<<"$artifacts_json" | sort)
+
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Source run $SOURCE_RUN_ID does not contain the exact five unexpired LSP release artifacts"
+            printf 'Expected:\n%s\nActual:\n%s\n' "$expected" "$actual"
+            exit 1
+          fi
+
       - name: Require scoped user-facing release notes
         env:
           RELEASE_NOTES: ${{ steps.validate.outputs.notes }}
@@ -245,7 +291,7 @@ jobs:
 
   build_lsp:
     name: Build LSP / ${{ matrix.target }}
-    if: ${{ inputs.scope == 'lsp' }}
+    if: ${{ inputs.scope == 'lsp' && inputs.operation != 'regenerate' }}
     needs: validate
     strategy:
       fail-fast: false
@@ -308,11 +354,20 @@ jobs:
           name: release-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
 
   verify_lsp:
     name: Verify LSP release artifact set
-    if: ${{ inputs.scope == 'lsp' }}
+    if: >-
+      ${{
+        always() &&
+        inputs.scope == 'lsp' &&
+        needs.validate.result == 'success' &&
+        (
+          (inputs.operation == 'regenerate' && needs.build_lsp.result == 'skipped') ||
+          (inputs.operation != 'regenerate' && needs.build_lsp.result == 'success')
+        )
+      }}
     needs: [validate, build_lsp]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -325,8 +380,21 @@ jobs:
       - name: Install pinned toolchain
         run: rustup toolchain install
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download current-run LSP artifacts
+        if: ${{ inputs.operation != 'regenerate' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Restore original LSP artifacts
+        if: ${{ inputs.operation == 'regenerate' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
           pattern: release-*
           path: dist
           merge-multiple: true
@@ -344,8 +412,21 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download current-run LSP artifacts
+        if: ${{ inputs.operation == 'publish' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Restore original LSP artifacts
+        if: ${{ inputs.operation == 'regenerate' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
           pattern: release-*
           path: dist
           merge-multiple: true
@@ -365,6 +446,7 @@ jobs:
           WORKFLOW_REF: ${{ github.workflow_ref }}
           RUN_ID: ${{ github.run_id }}
           REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         run: |
           jq -n \
             --arg repository "$REPOSITORY" \
@@ -373,13 +455,15 @@ jobs:
             --arg control_revision "$CONTROL_SHA" \
             --arg workflow_ref "$WORKFLOW_REF" \
             --arg run_id "$RUN_ID" \
+            --arg source_run_id "$SOURCE_RUN_ID" \
             '{
               schema_version: 1,
               operation: "regenerate",
               artifact_source: {
                 repository: $repository,
                 tag: $tag,
-                revision: $source_revision
+                revision: $source_revision,
+                original_cd_run_id: $source_run_id
               },
               release_control: {
                 revision: $control_revision,
@@ -406,7 +490,10 @@ jobs:
         (
           (
             inputs.scope == 'lsp' &&
-            needs.build_lsp.result == 'success' &&
+            (
+              (inputs.operation == 'regenerate' && needs.build_lsp.result == 'skipped') ||
+              (inputs.operation == 'publish' && needs.build_lsp.result == 'success')
+            ) &&
             needs.verify_lsp.result == 'success' &&
             needs.attest_lsp.result == 'success'
           ) ||
@@ -436,9 +523,21 @@ jobs:
           path: release-source
           persist-credentials: false
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: ${{ inputs.scope == 'lsp' }}
+      - name: Download current-run LSP artifacts
+        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'publish' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Restore original LSP artifacts
+        if: ${{ inputs.scope == 'lsp' && inputs.operation == 'regenerate' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
           pattern: release-*
           path: dist
           merge-multiple: true
