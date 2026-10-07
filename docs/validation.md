@@ -16,9 +16,30 @@ The release is published, non-prerelease, immutable, and contains the complete
 23-file distribution contract: five native binaries, one
 checksum/provenance/license bundle per binary, and the project MIT, Apache-2.0,
 and third-party notice files. The extension runtime pin now targets `0.1.1`.
-Hosted-delivery qualification against this recovery release remains a separate
-runtime check and should be recorded after
-`cargo xtask test-zed-hosted --timeout-seconds 180` passes.
+
+### Hosted delivery qualification — macOS ARM64
+
+`cargo xtask test-zed-hosted --timeout-seconds 180` passed against `v0.1.1`
+using Zed 1.22.0 on macOS ARM64. The isolated profile resolved the protected
+release tag to
+`4019fcc2b63c26702ad7d77839f76cfcb56bb065`, downloaded and launched
+`wit-language-server-aarch64-apple-darwin`, and verified SHA-256
+`0bde485ebad8e71f1af071ed2a18adc8e67af4e91118f750b6483d8b1b2f7cb3`.
+That digest matches the immutable GitHub Release asset.
+
+The same qualification run passed all four hosted-delivery scenarios:
+
+- first hosted install downloaded, verified, and launched the published server;
+- cached install reused the same verified server and checksum without rewriting
+  either cache file;
+- deliberate executable corruption was detected and repaired with bytes matching
+  the original published digest; and
+- deletion of the checksum sidecar caused clean recovery, restoring the checksum
+  and launching the server with the published release build identity.
+
+This qualifies hosted delivery for `v0.1.1` on macOS ARM64. It does not
+substitute for platform-specific hosted-delivery execution on macOS x86_64,
+Linux GNU ARM64, Linux GNU x86_64, or Windows x86_64 MSVC.
 
 ## v0.1.0 LSP-only publication — 2026-10-07
 
