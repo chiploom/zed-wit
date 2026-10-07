@@ -342,11 +342,7 @@ pub(crate) fn stage_hosted(root: &Path, profile: &Path) -> Result<Staged, String
     stage_with_server(root, profile, None)
 }
 
-fn stage_with_server(
-    root: &Path,
-    profile: &Path,
-    server: Option<&Path>,
-) -> Result<Staged, String> {
+fn stage_with_server(root: &Path, profile: &Path, server: Option<&Path>) -> Result<Staged, String> {
     validate_disposable_profile(root, profile)?;
     if profile.exists() {
         log(format!(
