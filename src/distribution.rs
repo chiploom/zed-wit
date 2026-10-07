@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
-pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const SERVER_VERSION: &str = env!("WIT_LANGUAGE_SERVER_VERSION");
 pub const RELEASE_BASE: &str = "https://github.com/chiploom/zed-wit/releases/download";
 pub const MAX_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -68,6 +68,7 @@ mod tests {
 
     #[test]
     fn release_names_are_fixed_and_versioned() {
+        assert_eq!(SERVER_VERSION, "0.1.0");
         for target in [
             "aarch64-apple-darwin",
             "x86_64-apple-darwin",
