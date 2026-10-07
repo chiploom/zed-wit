@@ -130,6 +130,11 @@ jobs:
         with:
           shared-key: check-${{ matrix.target }}
           cache-bin: false
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: nextest@0.9.146
+          fallback: none
       - name: Check native target
         run: cargo check --workspace --exclude xtask --all-targets --locked --target "$TARGET"
       - name: Check platform-specific xtask
@@ -141,6 +146,8 @@ jobs:
         run: |
           cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-wayland --target "$TARGET" -- -D warnings
           cargo clippy -p zed-gui-input --all-targets --locked --no-default-features --features linux-libei --target "$TARGET" -- -D warnings
+      - name: Run native tests
+        run: cargo nextest run --workspace --exclude xtask --locked --target "$TARGET"
 
   native-artifacts:
     name: Artifact / ${{ matrix.target }}
