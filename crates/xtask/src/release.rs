@@ -6,6 +6,42 @@ use std::{
 
 const MAX_BINARY_BYTES: u64 = 128 * 1024 * 1024;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReleaseScope {
+    Lsp,
+    Full,
+}
+
+impl ReleaseScope {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "lsp" => Ok(Self::Lsp),
+            "full" => Ok(Self::Full),
+            _ => Err(format!(
+                "unsupported release scope {value:?}; expected lsp or full"
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Lsp => "lsp",
+            Self::Full => "full",
+        }
+    }
+
+    fn title(self, tag: &str) -> String {
+        match self {
+            Self::Lsp => format!("WIT Language Server {tag}"),
+            Self::Full => format!("WIT for Zed {tag}"),
+        }
+    }
+
+    fn notes_path(self, tag: &str) -> String {
+        format!("docs/releases/{}/{tag}.md", self.as_str())
+    }
+}
+
 fn read_toml(path: &Path) -> Result<toml::Value, String> {
     let source =
         fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
@@ -188,10 +224,13 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn validate_release(tag: &str) -> Result<(), String> {
+pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
     let root = util::repo_root();
+    let scope = ReleaseScope::parse(scope)?;
     let project_version = project_version()?;
     let version = release_version_for_tag(tag, &project_version)?;
+    let title = scope.title(tag);
+    let notes = scope.notes_path(tag);
 
     let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     if !util::command_output("git", ["status", "--porcelain"], &root)?.is_empty() {
@@ -210,8 +249,12 @@ pub fn validate_release(tag: &str) -> Result<(), String> {
             .append(true)
             .open(&output_path)
             .map_err(|error| format!("open GITHUB_OUTPUT {output_path}: {error}"))?;
-        writeln!(output, "sha={head}\ntag={tag}")
-            .map_err(|error| format!("write GITHUB_OUTPUT {output_path}: {error}"))?;
+        writeln!(
+            output,
+            "sha={head}\ntag={tag}\nscope={}\ntitle={title}\nnotes={notes}",
+            scope.as_str()
+        )
+        .map_err(|error| format!("write GITHUB_OUTPUT {output_path}: {error}"))?;
     } else if env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
         return Err("GITHUB_ACTIONS is true but GITHUB_OUTPUT is missing".into());
     }
@@ -221,6 +264,9 @@ pub fn validate_release(tag: &str) -> Result<(), String> {
         serde_json::to_string_pretty(&json!({
             "tag": tag,
             "version": version,
+            "scope": scope.as_str(),
+            "title": title,
+            "notes": notes,
             "sha": head,
             "result": "passed",
         }))
@@ -424,6 +470,27 @@ mod tests {
                 .unwrap_err()
                 .contains("stable SemVer")
         );
+    }
+
+    #[test]
+    fn release_scope_controls_title_and_notes_path() {
+        let lsp = ReleaseScope::parse("lsp").unwrap();
+        assert_eq!(lsp.as_str(), "lsp");
+        assert_eq!(lsp.title("v0.2.0"), "WIT Language Server v0.2.0");
+        assert_eq!(
+            lsp.notes_path("v0.2.0"),
+            "docs/releases/lsp/v0.2.0.md"
+        );
+
+        let full = ReleaseScope::parse("full").unwrap();
+        assert_eq!(full.as_str(), "full");
+        assert_eq!(full.title("v0.2.0"), "WIT for Zed v0.2.0");
+        assert_eq!(
+            full.notes_path("v0.2.0"),
+            "docs/releases/full/v0.2.0.md"
+        );
+
+        assert!(ReleaseScope::parse("extension").is_err());
     }
 
     #[test]
