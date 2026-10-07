@@ -9,8 +9,9 @@
 - Replace stale pre-release download failure guidance with recovery instructions
   that remain valid after publication.
 - Require version-specific user-facing release notes for future CD publications.
-- Add explicit `lsp`, `extension`, and `full` CD release scopes so GitHub
-  releases state exactly which project surface they publish.
+- Add explicit independent `lsp` and `extension` CD release scopes, decouple
+  adapter and server versions, and require extension releases to reference a
+  complete published immutable LSP release.
 
 ## 0.1.0 - 2026-10-07
 
