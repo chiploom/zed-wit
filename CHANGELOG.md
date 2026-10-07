@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Prepare the `v0.1.1` LSP recovery release after the immutable `v0.1.0`
+  GitHub Release was deleted. GitHub permanently reserves the `v0.1.0` tag
+  name, so distribution must continue with a new patch version.
 - Update public documentation and security guidance for the published `v0.1.0`
   release.
 - Add post-release hosted-install qualification for first download, verified cache
@@ -12,8 +15,7 @@
 - Add explicit independent `lsp` and `extension` CD release scopes, decouple
   adapter and server versions through an explicit runtime LSP pin, require
   extension releases to reference a complete published immutable LSP release,
-  and support byte-preserving regeneration of a deleted GitHub Release from the
-  original successful publication run and protected tag.
+  and reject same-tag recovery assumptions for deleted immutable releases.
 
 ## 0.1.0 - 2026-10-07
 
