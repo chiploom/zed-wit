@@ -2,9 +2,10 @@
 
 WIT adds first-class [WebAssembly Interface Types (WIT)](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md) support to Zed. The extension combines syntax-aware editing with a native language server for diagnostics, formatting, completion, hover, navigation, references, and safe typo fixes.
 
-The protected **v0.1.0** tag is the **LSP-only release identity** for the first
-native language-server release. Its GitHub Release can be regenerated from that
-tag if the release record is missing. It is not a Zed-extension release, and the
+The protected **v0.1.0** tag identifies the first LSP-only release, but its
+immutable GitHub Release was deleted. GitHub permanently reserves tag names used
+by immutable releases, so `v0.1.0` cannot be recreated. LSP distribution resumes
+with `v0.1.1`. This is still separate from Zed-extension publication, and the
 extension is not yet published in the Zed extension registry.
 
 ## Features
