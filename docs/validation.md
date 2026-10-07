@@ -354,9 +354,12 @@ Before the first release candidate is considered ready:
 3. Verify public-repository security settings, release-environment protection,
    and the active default-branch and `v*` tag rulesets.
 4. Resolve the existing `wit` registry ownership/succession requirement.
-5. Create a stable `vX.Y.Z` tag whose version matches the adapter, extension,
-   and native server manifests.
-6. Dispatch the protected release workflow from the default branch.
+5. Dispatch the protected CD workflow from the default branch with a new stable
+   `vX.Y.Z` tag name and `publish=false`; require the full five-target artifact
+   gate to pass.
+6. Dispatch CD again from the same commit with `publish=true`; allow the protected
+   publish job to create the immutable release tag only after all build and
+   verification jobs pass.
 7. Verify the published five-target asset set, checksums, provenance, licenses,
-   and attestations.
+   tag-to-commit binding, and attestations.
 8. Re-test first install and cached install in Zed against the published assets.
