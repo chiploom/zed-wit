@@ -1,4 +1,4 @@
-use crate::{util, zed_smoke};
+use crate::{release, util, zed_smoke};
 use serde_json::json;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -305,17 +305,7 @@ fn is_language_server_executable(path: &Path) -> bool {
 }
 
 fn release_identity(root: &Path) -> Result<ReleaseIdentity, String> {
-    let manifest_path = root.join("crates/wit-language-server/Cargo.toml");
-    let source = fs::read_to_string(&manifest_path)
-        .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
-    let manifest: toml::Value = toml::from_str(&source)
-        .map_err(|error| format!("parse {}: {error}", manifest_path.display()))?;
-    let version = manifest
-        .get("package")
-        .and_then(|package| package.get("version"))
-        .and_then(toml::Value::as_str)
-        .ok_or("language-server manifest omitted package.version")?
-        .to_owned();
+    let version = release::runtime_lsp_version()?;
     let tag = format!("v{version}");
     let output = util::command_output(
         "git",
