@@ -625,8 +625,8 @@ world app {
         &wit_syntax::language(),
         r#"
 (statement/package_decl) @statement
-(package_items/interface_item) @package-item
-(world_definition/import_item) @world-definition
+(package_items/interface_item) @package_item
+(world_definition/import_item) @world_definition
 (typedef_item/record_item) @typedef
 (gate_item/since_gate) @gate
 "#,
@@ -651,15 +651,27 @@ world app {
     assert!(found.contains(&("statement".into(), "package demo:supertypes;".into())));
     assert!(
         found.iter().any(|(capture, text)| {
-            capture == "package-item"
+            capture == "package_item"
                 && text.contains("interface api")
                 && text.contains("record entry")
         }),
         "{found:?}"
     );
-    assert!(found.iter().any(|(capture, text)| capture == "world-definition" && text == "import api;"));
-    assert!(found.iter().any(|(capture, text)| capture == "typedef" && text.starts_with("record entry")));
-    assert!(found.iter().any(|(capture, text)| capture == "gate" && text == "@since(version = 1.0.0)"));
+    assert!(
+        found
+            .iter()
+            .any(|(capture, text)| capture == "world_definition" && text == "import api;")
+    );
+    assert!(
+        found
+            .iter()
+            .any(|(capture, text)| capture == "typedef" && text.starts_with("record entry"))
+    );
+    assert!(
+        found
+            .iter()
+            .any(|(capture, text)| capture == "gate" && text == "@since(version = 1.0.0)")
+    );
 
     for name in [
         "highlights",
