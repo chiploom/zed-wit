@@ -255,4 +255,24 @@ mod tests {
         assert!(job.contains("needs.verify_lsp.result == 'success'"));
         assert!(job.contains("inputs.operation != 'validate'"));
     }
+
+    #[test]
+    fn draft_asset_scope_uses_draft_capable_release_lookup() {
+        let root = util::repo_root();
+        let workflow = fs::read_to_string(root.join(".github/workflows/release.yml")).unwrap();
+        let start = workflow
+            .find("      - name: Verify draft asset scope\n")
+            .unwrap();
+        let end = workflow[start..]
+            .find("\n      - name: Publish draft release\n")
+            .map(|offset| start + offset)
+            .unwrap();
+        let step = &workflow[start..end];
+
+        assert!(
+            step.contains(r#"gh release view "$RELEASE_TAG" --json isDraft,tagName,name,assets"#)
+        );
+        assert!(!step.contains(r#"releases/tags/$RELEASE_TAG"#));
+        assert!(step.contains(r#".isDraft"#));
+    }
 }
