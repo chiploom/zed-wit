@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Release scope (lsp = native language server only; full = extension source + LSP)
+        description: Release scope (lsp, extension, or full)
         required: true
         default: lsp
         type: choice
         options:
           - lsp
+          - extension
           - full
       tag:
         description: New stable vX.Y.Z tag to create after all release checks pass
@@ -141,11 +142,34 @@ jobs:
       - name: Run doctests
         run: cargo test --doc --workspace --exclude xtask --locked
 
+  build_extension:
+    name: Build Zed extension
+    if: ${{ inputs.scope == 'extension' || inputs.scope == 'full' }}
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          persist-credentials: false
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: release-extension
+          cache-bin: false
+          save-if: false
+
       - name: Build the Zed extension as Zed does
         run: cargo build --target wasm32-wasip2 --locked
 
-  build:
+  build_lsp:
     name: Build LSP / ${{ matrix.target }}
+    if: ${{ inputs.scope == 'lsp' || inputs.scope == 'full' }}
     needs: validate
     strategy:
       fail-fast: false
@@ -210,9 +234,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  verify:
-    name: Verify release artifact set
-    needs: [validate, build]
+  verify_lsp:
+    name: Verify LSP release artifact set
+    if: ${{ inputs.scope == 'lsp' || inputs.scope == 'full' }}
+    needs: [validate, build_lsp]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -234,8 +259,21 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    if: ${{ inputs.publish }}
-    needs: [validate, build, verify]
+    if: >-
+      ${{
+        inputs.publish &&
+        always() &&
+        needs.validate.result == 'success' &&
+        (
+          inputs.scope == 'extension' ||
+          (needs.build_lsp.result == 'success' && needs.verify_lsp.result == 'success')
+        ) &&
+        (
+          inputs.scope == 'lsp' ||
+          needs.build_extension.result == 'success'
+        )
+      }}
+    needs: [validate, build_extension, build_lsp, verify_lsp]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release
@@ -250,18 +288,22 @@ jobs:
           persist-credentials: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ inputs.scope == 'lsp' || inputs.scope == 'full' }}
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
 
       - name: Install pinned toolchain
+        if: ${{ inputs.scope == 'lsp' || inputs.scope == 'full' }}
         run: rustup toolchain install
 
-      - name: Verify complete asset set
+      - name: Verify complete LSP asset set
+        if: ${{ inputs.scope == 'lsp' || inputs.scope == 'full' }}
         run: cargo xtask verify-release-assets --input dist
 
-      - name: Attest release artifacts
+      - name: Attest LSP release artifacts
+        if: ${{ inputs.scope == 'lsp' || inputs.scope == 'full' }}
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*
@@ -298,6 +340,10 @@ jobs:
             lsp)
               scope_marker="Release scope: LSP only"
               scope_notice="> **Release scope: LSP only.** This GitHub release publishes the native WIT language server and its release metadata. It does not publish the WIT Zed extension or change the Zed extension registry."
+              ;;
+            extension)
+              scope_marker="Release scope: Zed extension only"
+              scope_notice="> **Release scope: Zed extension only.** This GitHub release represents the WIT Zed extension source at this tag. It does not publish native LSP binaries and does not update the Zed extension registry."
               ;;
             full)
               scope_marker="Release scope: Full WIT for Zed"
@@ -347,6 +393,14 @@ jobs:
             fi
           fi
 
+      - name: Upload LSP release assets
+        if: ${{ inputs.scope == 'lsp' || inputs.scope == 'full' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
           gh release upload "$RELEASE_TAG" \
             dist/* \
             LICENSE-MIT \
@@ -354,7 +408,12 @@ jobs:
             THIRD_PARTY_NOTICES.md \
             --clobber
 
-          gh release edit "$RELEASE_TAG" --draft=false
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
 
       - name: Verify published release
         env:
@@ -368,6 +427,7 @@ jobs:
 
           case "$RELEASE_SCOPE" in
             lsp) scope_marker="Release scope: LSP only" ;;
+            extension) scope_marker="Release scope: Zed extension only" ;;
             full) scope_marker="Release scope: Full WIT for Zed" ;;
             *)
               echo "::error::Unsupported release scope: $RELEASE_SCOPE"
