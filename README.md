@@ -49,10 +49,9 @@ extension. Inspect **zed: open log** for startup or build failures.
 An existing registry WIT extension is overridden by the development install.
 Automatic native-server downloads follow
 `package.metadata.zed-wit.runtime-lsp-version` in the root manifest. The
-current pin remains `0.1.0`, whose immutable GitHub Release was deleted, so
-hosted downloads remain unavailable until the recovery `v0.1.1` release is
-published and a follow-up change advances the pin. The LSP package version can
-advance independently without changing what the extension downloads.
+current pin is `0.1.1`, which resolves to the published immutable recovery LSP
+release. The LSP package version can advance independently without changing what
+the extension downloads.
 
 ## How it works
 
@@ -121,11 +120,11 @@ implementation as its successor requires coordination with the existing
 maintainer and Zed under the [replacement policy](docs/publishing.md). No
 registry transfer or duplicate entry is assumed.
 
-GitHub release publication is separate from registry publication. Version
-`v0.1.0` is the protected **LSP-only** release tag. When its GitHub Release
-record exists, repository immutable-release policy protects the published
-assets. Future CD runs explicitly choose `lsp` or `extension` scope. LSP and extension versions can advance independently; the
-extension pins a published LSP version. See [publishing](docs/publishing.md) for
+GitHub release publication is separate from registry publication. The deleted
+immutable `v0.1.0` release remains represented by its protected historical tag,
+while `v0.1.1` is the current published immutable **LSP-only** release. Future
+CD runs explicitly choose `lsp` or `extension` scope. LSP and extension
+versions can advance independently; the extension pins a published LSP version. See [publishing](docs/publishing.md) for
 the scope contract and registry succession gate.
 
 ## Acknowledgements and license
