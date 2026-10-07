@@ -11,8 +11,13 @@ fn package_version(source: &str) -> Option<&str> {
         if !in_package {
             continue;
         }
-        let value = line.strip_prefix("version")?.trim_start();
-        let value = value.strip_prefix('=')?.trim();
+        let Some(value) = line.strip_prefix("version") else {
+            continue;
+        };
+        let Some(value) = value.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let value = value.trim();
         return value.strip_prefix('"')?.strip_suffix('"');
     }
     None
