@@ -29,9 +29,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         target_os = "linux",
         target_os = "windows"
     )) {
-        return Err(
-            "test-zed-hosted supports Zed desktop hosts: macOS, Linux, and Windows".into(),
-        );
+        return Err("test-zed-hosted supports Zed desktop hosts: macOS, Linux, and Windows".into());
     }
 
     let root = util::repo_root();
@@ -60,13 +58,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
         ));
     }
 
-    let first = run_session(
-        &zed_path,
-        profile,
-        &staged,
-        "first-install",
-        timeout,
-    )?;
+    let first = run_session(&zed_path, profile, &staged, "first-install", timeout)?;
     ensure_profile_owned(profile, &first.path)?;
     let checksum = checksum_path(&first.path)?;
     let initial_digest = util::sha256_file(&first.path)?;
@@ -224,11 +216,7 @@ fn run_session(
     };
 
     zed_smoke::stop_zed(&mut child)?;
-    zed_smoke::ensure_server_stopped(
-        observed.pid,
-        &observed.path,
-        Duration::from_secs(3),
-    )?;
+    zed_smoke::ensure_server_stopped(observed.pid, &observed.path, Duration::from_secs(3))?;
     zed_smoke::scan_logs(profile, &stdout_log, &stderr_log)?;
     Ok(observed)
 }
@@ -348,10 +336,14 @@ fn parse_remote_tag(output: &str, tag: &str) -> Result<String, String> {
         .next()
         .ok_or_else(|| format!("published release tag {tag} was not found on origin"))?;
     if matches.next().is_some() {
-        return Err(format!("origin returned multiple refs for release tag {tag}"));
+        return Err(format!(
+            "origin returned multiple refs for release tag {tag}"
+        ));
     }
     if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("origin returned an invalid commit for release tag {tag}: {sha:?}"));
+        return Err(format!(
+            "origin returned an invalid commit for release tag {tag}: {sha:?}"
+        ));
     }
     Ok(sha.to_owned())
 }
@@ -371,11 +363,7 @@ fn verify_server_identity(
     Ok(())
 }
 
-fn verify_checksum_sidecar(
-    checksum: &Path,
-    server: &Path,
-    digest: &str,
-) -> Result<(), String> {
+fn verify_checksum_sidecar(checksum: &Path, server: &Path, digest: &str) -> Result<(), String> {
     let name = server
         .file_name()
         .and_then(|name| name.to_str())
@@ -492,8 +480,7 @@ mod tests {
 
     #[test]
     fn parses_exact_remote_release_tag() {
-        let output =
-            "0123456789abcdef0123456789abcdef01234567\trefs/tags/v0.1.0\n";
+        let output = "0123456789abcdef0123456789abcdef01234567\trefs/tags/v0.1.0\n";
         assert_eq!(
             parse_remote_tag(output, "v0.1.0").unwrap(),
             "0123456789abcdef0123456789abcdef01234567"
