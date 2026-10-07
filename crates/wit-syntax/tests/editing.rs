@@ -605,13 +605,75 @@ fn every_snippet_default_expands_into_valid_wit_in_its_context() {
 }
 
 #[test]
+fn latest_upstream_supertypes_are_queryable_without_broadening_concrete_queries() {
+    let source = r#"package demo:supertypes;
+@since(version = 1.0.0)
+interface api {
+    record entry { value: string }
+}
+world app {
+    import api;
+}"#;
+    let tree = parse(source);
+    assert!(
+        !tree.root_node().has_error(),
+        "{}",
+        tree.root_node().to_sexp()
+    );
+
+    let supertype_query = Query::new(
+        &wit_syntax::language(),
+        r#"
+(statement/package_decl) @statement
+(package_items/interface_item) @package-item
+(world_definition/import_item) @world-definition
+(typedef_item/record_item) @typedef
+(gate_item/since_gate) @gate
+"#,
+    )
+    .unwrap();
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(
+        &supertype_query,
+        tree.root_node(),
+        source.as_bytes(),
+    );
+    let mut found = BTreeSet::new();
+    while let Some(matched) = matches.next() {
+        for capture in matched.captures {
+            found.insert((
+                supertype_query.capture_names()[capture.index as usize].to_string(),
+                source[capture.node.byte_range()].to_string(),
+            ));
+        }
+    }
+
+    assert!(found.contains(&("statement".into(), "package demo:supertypes;".into())));
+    assert!(found.contains(&("package-item".into(), source[source.find("interface api").unwrap()..source.find("world app").unwrap()].trim().into())));
+    assert!(found.iter().any(|(capture, text)| capture == "world-definition" && text == "import api;"));
+    assert!(found.iter().any(|(capture, text)| capture == "typedef" && text.starts_with("record entry")));
+    assert!(found.iter().any(|(capture, text)| capture == "gate" && text == "@since(version = 1.0.0)"));
+
+    for name in [
+        "highlights",
+        "brackets",
+        "indents",
+        "outline",
+        "textobjects",
+        "overrides",
+    ] {
+        let _ = captures(name, source);
+    }
+}
+
+#[test]
 fn extension_and_native_tooling_share_the_exact_grammar_pin() {
     let extension: toml::Value =
         toml::from_str(&fs::read_to_string(root().join("extension.toml")).unwrap()).unwrap();
     let native: toml::Value =
         toml::from_str(&fs::read_to_string(root().join("crates/wit-syntax/Cargo.toml")).unwrap())
             .unwrap();
-    let pin = "cdf07263b136054b413cab449ac7a1d059c27542";
+    let pin = "f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6";
     let repository = "https://github.com/bytecodealliance/tree-sitter-wit";
     assert_eq!(extension["grammars"]["wit"]["rev"].as_str(), Some(pin));
     assert_eq!(
