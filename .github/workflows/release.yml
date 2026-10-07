@@ -333,6 +333,27 @@ jobs:
 
       - run: cargo xtask verify-release-assets --input dist
 
+  attest_lsp:
+    name: Attest LSP release artifacts
+    if: ${{ inputs.scope == 'lsp' && inputs.operation != 'validate' }}
+    needs: [validate, verify_lsp]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
+
   publish:
     name: Publish GitHub release
     if: >-
@@ -344,7 +365,8 @@ jobs:
           (
             inputs.scope == 'lsp' &&
             needs.build_lsp.result == 'success' &&
-            needs.verify_lsp.result == 'success'
+            needs.verify_lsp.result == 'success' &&
+            needs.attest_lsp.result == 'success'
           ) ||
           (
             inputs.scope == 'extension' &&
@@ -352,14 +374,12 @@ jobs:
           )
         )
       }}
-    needs: [validate, build_extension, build_lsp, verify_lsp]
+    needs: [validate, build_extension, build_lsp, verify_lsp, attest_lsp]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release
     permissions:
       contents: write
-      id-token: write
-      attestations: write
     steps:
       - name: Checkout release control metadata
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -389,12 +409,6 @@ jobs:
         if: ${{ inputs.scope == 'lsp' }}
         working-directory: release-source
         run: cargo xtask verify-release-assets --input ../dist
-
-      - name: Attest LSP release artifacts
-        if: ${{ inputs.scope == 'lsp' }}
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: dist/*
 
       - name: Create or resume draft release
         env:
