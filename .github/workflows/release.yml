@@ -193,7 +193,7 @@ jobs:
 
           jobs_json=$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100")
           publish_successes=$(jq '[.jobs[] | select(.name == "Publish GitHub release" and .conclusion == "success")] | length' <<<"$jobs_json")
-          verify_successes=$(jq '[.jobs[] | select(.name == "Verify release artifact set" and .conclusion == "success")] | length' <<<"$jobs_json")
+          verify_successes=$(jq '[.jobs[] | select((.name == "Verify release artifact set" or .name == "Verify LSP release artifact set") and .conclusion == "success")] | length' <<<"$jobs_json")
           if [ "$publish_successes" -ne 1 ] || [ "$verify_successes" -ne 1 ]; then
             echo "::error::Source run $SOURCE_RUN_ID is not a fully verified successful publication run"
             exit 1
