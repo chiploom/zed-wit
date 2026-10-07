@@ -2,9 +2,10 @@
 
 WIT adds first-class [WebAssembly Interface Types (WIT)](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md) support to Zed. The extension combines syntax-aware editing with a native language server for diagnostics, formatting, completion, hover, navigation, references, and safe typo fixes.
 
-The protected **v0.1.0** tag is the **LSP-only release identity** for the first
-native language-server release. Its GitHub Release can be regenerated from that
-tag if the release record is missing. It is not a Zed-extension release, and the
+The protected **v0.1.0** tag identifies the first LSP-only release, but its
+immutable GitHub Release was deleted. GitHub permanently reserves tag names used
+by immutable releases, so `v0.1.0` cannot be recreated. LSP distribution resumes
+with `v0.1.1`. This is still separate from Zed-extension publication, and the
 extension is not yet published in the Zed extension registry.
 
 ## Features
@@ -37,7 +38,7 @@ Windows, change the untracked `.zed/settings.json` path to
 `target/release/wit-language-server.exe`.
 
 The version output includes the Git commit captured at build time, for example
-`0.1.0+git.<commit>`. The same build identity is exposed through LSP
+`0.1.1+git.<commit>`. The same build identity is exposed through LSP
 `serverInfo.version` and emitted once through `window/logMessage`.
 
 In Zed, run **zed: install dev extension** from the command palette and select
@@ -46,10 +47,12 @@ completion, navigation, diagnostics, and **editor: format** to exercise the
 extension. Inspect **zed: open log** for startup or build failures.
 
 An existing registry WIT extension is overridden by the development install.
-Automatic native-server downloads use the published immutable LSP release
-explicitly pinned by `package.metadata.zed-wit.runtime-lsp-version` in the root
-manifest. The LSP package version can advance independently without changing
-what the extension downloads.
+Automatic native-server downloads follow
+`package.metadata.zed-wit.runtime-lsp-version` in the root manifest. The
+current pin remains `0.1.0`, whose immutable GitHub Release was deleted, so
+hosted downloads remain unavailable until the recovery `v0.1.1` release is
+published and a follow-up change advances the pin. The LSP package version can
+advance independently without changing what the extension downloads.
 
 ## How it works
 

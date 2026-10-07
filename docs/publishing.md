@@ -1,12 +1,12 @@
 # Publishing and maintenance
 
 The repository is public and protected tag `v0.1.0` identifies the first
-LSP-only release. If its GitHub Release record is missing, use the documented
-`regenerate` operation to recreate it from the protected tag. GitHub release
+LSP-only release. Its immutable GitHub Release was deleted, and GitHub permanently
+reserves tag names that were used by immutable releases, so `v0.1.0` cannot be
+recreated. Recovery therefore proceeds with a new patch version. GitHub release
 publication does not grant permission to replace the existing Zed registry
-entry. Repository rulesets, immutable releases, and
-release-environment protections remain part of the release contract for every
-subsequent version.
+entry. Repository rulesets, immutable releases, and release-environment
+protections remain part of the release contract for every subsequent version.
 
 ## Release scopes
 
@@ -40,9 +40,10 @@ Both tag formats begin with `v`, so the existing protected `v*` tag ruleset
 covers both streams. GitHub extension releases still do not publish or replace
 the Zed extension registry entry; registry succession remains a separate process.
 
-Protected tag `v0.1.0` represents an **LSP-only** release. A corresponding
-GitHub Release, when present, contains the native language server and its
-metadata; it is not a published Zed extension.
+Protected tag `v0.1.0` represents the historical first **LSP-only** release,
+but its deleted immutable GitHub Release cannot be recreated under that tag.
+`v0.1.1` is the recovery release for restoring LSP distribution. Neither is a
+published Zed extension.
 
 ## Native assets
 
@@ -86,12 +87,14 @@ The workflow's `operation` input controls lifecycle behavior:
 
 - `validate` performs a dry run for a **new** tag and creates nothing.
 - `publish` qualifies and publishes a new tag/release. It may also resume an
-  interrupted draft when the existing tag still resolves to the validated
-  release commit.
-- `regenerate` requires an **existing protected tag** and, for LSP releases,
-  the original successful publication run ID. It restores the exact original
-  unexpired release artifact bundles rather than rebuilding binaries. It never
-  creates, updates, or deletes the tag.
+  existing unpublished draft when the tag still resolves to the validated
+  release commit. An existing tag with no draft is rejected because GitHub does
+  not expose a safe distinction between an interrupted tag-only publication and
+  a tag name permanently reserved by a deleted immutable release.
+
+Deleted immutable releases are not recoverable under the same tag name. GitHub
+reserves that tag name permanently after deletion, so publish a new corrected
+version instead.
 
 All operations execute repository policy, formatting, clippy/check/doctests, and
 release identity validation. The `lsp` scope runs native tests on all five
@@ -125,38 +128,22 @@ For publication:
    attestations and upload the verified native asset set; extension releases
    publish source only. If `main` advanced after an earlier dry run, this
    publication run is the authoritative qualification.
-6. If publication is interrupted after tag creation, rerun CD from the same
-   validated commit with `operation=publish`. CD accepts an exact tag with no
-   release or an unpublished matching draft only when the tag still resolves to
-   the validated SHA, then resumes without moving or deleting the tag.
-7. If a published GitHub Release is later deleted while its protected tag
-   remains, dispatch CD from current protected `main` with the original scope
-   and tag plus `operation=regenerate`. For an LSP release, also provide the
-   original successful publication run ID. CD requires that run to be a
-   successful `workflow_dispatch` execution of the CD workflow at the exact
-   protected tag SHA, requires its **Publish GitHub release** job to have
-   succeeded, and requires the exact five unexpired `release-*` artifact
-   bundles. It then restores those exact original bytes, uses license files from
-   the protected tag source, applies the current scoped release notes, recreates
-   the draft, verifies its asset set, and republishes it without changing the
-   tag. Regenerated LSP artifacts receive a signed custom regeneration
-   attestation recording the protected source tag/revision and original CD run
-   instead of claiming normal SLSA provenance from the current control commit.
-
-   If the original Actions artifacts have expired, do **not** rebuild and
-   republish different binaries under the same tag. Publish a corrected new
-   version instead. New CD release artifacts are retained for 90 days to extend
-   the byte-preserving recovery window.
+6. If publication is interrupted after the draft exists, rerun CD from the same
+   validated commit with `operation=publish`. CD resumes only an unpublished
+   matching draft whose tag still resolves to the validated SHA. An existing tag
+   with no draft is rejected; investigate it manually rather than risking reuse
+   of a tag name reserved by a deleted immutable release.
+7. If a published immutable release is deleted, do **not** attempt to recreate it
+   under the same tag. GitHub permanently reserves tag names previously used by
+   immutable releases. Publish a corrected new version, then update any runtime
+   pins after that new release is qualified.
 8. For LSP releases, download each published asset and sidecar, verify checksum,
    provenance and target-specific redistribution notices, and run
    `cargo xtask test-zed-hosted` on each available supported host. Also run
    `gh attestation verify <asset> --repo chiploom/zed-wit` against downloaded
-   bytes. For regenerated LSP releases, also require predicate type
-   `https://github.com/chiploom/zed-wit/attestations/release-regeneration/v1`
-   and verify that its `artifact_source.tag` and `artifact_source.revision`
-   match the protected release tag. For extension releases, verify the tagged
-   source installs as a development extension and resolves the already-published
-   pinned LSP. The adapter itself verifies SHA-256, not attestations.
+   bytes. For extension releases, verify the tagged source installs as a
+   development extension and resolves the already-published pinned LSP. The
+   adapter itself verifies SHA-256, not attestations.
 
 Checksums and executable bytes come from the same GitHub origin. They detect
 corruption and asset mismatch, not a compromised publishing account. Immutable

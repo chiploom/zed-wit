@@ -24,12 +24,11 @@ to publish when the notes file for the selected scope/version is missing or
 empty. The workflow prepends the canonical scope notice to the GitHub Release
 body, so release-note files should not invent a different scope label.
 
-## Regeneration
+## Deleted immutable releases
 
-Deleted LSP GitHub Releases may be restored only while the original successful
-publication run's `release-*` artifacts remain available. CD validates that
-source run against the protected tag SHA and restores the original artifact
-bytes. It does not rebuild LSP binaries for an existing release tag.
+GitHub permanently reserves a tag name after an immutable release using that tag
+has been published, even if the release is later deleted. A deleted immutable
+release therefore cannot be recreated under the same tag.
 
-If those Actions artifacts have expired, create a new version rather than
-publishing newly built bytes under the old tag.
+Publish a new corrected version instead. For example, the deleted immutable
+`v0.1.0` release is recovered through `v0.1.1`, not by reusing `v0.1.0`.

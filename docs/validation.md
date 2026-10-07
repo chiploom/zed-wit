@@ -7,6 +7,11 @@ claim Zed registry publication.
 
 ## v0.1.0 LSP-only publication — 2026-10-07
 
+> Historical evidence: the immutable `v0.1.0` GitHub Release was later deleted.
+> Its protected tag remains, but GitHub permanently reserves tag names previously
+> used by immutable releases, so the release cannot be recreated under
+> `v0.1.0`. Distribution recovery proceeds with `v0.1.1`.
+
 The first immutable GitHub release, `v0.1.0`, published only the native WIT
 language server and its release metadata. It did not publish the Zed extension
 or modify the Zed extension registry. The release was published from
