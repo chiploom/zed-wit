@@ -30,6 +30,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -187,6 +188,13 @@ jobs:
           source_sha=$(jq -r '.head_sha' <<<"$run_json")
           if [ "$source_sha" != "$RELEASE_SHA" ]; then
             echo "::error::Source run $SOURCE_RUN_ID used $source_sha instead of release source $RELEASE_SHA"
+            exit 1
+          fi
+
+          jobs_json=$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100")
+          publish_successes=$(jq '[.jobs[] | select(.name == "Publish GitHub release" and .conclusion == "success")] | length' <<<"$jobs_json")
+          if [ "$publish_successes" -ne 1 ]; then
+            echo "::error::Source run $SOURCE_RUN_ID is not a successful publication run"
             exit 1
           fi
 
@@ -408,6 +416,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
       id-token: write
       attestations: write
@@ -508,6 +517,7 @@ jobs:
     timeout-minutes: 15
     environment: release
     permissions:
+      actions: read
       contents: write
     steps:
       - name: Checkout release control metadata
