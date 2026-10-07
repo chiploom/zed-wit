@@ -36,44 +36,53 @@ itself a cryptographic attestation.
 
 ## Release gate
 
-1. Verify the active default-branch and `v*` tag rulesets and the GitHub
-   `release` environment before release. The release-tag ruleset must prevent
-   updates and deletion of existing `v*` tags while still allowing the release
-   process to create a new tag. Verify the environment's reviewer, self-review,
-   and deployment-branch restrictions as applicable, and keep private
-   vulnerability reporting enabled.
-2. Complete CI on the intended commit, including all five native targets and the
-   adapter Wasm check. Complete and retain the [manual matrix](manual-testing.md).
-   Run `cargo xtask check-dependencies` and audit the locked dependency licenses.
-   CI generates and validates the target-specific redistribution notices for every
-   native build; do not publish a native binary without its matching notice bundle.
-3. Ensure `Cargo.toml`, the native server manifest, `extension.toml`, and the
-   adapter's pinned release version agree. Update changelog and compatibility
-   notes. Retain `Cargo.lock`; do not resolve new dependencies during release.
-4. Create the immutable stable `vX.Y.Z` tag at that default-branch commit. Dispatch
-   **Release native server** from the default branch with that tag. The workflow
-   rejects other dispatch branches, mismatched versions and tags pointing to a
-   different commit. Prerelease/build-metadata tags are intentionally excluded.
-5. Review the build jobs and approve the protected environment. The publisher
-   checks the complete binary/checksum/provenance/redistribution-notice set,
-   generates GitHub artifact attestations, checks the tag still resolves to the
-   validated commit, and creates the release. It never overwrites existing release
-   assets.
-6. Download each published asset and sidecar, verify checksum, provenance and the
-   target-specific redistribution notice, and
-   exercise fresh-install and cache behavior in Zed before announcing support.
-   For example, run `gh attestation verify <asset> --repo chiploom/zed-wit` against
-   the downloaded bytes. The adapter itself verifies SHA-256, not attestations.
+The CD workflow is dispatched from the protected default branch with a new stable
+`vX.Y.Z` tag name. The tag must match the adapter, extension, and native-server
+version; it does not exist before the workflow begins.
+
+Set the workflow's `publish` input to `false` for a release-candidate dry run.
+A dry run executes repository policy, formatting, clippy/check/doctests, the Wasm
+adapter build, native tests on all five release targets, packaging, redistribution
+notice generation, and complete artifact-set verification without creating a tag
+or GitHub Release.
+
+For publication:
+
+1. Verify the active default-branch and `v*` tag rulesets, the protected GitHub
+   `release` environment, and private vulnerability reporting. Existing `v*`
+   tags must be non-updatable and non-deletable; creation must remain available
+   to the CD job.
+2. Complete normal CI and the applicable [manual matrix](manual-testing.md) on the
+   intended release commit. Audit locked dependency licenses and retain
+   `Cargo.lock`.
+3. Ensure `Cargo.toml`, the native server manifest, `extension.toml`, the
+   adapter release version, changelog, and compatibility notes agree.
+4. Dispatch **CD** from the default branch with the new `vX.Y.Z` tag and
+   `publish=false`. Require the validation, five native builds, and combined
+   artifact verification to pass.
+5. Dispatch **CD** again on the same default-branch commit with the same tag and
+   `publish=true`. The protected publish job re-runs the full gate, generates
+   artifact attestations, creates a draft release targeted at the validated
+   commit, verifies the resulting tag resolves to that exact commit, uploads the
+   complete asset set, then publishes the draft.
+6. If publication is interrupted after the draft/tag is created, rerun the same
+   workflow from the same commit with `publish=true`. CD accepts only a draft
+   release whose protected tag still resolves to the validated SHA and resumes
+   asset upload; it never moves or deletes the tag.
+7. Download each published asset and sidecar, verify checksum, provenance and the
+   target-specific redistribution notice, and exercise fresh-install and cached
+   behavior in Zed. For example, run
+   `gh attestation verify <asset> --repo chiploom/zed-wit` against downloaded
+   bytes. The adapter itself verifies SHA-256, not attestations.
 
 Checksums and executable bytes come from the same GitHub origin. They detect
 corruption and asset mismatch, not a compromised publishing account. Immutable
-action pins, restricted publishing permission, approvals and provenance reduce
-separate supply-chain risks. Consult GitHub's
-[artifact attestation documentation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
+action pins, restricted publishing permission, protected tags, environment
+approval, and provenance reduce separate supply-chain risks.
 
-A failed run is not a release. Fix the cause and rerun the full relevant matrix;
-do not publish a subset of platforms. Never silently replace assets under a tag.
-For a bad published release, document the issue and publish a corrected version;
+A failed dry run is not a release. Fix the cause and rerun the complete workflow.
+A published release is immutable by policy: do not replace its tag or assets.
+For a bad published release, document the problem and publish a corrected version;
 update the adapter pin and perform fresh-download verification again.
 
 ## Zed registry succession
