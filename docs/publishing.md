@@ -88,9 +88,10 @@ The workflow's `operation` input controls lifecycle behavior:
 - `publish` qualifies and publishes a new tag/release. It may also resume an
   interrupted draft when the existing tag still resolves to the validated
   release commit.
-- `regenerate` requires an **existing protected tag** and recreates a missing
-  GitHub Release from that tag's original source commit. It never creates,
-  updates, or deletes the tag.
+- `regenerate` requires an **existing protected tag** and, for LSP releases,
+  the original successful publication run ID. It restores the exact original
+  unexpired release artifact bundles rather than rebuilding binaries. It never
+  creates, updates, or deletes the tag.
 
 All operations execute repository policy, formatting, clippy/check/doctests, and
 release identity validation. The `lsp` scope runs native tests on all five
@@ -130,14 +131,22 @@ For publication:
    the validated SHA, then resumes without moving or deleting the tag.
 7. If a published GitHub Release is later deleted while its protected tag
    remains, dispatch CD from current protected `main` with the original scope
-   and tag plus `operation=regenerate`. CD resolves and validates the existing
-   tag commit, rebuilds the release from that source, uses the current scoped
-   release notes, recreates the draft, verifies its scope-specific asset set, and
-   republishes it without changing the tag. Because the workflow itself runs from
-   current protected `main`, regenerated LSP artifacts use a signed custom
-   regeneration attestation that explicitly records the protected source tag and
-   source revision instead of claiming normal SLSA provenance from the control
-   commit.
+   and tag plus `operation=regenerate`. For an LSP release, also provide the
+   original successful publication run ID. CD requires that run to be a
+   successful `workflow_dispatch` execution of the CD workflow at the exact
+   protected tag SHA, requires its **Publish GitHub release** job to have
+   succeeded, and requires the exact five unexpired `release-*` artifact
+   bundles. It then restores those exact original bytes, uses license files from
+   the protected tag source, applies the current scoped release notes, recreates
+   the draft, verifies its asset set, and republishes it without changing the
+   tag. Regenerated LSP artifacts receive a signed custom regeneration
+   attestation recording the protected source tag/revision and original CD run
+   instead of claiming normal SLSA provenance from the current control commit.
+
+   If the original Actions artifacts have expired, do **not** rebuild and
+   republish different binaries under the same tag. Publish a corrected new
+   version instead. New CD release artifacts are retained for 90 days to extend
+   the byte-preserving recovery window.
 8. For LSP releases, download each published asset and sidecar, verify checksum,
    provenance and target-specific redistribution notices, and run
    `cargo xtask test-zed-hosted` on each available supported host. Also run
