@@ -57,18 +57,19 @@ For publication:
    `Cargo.lock`.
 3. Ensure `Cargo.toml`, the native server manifest, `extension.toml`, the
    adapter release version, changelog, and compatibility notes agree.
-4. Dispatch **CD** from the default branch with the new `vX.Y.Z` tag and
-   `publish=false`. Require the validation, five native builds, and combined
-   artifact verification to pass.
-5. Dispatch **CD** again on the same default-branch commit with the same tag and
-   `publish=true`. The protected publish job re-runs the full gate, generates
+4. Optionally dispatch **CD** from the default branch with the new `vX.Y.Z`
+   tag and `publish=false` as a release-candidate dry run. Require the
+   validation, five native builds, and combined artifact verification to pass.
+5. Dispatch **CD** from the intended release commit with the same tag and
+   `publish=true`. The protected publish job runs the full gate again, generates
    artifact attestations, creates a draft release targeted at the validated
    commit, verifies the resulting tag resolves to that exact commit, uploads the
-   complete asset set, then publishes the draft.
-6. If publication is interrupted after the draft/tag is created, rerun the same
-   workflow from the same commit with `publish=true`. CD accepts only a draft
-   release whose protected tag still resolves to the validated SHA and resumes
-   asset upload; it never moves or deletes the tag.
+   complete asset set, then publishes the draft. If `main` advanced after an
+   earlier dry run, this publication run is the authoritative qualification.
+6. If publication is interrupted after the draft/tag is created, rerun CD from
+   the same validated commit with `publish=true`. CD accepts only a draft release
+   whose protected tag still resolves to the validated SHA and resumes asset
+   upload; it never moves or deletes the tag.
 7. Download each published asset and sidecar, verify checksum, provenance and the
    target-specific redistribution notice, and exercise fresh-install and cached
    behavior in Zed. For example, run
