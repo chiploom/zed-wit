@@ -6,6 +6,29 @@ existing Zed registry entry. Repository rulesets, immutable releases, and
 release-environment protections remain part of the release contract for every
 subsequent version.
 
+## Release scopes
+
+CD requires one explicit scope for every immutable GitHub release:
+
+| Scope | Represents | Native LSP assets | Zed registry publication |
+| --- | --- | --- | --- |
+| `lsp` | Native WIT language server only | Yes | No |
+| `extension` | Zed extension source at the tag | No | No |
+| `full` | Zed extension source plus native LSP | Yes | No |
+
+The `extension` scope verifies that the extension builds for
+`wasm32-wasip2`; GitHub's source archive is the release payload. It does not
+create or update the Zed registry entry. The `full` scope uses the same source
+tag while also publishing the native LSP asset set.
+
+Scopes do not create independent version streams. Adapter, extension, and native
+server versions remain aligned, and a protected immutable `vX.Y.Z` tag can
+represent exactly one scope.
+
+The existing `v0.1.0` release is an **LSP-only** release. Its attached assets
+are the native language server and its metadata; it is not a published Zed
+extension.
+
 ## Native assets
 
 The adapter expects the raw executable at
@@ -37,15 +60,17 @@ itself a cryptographic attestation.
 
 ## Release gate
 
-The CD workflow is dispatched from the protected default branch with a new stable
-`vX.Y.Z` tag name. The tag must match the adapter, extension, and native-server
-version; it does not exist before the workflow begins.
+The CD workflow is dispatched from the protected default branch with an explicit
+`lsp`, `extension`, or `full` scope and a new stable `vX.Y.Z` tag name.
+The tag must match the aligned adapter, extension, and native-server version; it
+does not exist before the workflow begins.
 
 Set the workflow's `publish` input to `false` for a release-candidate dry run.
-A dry run executes repository policy, formatting, clippy/check/doctests, the Wasm
-adapter build, native tests on all five release targets, packaging, redistribution
-notice generation, and complete artifact-set verification without creating a tag
-or GitHub Release.
+All scopes execute repository policy, formatting, clippy/check/doctests, and
+release identity validation. `extension` and `full` build the Zed extension
+for `wasm32-wasip2`. `lsp` and `full` run native tests on all five release
+targets, package the LSP assets and notices, and verify the complete LSP artifact
+set. A dry run creates neither a tag nor a GitHub Release.
 
 For publication:
 
@@ -59,11 +84,11 @@ For publication:
    `Cargo.lock`.
 3. Ensure `Cargo.toml`, the native server manifest, `extension.toml`, the
    adapter release version, changelog, compatibility notes, and the nonempty
-   `docs/releases/vX.Y.Z.md` user-facing release notes agree. CD refuses a
-   release candidate without the matching release-notes file.
-4. Optionally dispatch **CD** from the default branch with the new `vX.Y.Z`
-   tag and `publish=false` as a release-candidate dry run. Require the
-   validation, five native builds, and combined artifact verification to pass.
+   `docs/releases/<scope>/vX.Y.Z.md` user-facing release notes agree. CD
+   refuses a release candidate without the notes file for the selected scope.
+4. Optionally dispatch **CD** from the default branch with the intended scope,
+   new `vX.Y.Z` tag, and `publish=false` as a release-candidate dry run.
+   Require every job applicable to that scope to pass.
 5. Dispatch **CD** from the intended release commit with the same tag and
    `publish=true`. The protected publish job runs the full gate again, generates
    artifact attestations, explicitly creates the protected lightweight tag at the
