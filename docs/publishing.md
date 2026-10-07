@@ -16,15 +16,23 @@ CD supports two independent release streams:
 | `extension` | `v-extension-X.Y.Z` | `extension.toml` + adapter crate | Tagged extension source; no native LSP binaries attached | No |
 
 The adapter and `extension.toml` versions remain aligned with each other, but
-the native language-server version is independent. The adapter embeds the server
-version from `crates/wit-language-server/Cargo.toml` at build time and downloads
-that server from the corresponding `vX.Y.Z` LSP release.
+the native language-server version is independent. The extension's runtime LSP is
+an explicit pin at
+`package.metadata.zed-wit.runtime-lsp-version` in the root `Cargo.toml`.
+The adapter embeds that pin at build time and downloads the corresponding
+`vX.Y.Z` LSP release.
 
-An `extension` release therefore does not duplicate LSP binaries. Before CD can
-publish it, the referenced LSP release must already be published, non-prerelease,
-immutable, and contain every supported server binary plus checksum. This makes an
-extension release independently versionable without allowing it to point at a
-missing runtime.
+Changing `crates/wit-language-server/Cargo.toml` therefore does **not** change
+the extension's runtime dependency. Publish and qualify the new LSP release
+first. Then update the runtime pin in a separate extension change, test the
+hosted install path, and release the extension when appropriate. This ordering
+prevents protected `main` from ever pointing the extension at an unpublished
+LSP version.
+
+An `extension` release does not duplicate LSP binaries. Before CD can publish
+it, the explicitly pinned LSP release must already be published,
+non-prerelease, immutable, and contain every supported server binary plus
+checksum.
 
 Both tag formats begin with `v`, so the existing protected `v*` tag ruleset
 covers both streams. GitHub extension releases still do not publish or replace
@@ -37,10 +45,10 @@ extension.
 ## Native assets
 
 The adapter expects each server executable at
-`https://github.com/chiploom/zed-wit/releases/download/v<SERVER_VERSION>/<asset>`
-and its `<asset>.sha256` sidecar. Bumping the native server version requires a
-matching LSP release before any extension release that references it. Extension
-version bumps do not require a new LSP release when the pinned server version is
+`https://github.com/chiploom/zed-wit/releases/download/v<RUNTIME_LSP_VERSION>/<asset>`
+and its `<asset>.sha256` sidecar. The runtime version comes from the explicit
+root-manifest pin, not from the native server crate's current package version.
+Extension version bumps do not require a new LSP release when the pin is
 unchanged. Archives are not interchangeable with these raw downloads.
 
 | Platform | Target | Asset |
@@ -72,13 +80,21 @@ The CD workflow is dispatched from the protected default branch with either
 `v-extension-X.Y.Z`. The selected tag must match the version source for that
 scope and must not already identify a published release.
 
-Set the workflow's `publish` input to `false` for a release-candidate dry run.
-Both scopes execute repository policy, formatting, clippy/check/doctests, and
+The workflow's `operation` input controls lifecycle behavior:
+
+- `validate` performs a dry run for a **new** tag and creates nothing.
+- `publish` qualifies and publishes a new tag/release. It may also resume an
+  interrupted draft when the existing tag still resolves to the validated
+  release commit.
+- `regenerate` requires an **existing protected tag** and recreates a missing
+  GitHub Release from that tag's original source commit. It never creates,
+  updates, or deletes the tag.
+
+All operations execute repository policy, formatting, clippy/check/doctests, and
 release identity validation. The `lsp` scope runs native tests on all five
 release targets, packages the server assets/notices, and verifies the complete
 LSP artifact set. The `extension` scope verifies the referenced immutable LSP
-dependency and builds the Zed extension for `wasm32-wasip2`. A dry run creates
-neither a tag nor a GitHub Release.
+dependency and builds the Zed extension for `wasm32-wasip2`.
 
 For publication:
 
@@ -96,20 +112,26 @@ For publication:
    intentional; CD independently verifies that the referenced LSP release exists
    and is immutable.
 4. Optionally dispatch **CD** from the default branch with the intended scope,
-   its matching tag format, and `publish=false` as a release-candidate dry run.
-   Require every job applicable to that scope to pass.
+   its matching tag format, and `operation=validate` as a release-candidate dry
+   run. Require every job applicable to that scope to pass.
 5. Dispatch **CD** from the intended release commit with the same scope/tag and
-   `publish=true`. The protected publish job reruns the applicable gate,
+   `operation=publish`. The protected publish job reruns the applicable gate,
    explicitly creates the protected lightweight tag at the validated SHA,
    verifies that binding, creates a scoped draft release, then publishes it.
    LSP releases additionally attest and upload the verified native asset set;
    extension releases publish source only. If `main` advanced after an earlier
    dry run, this publication run is the authoritative qualification.
 6. If publication is interrupted after tag creation, rerun CD from the same
-   validated commit with `publish=true`. CD accepts an exact tag with no release
-   or an unpublished draft release only when the tag still resolves to the
-   validated SHA, then resumes publication without moving or deleting the tag.
-7. For LSP releases, download each published asset and sidecar, verify checksum,
+   validated commit with `operation=publish`. CD accepts an exact tag with no
+   release or an unpublished matching draft only when the tag still resolves to
+   the validated SHA, then resumes without moving or deleting the tag.
+7. If a published GitHub Release is later deleted while its protected tag
+   remains, dispatch CD from current protected `main` with the original scope
+   and tag plus `operation=regenerate`. CD resolves and validates the existing
+   tag commit, rebuilds the release from that source, uses the current scoped
+   release notes, recreates the draft, verifies its scope-specific asset set, and
+   republishes it without changing the tag.
+8. For LSP releases, download each published asset and sidecar, verify checksum,
    provenance and target-specific redistribution notices, and run
    `cargo xtask test-zed-hosted` on each available supported host. Also run
    `gh attestation verify <asset> --repo chiploom/zed-wit` against downloaded
