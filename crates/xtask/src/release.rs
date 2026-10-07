@@ -12,24 +12,6 @@ enum ReleaseScope {
     Extension,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ReleaseValidationMode {
-    New,
-    Regenerate,
-}
-
-impl ReleaseValidationMode {
-    fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "new" => Ok(Self::New),
-            "regenerate" => Ok(Self::Regenerate),
-            _ => Err(format!(
-                "unsupported release validation mode {value:?}; expected new or regenerate"
-            )),
-        }
-    }
-}
-
 impl ReleaseScope {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
@@ -135,24 +117,6 @@ fn runtime_lsp_version_from(manifest: &toml::Value) -> Result<String, String> {
 pub(crate) fn runtime_lsp_version() -> Result<String, String> {
     let root = util::repo_root();
     runtime_lsp_version_from(&read_toml(&root.join("Cargo.toml"))?)
-}
-
-fn read_toml_at(root: &Path, revision: &str, path: &str) -> Result<toml::Value, String> {
-    let spec = format!("{revision}:{path}");
-    let output = Command::new("git")
-        .args(["show", &spec])
-        .current_dir(root)
-        .output()
-        .map_err(|error| format!("run git show {spec}: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "git show {spec} failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let source = String::from_utf8(output.stdout)
-        .map_err(|error| format!("git show {spec} returned non-UTF-8 data: {error}"))?;
-    toml::from_str(&source).map_err(|error| format!("parse {spec}: {error}"))
 }
 
 fn stable_version(version: &str) -> Option<&str> {
@@ -314,58 +278,34 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String> {
+pub fn validate_release(tag: &str, scope: &str) -> Result<(), String> {
     let root = util::repo_root();
     let scope = ReleaseScope::parse(scope)?;
-    let mode = ReleaseValidationMode::parse(mode)?;
 
     // Validate the user-provided ref syntax before passing it to any Git command.
     tag_version_for_scope(scope, tag)?;
 
-    let control_head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
+    let source_sha = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     if !util::command_output("git", ["status", "--porcelain"], &root)?.is_empty() {
-        return Err("release control checkout must be clean".into());
+        return Err("release candidate checkout must be clean".into());
     }
     if env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
         let github_sha = env::var("GITHUB_SHA")
             .map_err(|_| "GITHUB_ACTIONS is true but GITHUB_SHA is missing")?;
-        if github_sha != control_head {
-            return Err("GITHUB_SHA does not match the release control checkout".into());
+        if github_sha != source_sha {
+            return Err("GITHUB_SHA does not match the validated release commit".into());
         }
     }
 
-    let source_sha = match mode {
-        ReleaseValidationMode::New => control_head.clone(),
-        ReleaseValidationMode::Regenerate => {
-            util::command_output("git", ["rev-parse", &format!("{tag}^{{commit}}")], &root)?
-        }
-    };
-
     let (version, server_tag, runtime_lsp_version) = match scope {
         ReleaseScope::Lsp => {
-            let server_version = match mode {
-                ReleaseValidationMode::New => server_version()?,
-                ReleaseValidationMode::Regenerate => server_version_from(&read_toml_at(
-                    &root,
-                    &source_sha,
-                    "crates/wit-language-server/Cargo.toml",
-                )?)?,
-            };
+            let server_version = server_version()?;
             let version = release_version_for_scope(scope, tag, &server_version)?.to_owned();
             (version, format!("v{server_version}"), None)
         }
         ReleaseScope::Extension => {
-            let (extension_version, runtime_lsp_version) = match mode {
-                ReleaseValidationMode::New => (extension_version()?, runtime_lsp_version()?),
-                ReleaseValidationMode::Regenerate => {
-                    let adapter_manifest = read_toml_at(&root, &source_sha, "Cargo.toml")?;
-                    let extension_manifest = read_toml_at(&root, &source_sha, "extension.toml")?;
-                    (
-                        extension_version_from(&adapter_manifest, &extension_manifest)?,
-                        runtime_lsp_version_from(&adapter_manifest)?,
-                    )
-                }
-            };
+            let extension_version = extension_version()?;
+            let runtime_lsp_version = runtime_lsp_version()?;
             let version = release_version_for_scope(scope, tag, &extension_version)?.to_owned();
             (
                 version,
@@ -385,12 +325,8 @@ pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String
             .map_err(|error| format!("open GITHUB_OUTPUT {output_path}: {error}"))?;
         writeln!(
             output,
-            "sha={source_sha}\ntag={tag}\nscope={}\nversion={version}\ntitle={title}\nnotes={notes}\nserver_tag={server_tag}\nmode={}",
-            scope.as_str(),
-            match mode {
-                ReleaseValidationMode::New => "new",
-                ReleaseValidationMode::Regenerate => "regenerate",
-            }
+            "sha={source_sha}\ntag={tag}\nscope={}\nversion={version}\ntitle={title}\nnotes={notes}\nserver_tag={server_tag}",
+            scope.as_str()
         )
         .map_err(|error| format!("write GITHUB_OUTPUT {output_path}: {error}"))?;
     } else if env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
@@ -408,10 +344,6 @@ pub fn validate_release(tag: &str, scope: &str, mode: &str) -> Result<(), String
             "server_tag": server_tag,
             "runtime_lsp_version": runtime_lsp_version,
             "sha": source_sha,
-            "mode": match mode {
-                ReleaseValidationMode::New => "new",
-                ReleaseValidationMode::Regenerate => "regenerate",
-            },
             "result": "passed",
         }))
         .map_err(|error| format!("serialize release validation: {error}"))?
@@ -605,25 +537,6 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
     verify_release_assets_against(input, &root, expected_workflow_run.as_deref())
 }
 
-pub fn verify_restored_release_assets(
-    input: &Path,
-    source_root: &Path,
-    source_run_id: &str,
-) -> Result<(), String> {
-    if source_run_id.is_empty() || !source_run_id.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err("source run ID must contain only decimal digits".into());
-    }
-    let revision = git_revision(source_root)?
-        .ok_or_else(|| format!("{} is not a Git checkout", source_root.display()))?;
-    if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!(
-            "{} has invalid Git revision {revision:?}",
-            source_root.display()
-        ));
-    }
-    verify_release_assets_against(input, source_root, Some(source_run_id))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -664,19 +577,6 @@ runtime-lsp-version = "0.7.3-rc.1"
         )
         .unwrap();
         assert!(runtime_lsp_version_from(&invalid).is_err());
-    }
-
-    #[test]
-    fn release_validation_modes_are_explicit() {
-        assert_eq!(
-            ReleaseValidationMode::parse("new").unwrap(),
-            ReleaseValidationMode::New
-        );
-        assert_eq!(
-            ReleaseValidationMode::parse("regenerate").unwrap(),
-            ReleaseValidationMode::Regenerate
-        );
-        assert!(ReleaseValidationMode::parse("restore").is_err());
     }
 
     #[test]
