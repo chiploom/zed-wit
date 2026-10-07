@@ -194,7 +194,7 @@ Usage:
   cargo xtask validate-release --tag <vX.Y.Z>
   cargo xtask verify-release-assets [--input <dir>]
   cargo xtask check-no-python
-  cargo xtask test-zed [--zed <binary>] [--profile <dir>] [--timeout-seconds <5-180>]
-  cargo xtask test-zed-gui [--zed <binary>] [--profile <dir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] [--linux-input-backend <auto|x11|wayland|libei>] --allow-input-injection true"
+  cargo xtask test-zed [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>]
+  cargo xtask test-zed-gui [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] [--linux-input-backend <auto|x11|wayland|libei>] --allow-input-injection true"
     );
 }

@@ -4,7 +4,7 @@ use std::{
     collections::BTreeSet,
     env,
     fs::{self, File},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
     time::{Duration, Instant},
@@ -33,6 +33,7 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     }
 
     let root = util::repo_root();
+    validate_disposable_profile(&root, profile)?;
     let head = util::command_output("git", ["rev-parse", "HEAD"], &root)?;
     let zed_path = resolve_executable(zed)?;
     let zed_version = output_path(&zed_path, &["--version"], &root)?;
@@ -244,6 +245,73 @@ pub fn run(zed: &str, profile: &Path, timeout: Duration) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn validate_disposable_profile(root: &Path, profile: &Path) -> Result<(), String> {
+    fn normalize_without_parent(path: &Path) -> Result<PathBuf, String> {
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    return Err(format!(
+                        "Zed qualification profile must not contain '..': {}",
+                        path.display()
+                    ));
+                }
+                other => normalized.push(other.as_os_str()),
+            }
+        }
+        Ok(normalized)
+    }
+
+    let root = normalize_without_parent(root)?;
+    let target = root.join("target");
+    let profile_path = if profile.is_absolute() {
+        profile.to_path_buf()
+    } else {
+        root.join(profile)
+    };
+    let profile = normalize_without_parent(&profile_path)?;
+
+    let relative = profile.strip_prefix(&target).map_err(|_| {
+        format!(
+            "Zed qualification profile must be a disposable subdirectory of {}; got {}",
+            target.display(),
+            profile.display()
+        )
+    })?;
+    if relative.as_os_str().is_empty() {
+        return Err(format!(
+            "Zed qualification profile must be below {}, not the target directory itself",
+            target.display()
+        ));
+    }
+
+    if target.exists() {
+        let canonical_target = fs::canonicalize(&target)
+            .map_err(|error| format!("canonicalize {}: {error}", target.display()))?;
+        let mut existing = profile.as_path();
+        while !existing.exists() {
+            existing = existing.parent().ok_or_else(|| {
+                format!(
+                    "cannot locate an existing ancestor for Zed qualification profile {}",
+                    profile.display()
+                )
+            })?;
+        }
+        let canonical_existing = fs::canonicalize(existing)
+            .map_err(|error| format!("canonicalize {}: {error}", existing.display()))?;
+        if !canonical_existing.starts_with(&canonical_target) {
+            return Err(format!(
+                "Zed qualification profile resolves outside {}; got {}",
+                canonical_target.display(),
+                profile.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) struct Staged {
     pub(crate) extension_dir: PathBuf,
     pub(crate) workspace_dir: PathBuf,
@@ -277,6 +345,7 @@ pub(crate) fn write_isolated_settings(
 }
 
 pub(crate) fn stage(root: &Path, profile: &Path, server: &Path) -> Result<Staged, String> {
+    validate_disposable_profile(root, profile)?;
     if profile.exists() {
         log(format!(
             "resetting existing smoke profile: {}",
@@ -1125,6 +1194,65 @@ mod tests {
         assert_eq!(settings["snippet_sort_order"], json!("top"));
 
         fs::remove_dir_all(profile).unwrap();
+    }
+
+    #[test]
+    fn qualification_profile_is_confined_to_target() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "zed-wit-profile-guard-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("target")).unwrap();
+
+        assert!(
+            validate_disposable_profile(&root, &root.join("target/zed-smoke/profile")).is_ok()
+        );
+        for profile in [
+            root.clone(),
+            root.join("target"),
+            root.join("outside"),
+            root.join("target/../outside"),
+        ] {
+            assert!(
+                validate_disposable_profile(&root, &profile).is_err(),
+                "{}",
+                profile.display()
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn qualification_profile_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "zed-wit-profile-symlink-{}-{nonce}",
+            std::process::id()
+        ));
+        let outside = root.join("outside");
+        fs::create_dir_all(root.join("target")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("target/escape")).unwrap();
+
+        assert!(
+            validate_disposable_profile(&root, &root.join("target/escape/profile")).is_err()
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

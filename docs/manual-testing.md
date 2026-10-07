@@ -47,7 +47,8 @@ explicit binary selection, restart lifecycle and integration failures, while the
 exact editor mutations and semantic requests are asserted through the native LSP
 protocol suite. Hosted-release scenarios remain explicit `not-run` entries until
 matching release assets exist. Override the executable/profile/timeout with `--zed`, `--profile` and
-`--timeout-seconds` when needed.
+`--timeout-seconds` when needed. Custom profiles must be disposable subdirectories
+of the repository `target/` tree because the harness resets them recursively.
 
 The real-editor smoke supports macOS, Linux and Windows. Grammar compilation
 uses `WASI_SDK_PATH` first, then Zed's normal extension-build wasi-sdk cache.
