@@ -412,10 +412,8 @@ fn verify_pr_version_transition(
         return Err("release PR provenance has invalid commit identifiers or count".into());
     }
     let current = manifest_version(root, scope)?;
-    let reviewed_head = version_in_manifest(
-        &remote_file_at(root, pr_head_sha, scope.manifest())?,
-        false,
-    )?;
+    let reviewed_head =
+        version_in_manifest(&remote_file_at(root, pr_head_sha, scope.manifest())?, false)?;
     let merged = git_manifest_version(root, merge_sha, scope, false)?;
     // Merge and squash commits introduce the entire PR diff at the immediate
     // first parent; a rebase merge introduces N sequential PR commits.
@@ -426,17 +424,13 @@ fn verify_pr_version_transition(
     }
     ensure_release_transition(previous, reviewed_head, merged, current)?;
     if scope == Scope::Extension {
-        let checked_head = version_in_manifest(
-            &remote_file_at(root, pr_head_sha, "extension.toml")?,
-            true,
-        )?;
+        let checked_head =
+            version_in_manifest(&remote_file_at(root, pr_head_sha, "extension.toml")?, true)?;
         let merged_extension = git_manifest_version(root, merge_sha, scope, true)?;
         let prior_extension =
             historical_predecessor_version(root, scope, merge_sha, pr_commits, true, candidate)?;
-        let current_extension = version_in_manifest(
-            &util::read_nonempty(&root.join("extension.toml"))?,
-            true,
-        )?;
+        let current_extension =
+            version_in_manifest(&util::read_nonempty(&root.join("extension.toml"))?, true)?;
         ensure_release_transition(
             prior_extension,
             checked_head,
@@ -1880,12 +1874,7 @@ mod tests {
         let commit = git(&["rev-parse", "HEAD"], &root).unwrap();
         // Prevent any globally configured tag signing from opening pinentry
         // or contacting an external signing service during this fixture.
-        command(
-            "git",
-            &["-c", "tag.gpgSign=false", "tag", "v0.1.3"],
-            &root,
-        )
-        .unwrap();
+        command("git", &["-c", "tag.gpgSign=false", "tag", "v0.1.3"], &root).unwrap();
         command(
             "git",
             &[
