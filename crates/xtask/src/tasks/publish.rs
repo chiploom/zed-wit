@@ -519,8 +519,15 @@ fn validate_candidate(
     }
     Ok(())
 }
+fn ensure_main_branch(root: &Path) -> Result<(), String> {
+    if current_branch(root)? != "main" {
+        return Err("publish planning requires a checked-out main branch; switch to main before preparing".into());
+    }
+    Ok(())
+}
 fn plan(root: &Path, scope: Scope, bump: Bump, remote: bool) -> Result<Plan, String> {
     if remote {
+        ensure_main_branch(root)?;
         check_release_preconditions(root)?;
     }
     let current = manifest_version(root, scope)?;
@@ -1344,6 +1351,39 @@ mod tests {
         ] {
             assert!(!origin_is_expected(invalid));
         }
+    }
+
+    #[test]
+    fn planning_rejects_disposable_feature_branch_at_the_same_main_commit() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let path = std::env::temp_dir().join(format!(
+                "zed-wit-publish-main-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("create disposable Git repo: {error}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove disposable Git repo");
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        git(&["init", "-q", "-b", "main"], &root).unwrap();
+        command("git", &["-c", "user.name=Fixture", "-c",
+            "user.email=fixture@example.invalid", "commit", "--allow-empty",
+            "-qm", "initial"], &root).unwrap();
+        let main_sha = git(&["rev-parse", "HEAD"], &root).unwrap();
+        ensure_main_branch(&root).unwrap();
+        git(&["switch", "-q", "-c", "fixture-feature"], &root).unwrap();
+        assert_eq!(git(&["rev-parse", "HEAD"], &root).unwrap(), main_sha);
+        assert!(ensure_main_branch(&root).is_err());
     }
 
     #[test]
