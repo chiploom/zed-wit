@@ -322,7 +322,6 @@ fn test_all(args: &[String]) -> Result<(), String> {
     cargo(&["test", "--doc", "--workspace", "--exclude", "xtask", "--locked"])?;
     build(&["--kind".into(), "extension".into()])?;
     if with_zed {
-        dev(&[])?;
         crate::zed_smoke::run(
             "zed",
             &util::repo_root().join("target/zed-smoke/profile"),
