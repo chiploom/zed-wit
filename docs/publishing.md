@@ -102,6 +102,18 @@ The only authorized path to a new publication is:
    attestation, immutable GitHub Releases and the five-target native artifact
    contract; no local xtask action may bypass it.
 
+For PR submission, effective Git push URLs (including `pushurl` and rewrite
+rules) must identify only the canonical repository. A new branch is pushed
+with an explicit expected-absent-ref lease, not a plain fast-forward push.
+The remote ref and GitHub PR head are verified against the validated commit.
+
+For publication requests, the checkout's exclusive Git lock prevents
+simultaneous local resume calls, while CD's protected serialization and
+last-moment draft/tag check prevent duplicate release promotion. No
+distributed exactly-once dispatch claim is made for separate hosts or
+temporary API inconsistency. Inspect existing Actions runs before retrying
+ambiguous dispatch outcomes.
+
 A successful dispatch means **requested**, not published. Missing/ambiguous
 GitHub history, an existing non-draft tag, duplicate active CD runs, denied
 permissions, or a reserved immutable tag requires human inspection rather than
