@@ -19,7 +19,7 @@ To add a command: implement it in its domain module, register **one dispatch arm
 
 Local xtasks **never** create tags, publish GitHub Releases, submit registry updates, or change an upstream grammar pin. Publication remains exclusively in the protected CD workflow.
 
-Native binary lookup and local release packaging follow Cargo's `CARGO_TARGET_DIR` override (absolute or repository-relative) when present; otherwise they use the default `target/` directory. The committed Zed settings example remains configured for the default build directory, so `cargo xtask dev` rejects a custom target directory rather than pointing Zed to the wrong executable.
+Native binary lookup and local release packaging read the effective output directory from `cargo metadata --format-version 1 --no-deps --locked`. This respects `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, and Cargo's layered `[build] target-dir` configuration, including relative and absolute paths. The committed Zed settings example requires `target/release/wit-language-server[.exe]`: `dev` checks the actual compiler artifact path and fails if an implicit `build.target` or custom target directory moves the executable. It does not modify Zed settings.
 
 ## Development and validation
 
@@ -32,7 +32,7 @@ Native binary lookup and local release packaging follow Cargo's `CARGO_TARGET_DI
 | `test-lsp` | Test syntax, analysis and language-server packages. |
 | `test-extension` | Test extension and syntax packages, build `wasm32-wasip2` adapter. |
 | `build` | Build `--kind server` (default) or `--kind extension`. Supports `--release true` and server `--target <triple>`. |
-| `dev` | Build optimized native server and validate committed local Zed settings example. Does not write user settings. |
+| `dev` | Build optimized native server, verify Cargo's actual executable path matches the committed Zed settings example, and leave user settings untouched. |
 | `doctor` | Inspect Rust/Cargo/rustup/Git and wasm target; report optional nextest, llvm-cov, and Zed tools separately. |
 
 `test --filter` uses Cargo substring syntax. Do not pair it with `--runner nextest`, which requires different filter expressions. A default test pass does **not** qualify hosted distribution or cross-platform Zed runtime behavior.
@@ -63,7 +63,7 @@ Single-target local verification does not replace the existing five-target relea
 
 | Command | Behavior |
 | --- | --- |
-| `install-dev --destination <binary-path>` | Copies the already-built native release server into an explicit **new** path; refuses overwrite. |
+| `install-dev --destination <binary-path> [--target <release-target>]` | Build/update the optimized native server for the selected target (default: host), then copy from the **target-specific** release directory into a **new** destination. Refuses overwrite. This is compatible with `release-build`; it does not install the untargeted binary built by `dev`. |
 | `clean --scope <dist|profiles|coverage|build|all>` | Preview by default; `--execute true` deletes only allowed generated outputs. `build`/`all` use Cargo clean. Symlinked target paths are rejected. |
 | `bench [--iterations N]` | Run a real optimized Tree-sitter WIT parse microbenchmark with 100 warmups and N timed iterations (default 2,000). |
 | `coverage [--output target/coverage/name.lcov]` | Generate LCOV data with optional installed `cargo-llvm-cov`. Output must be a file directly under `target/coverage`. |
@@ -79,7 +79,7 @@ cargo xtask clean --scope profiles --execute true
 cargo xtask clean --scope build --execute true
 ```
 
-For `clean --scope build|all`, xtask refuses a non-default `CARGO_TARGET_DIR` to avoid deleting build data outside the repository's allowlisted `target/`. When intentionally cleaning a custom Cargo target directory, run `cargo clean --locked` yourself after checking the configured path.
+For `clean --scope build|all`, xtask asks Cargo to resolve its effective target directory, refuses any non-default location (including `CARGO_BUILD_TARGET_DIR` and configured `build.target-dir`), then passes `--target-dir <repository>/target` explicitly to `cargo clean` to prevent redirection. When intentionally cleaning a custom Cargo target directory, run `cargo clean --locked` yourself after checking the configured path.
 
 On Windows, running `cargo clean` from the active `xtask.exe` would attempt to remove that locked executable. For `--scope build` or `--scope all`, invoke `cargo clean --locked` directly instead. The xtask command rejects destructive execution of those scopes on Windows.
 
