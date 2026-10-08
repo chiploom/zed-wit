@@ -580,6 +580,14 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     {
         return Err("release preparation PR is not merged on main for this exact tag".into());
     }
+    let changed = gh(&[
+        "api", "--paginate", "--jq", ".[].filename",
+        &format!("repos/{REPO}/pulls/{pr}/files?per_page=100"),
+    ], root)?;
+    validate_changed_files(&changed, scope, version)?;
+    if changed.trim().is_empty() {
+        return Err("merged release-preparation PR has no reported files".into());
+    }
     let merge_sha = info["merge_commit_sha"].as_str()
         .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
         .ok_or("merged preparation PR omitted merge commit SHA")?;
