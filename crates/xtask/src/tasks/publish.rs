@@ -1081,6 +1081,50 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
     Ok(())
 }
 
+fn protected_dispatch_args(scope: Scope, tag: &str, main_sha: &str) -> Vec<String> {
+    vec![
+        "api".into(),
+        "-X".into(),
+        "POST".into(),
+        "-H".into(),
+        "X-GitHub-Api-Version: 2026-03-10".into(),
+        format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/dispatches"),
+        "-F".into(),
+        "return_run_details=true".into(),
+        "-f".into(),
+        "ref=main".into(),
+        "-f".into(),
+        format!("inputs[expected_sha]={main_sha}"),
+        "-f".into(),
+        "inputs[operation]=publish".into(),
+        "-f".into(),
+        format!("inputs[scope]={}", scope.name()),
+        "-f".into(),
+        format!("inputs[tag]={tag}"),
+    ]
+}
+fn verify_merged_preparation_pr(
+    info: &Value, scope: Scope, version: Version,
+) -> Result<(String, String, u64), String> {
+    let branch = format!("release-prep/{}-{}", scope.name(), scope.tag(version));
+    if info["merged"].as_bool() != Some(true)
+        || info["base"]["ref"].as_str() != Some("main")
+        || info["head"]["ref"].as_str() != Some(branch.as_str())
+        || info["head"]["repo"]["full_name"].as_str() != Some(REPO)
+    {
+        return Err("release preparation PR is not merged on main for this exact tag".into());
+    }
+    let merge_sha = info["merge_commit_sha"].as_str()
+        .filter(|sha| valid_sha(sha))
+        .ok_or("merged preparation PR omitted valid merge commit SHA")?;
+    let head_sha = info["head"]["sha"].as_str()
+        .filter(|sha| valid_sha(sha))
+        .ok_or("release PR omitted valid reviewed head SHA")?;
+    let commits = info["commits"].as_u64()
+        .filter(|count| (1..=250).contains(count))
+        .ok_or("release PR omitted a valid commit count")?;
+    Ok((merge_sha.to_owned(), head_sha.to_owned(), commits))
+}
 fn parse_dispatch_identity(response: &str) -> Result<(u64, String), String> {
     let result: Value = serde_json::from_str(response).map_err(|_| {
         "CD dispatch returned no usable run identity; inspect Actions before retrying".to_owned()
@@ -1284,13 +1328,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     let info: Value =
         serde_json::from_str(&gh(&["api", &format!("repos/{REPO}/pulls/{pr}")], root)?)
             .map_err(|e| format!("parse preparation PR: {e}"))?;
-    if info["merged"].as_bool() != Some(true)
-        || info["base"]["ref"].as_str() != Some("main")
-        || info["head"]["ref"].as_str() != Some(branch.as_str())
-        || info["head"]["repo"]["full_name"].as_str() != Some(REPO)
-    {
-        return Err("release preparation PR is not merged on main for this exact tag".into());
-    }
+
     let reviewed_files = gh(
         &[
             "api",
@@ -1310,21 +1348,13 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         ));
     }
     let reviewed_predecessor = reviewed_pr_file_versions(&reviewed_files, scope, version)?;
-    let merge_sha = info["merge_commit_sha"]
-        .as_str()
-        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        .ok_or("merged preparation PR omitted merge commit SHA")?;
-    git(&["merge-base", "--is-ancestor", merge_sha, &main_sha], root)
+    let (merge_sha, head_sha, pr_commits) = 
+        verify_merged_preparation_pr(&info, scope, version)?;
+    git(&["merge-base", "--is-ancestor", &merge_sha, &main_sha], root)
         .map_err(|_| "merged preparation commit is not in current main".to_owned())?;
-    let head_sha = info["head"]["sha"]
-        .as_str()
-        .filter(|sha| valid_sha(sha))
-        .ok_or("release PR is missing immutable reviewed head SHA")?;
-    let pr_commits = info["commits"]
-        .as_u64()
-        .ok_or("release PR is missing commit count")?;
+
     verify_pr_version_transition(
-        root, scope, version, reviewed_predecessor, merge_sha, head_sha, pr_commits,
+        root, scope, version, reviewed_predecessor, &merge_sha, &head_sha, pr_commits,
     )?;
 
     let known = release_tag_history(root)?;
@@ -1396,29 +1426,9 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
 
     // GitHub's 2026 workflow_dispatch response gives the exact run ID.
     // Never fall back to scanning the latest run after an ambiguous dispatch.
-    let response = gh(
-        &[
-            "api",
-            "-X",
-            "POST",
-            "-H",
-            "X-GitHub-Api-Version: 2026-03-10",
-            &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/dispatches"),
-            "-F",
-            "return_run_details=true",
-            "-f",
-            "ref=main",
-            "-f",
-            &format!("inputs[expected_sha]={main_sha}"),
-            "-f",
-            "inputs[operation]=publish",
-            "-f",
-            &format!("inputs[scope]={}", scope.name()),
-            "-f",
-            &format!("inputs[tag]={tag}"),
-        ],
-        root,
-    )
+    let dispatch = protected_dispatch_args(scope, &tag, &main_sha);
+    let dispatch_refs = dispatch.iter().map(String::as_str).collect::<Vec<_>>();
+    let response = gh(&dispatch_refs, root)
     .map_err(|_| {
         "CD dispatch may have been accepted; check GitHub Actions before retrying".to_owned()
     })?;
@@ -2256,6 +2266,52 @@ mod tests {
         ] {
             assert!(verify_published_release(&invalid, tag).is_err());
         }
+    }
+
+    #[test]
+    fn mocked_pr_state_rejects_wrong_merged_identity() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let version = Version::parse("0.1.3").unwrap();
+        let mut pr = serde_json::json!({
+            "merged": true,
+            "base": {"ref": "main"},
+            "head": {"ref": "release-prep/lsp-v0.1.3",
+                     "sha": sha,
+                     "repo": {"full_name": "chiploom/zed-wit"}},
+            "merge_commit_sha": sha,
+            "commits": 2,
+            "changed_files": 4,
+        });
+        assert_eq!(
+            verify_merged_preparation_pr(&pr, Scope::Lsp, version).unwrap().2,
+            2
+        );
+        pr["merged"] = false.into();
+        assert!(verify_merged_preparation_pr(&pr, Scope::Lsp, version).is_err());
+        pr["merged"] = true.into();
+        pr["base"]["ref"] = "wrong".into();
+        assert!(verify_merged_preparation_pr(&pr, Scope::Lsp, version).is_err());
+        pr["base"]["ref"] = "main".into();
+        pr["head"]["repo"]["full_name"] = "someone-else/zed-wit".into();
+        assert!(verify_merged_preparation_pr(&pr, Scope::Lsp, version).is_err());
+        pr["head"]["repo"]["full_name"] = REPO.into();
+        pr["commits"] = 0.into();
+        assert!(verify_merged_preparation_pr(&pr, Scope::Lsp, version).is_err());
+    }
+
+    #[test]
+    fn protected_dispatch_serializes_api_version_and_exact_release_inputs() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let args = protected_dispatch_args(Scope::Lsp, "v0.1.3", sha);
+        assert_eq!(args[0..3], ["api", "-X", "POST"]);
+        assert!(args.iter().any(|arg| arg == "return_run_details=true"));
+        assert!(args.iter().any(|arg| arg == "X-GitHub-Api-Version: 2026-03-10"));
+        assert!(args.iter().any(|arg| arg == &format!("inputs[expected_sha]={sha}")));
+        assert!(args.iter().any(|arg| arg == "inputs[operation]=publish"));
+        assert!(args.iter().any(|arg| arg == "inputs[scope]=lsp"));
+        assert!(args.iter().any(|arg| arg == "inputs[tag]=v0.1.3"));
+        assert!(args.iter().any(|arg| arg == "ref=main"));
+        assert!(!args.iter().any(|arg| arg.starts_with("Authorization:")));
     }
 
     #[test]
