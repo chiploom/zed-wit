@@ -990,6 +990,27 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
     if delta.is_empty() {
         return Err("release preparation branch has no changes".into());
     }
+    for (file, extension_file) in [
+        (scope.manifest(), false),
+        ("extension.toml", true),
+    ] {
+        if extension_file && scope != Scope::Extension {
+            continue;
+        }
+        let patch = git(&[
+            "diff", "--no-ext-diff", "--unified=0", &remote_sha, "HEAD",
+            "--", file,
+        ], root)?;
+        let patched_predecessor = changed_manifest_version_from_patch(&patch, version)?;
+        let actual_predecessor = git_manifest_version(
+            root, &remote_sha, scope, extension_file,
+        )?;
+        if patched_predecessor != actual_predecessor {
+            return Err(format!(
+                "release manifest version diff does not match remote main: {file}"
+            ));
+        }
+    }
     notes_reviewed(root, scope, version)?;
     command(
         "cargo",
