@@ -764,6 +764,54 @@ fn parse_dispatch_identity(response: &str) -> Result<(u64, String), String> {
     Ok((id, url.to_owned()))
 }
 
+fn validate_prior_cd_runs(
+    runs: &str,
+    main_sha: &str,
+    scope: Scope,
+    tag: &str,
+    matching_draft: bool,
+) -> Result<(), String> {
+    let candidate_validate = format!("CD / validate / {} / {tag}", scope.name());
+    let candidate_publish = format!("CD / publish / {} / {tag}", scope.name());
+    for row in runs.lines() {
+        let columns = row.split('\t').collect::<Vec<_>>();
+        if columns.len() != 4 {
+            return Err("CD run history is ambiguous; inspect it manually".into());
+        }
+        let [sha, event, status, title] =
+            <[&str; 4]>::try_from(columns.as_slice()).expect("validated column count");
+        if sha != main_sha || event != "workflow_dispatch" {
+            continue;
+        }
+        // A queued or running release is never safe to overlap, even across
+        // scopes: the protected CD workflow serializes all release operations.
+        if status != "completed" {
+            return Err("another CD workflow dispatch is active on this commit".into());
+        }
+        // The fixed run-name is introduced with this xtask frontend. Older
+        // history with unknown inputs cannot be classified; fail closed.
+        if title == candidate_validate {
+            continue;
+        }
+        if title == candidate_publish {
+            if matching_draft {
+                continue;
+            }
+            return Err("previous publication attempt exists without a matching draft".into());
+        }
+        let known_other_release = title
+            .strip_prefix("CD / validate / ")
+            .or_else(|| title.strip_prefix("CD / publish / "))
+            .is_some_and(|suffix| {
+                suffix.starts_with("lsp / v") || suffix.starts_with("extension / v-extension-")
+            });
+        if !known_other_release {
+            return Err("CD workflow history does not identify prior release intent".into());
+        }
+    }
+    Ok(())
+}
+
 fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> {
     check_release_preconditions(root)?;
     let main_sha = confirm_remote_main(root)?;
@@ -861,26 +909,12 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
             "api",
             "--paginate",
             "--jq",
-            ".workflow_runs[] | [.head_sha, .event, .status] | @tsv",
+            ".workflow_runs[] | [.head_sha, .event, .status, .display_title] | @tsv",
             &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100"),
         ],
         root,
     )?;
-    for row in runs.lines() {
-        let fields = row.split('\t').collect::<Vec<_>>();
-        if fields.len() != 3 {
-            return Err("CD run history is ambiguous; inspect it manually".into());
-        }
-        if fields[0] == main_sha
-            && fields[1] == "workflow_dispatch"
-            && (!matching_draft || fields[2] != "completed")
-        {
-            return Err(
-                "possible duplicate or active CD workflow for this SHA; inspect before retrying"
-                    .into(),
-            );
-        }
-    }
+    validate_prior_cd_runs(&runs, &main_sha, scope, &tag, matching_draft)?;
 
     // GitHub's 2026 workflow_dispatch response gives the exact run ID.
     // Never fall back to scanning the latest run after an ambiguous dispatch.
@@ -894,6 +928,8 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
             "return_run_details=true",
             "-f",
             "ref=main",
+            "-f",
+            &format!("inputs[expected_sha]={main_sha}"),
             "-f",
             "inputs[operation]=publish",
             "-f",
@@ -1134,6 +1170,24 @@ mod tests {
             validate_changed_files("crates/wit-language-server/src/main.rs", Scope::Lsp, v)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn cd_run_history_distinguishes_validation_publish_and_other_scope() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let tag = "v0.1.3";
+        let other = format!("{sha}\tworkflow_dispatch\tcompleted\tCD / publish / extension / v-extension-0.1.1");
+        let validated = format!("{sha}\tworkflow_dispatch\tcompleted\tCD / validate / lsp / {tag}");
+        let published = format!("{sha}\tworkflow_dispatch\tcompleted\tCD / publish / lsp / {tag}");
+        let queued = format!("{sha}\tworkflow_dispatch\tqueued\tCD / validate / lsp / {tag}");
+        let legacy = format!("{sha}\tworkflow_dispatch\tcompleted\tCD");
+        assert!(validate_prior_cd_runs(&validated, sha, Scope::Lsp, tag, false).is_ok());
+        assert!(validate_prior_cd_runs(&other, sha, Scope::Lsp, tag, false).is_ok());
+        assert!(validate_prior_cd_runs(&published, sha, Scope::Lsp, tag, false).is_err());
+        assert!(validate_prior_cd_runs(&published, sha, Scope::Lsp, tag, true).is_ok());
+        assert!(validate_prior_cd_runs(&queued, sha, Scope::Lsp, tag, true).is_err());
+        assert!(validate_prior_cd_runs(&legacy, sha, Scope::Lsp, tag, true).is_err());
+        assert!(validate_prior_cd_runs("malformed", sha, Scope::Lsp, tag, false).is_err());
     }
 
     #[test]
