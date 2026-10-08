@@ -88,20 +88,20 @@ pub(crate) fn safe_generated_path(root: &Path, relative: &str) -> Result<PathBuf
     }
     if relative.starts_with("target/") {
         let target = root.join("target");
-        if let Ok(meta) = fs::symlink_metadata(&target) {
-            if meta.file_type().is_symlink() {
-                return Err("refusing cleanup through a symlinked target directory".into());
-            }
+        if let Ok(meta) = fs::symlink_metadata(&target)
+            && meta.file_type().is_symlink()
+        {
+            return Err("refusing cleanup through a symlinked target directory".into());
         }
     }
     let path = root.join(relative);
-    if let Ok(meta) = fs::symlink_metadata(&path) {
-        if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err(format!(
-                "refusing cleanup of non-directory or symlink: {}",
-                path.display()
-            ));
-        }
+    if let Ok(meta) = fs::symlink_metadata(&path)
+        && (meta.file_type().is_symlink() || !meta.is_dir())
+    {
+        return Err(format!(
+            "refusing cleanup of non-directory or symlink: {}",
+            path.display()
+        ));
     }
     Ok(path)
 }
