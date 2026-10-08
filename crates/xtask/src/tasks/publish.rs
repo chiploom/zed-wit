@@ -892,6 +892,39 @@ fn parse_dispatch_identity(response: &str) -> Result<(u64, String), String> {
     Ok((id, url.to_owned()))
 }
 
+fn parse_remote_tag_commit(rows: &str, tag: &str) -> Result<String, String> {
+    let exact = format!("refs/tags/{tag}");
+    let peeled = format!("{exact}^{{}}");
+    let mut direct = None;
+    let mut commit = None;
+    for line in rows.lines() {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if fields.len() != 2 || !valid_sha(fields[0]) {
+            return Err("tag lookup returned an invalid object reference".into());
+        }
+        match fields[1] {
+            reference if reference == exact => {
+                if direct.replace(fields[0]).is_some() {
+                    return Err("duplicate tag object reference".into());
+                }
+            }
+            reference if reference == peeled => {
+                if commit.replace(fields[0]).is_some() {
+                    return Err("duplicate peeled tag reference".into());
+                }
+            }
+            _ => return Err("tag lookup returned an unrelated reference".into()),
+        }
+    }
+    if direct.is_none() {
+        return Err("resumable draft lacks the expected Git tag".into());
+    }
+    // A lightweight tag has only a direct ref; annotated tags also have a
+    // peeled ^{} entry. As in CD, the commit (not the annotated tag object)
+    // is the relevant release identity.
+    Ok(commit.or(direct).expect("direct tag reference validated").to_owned())
+}
+
 fn validate_prior_cd_runs(
     runs: &str,
     main_sha: &str,
@@ -1009,14 +1042,14 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
             ));
         }
         let remote_tag = git(
-            &["ls-remote", "--tags", "origin", &format!("refs/tags/{tag}")],
+            &[
+                "ls-remote", "--tags", "origin",
+                &format!("refs/tags/{tag}"),
+                &format!("refs/tags/{tag}^{{}}"),
+            ],
             root,
         )?;
-        let tagged_sha = remote_tag
-            .split_whitespace()
-            .next()
-            .filter(|sha| sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or("resumable draft lacks a verifiable existing Git tag")?;
+        let tagged_sha = parse_remote_tag_commit(&remote_tag, &tag)?;
         if tagged_sha != main_sha {
             return Err(
                 "resumable draft Git tag does not match the exact validated main SHA".into(),
@@ -1332,6 +1365,19 @@ mod tests {
             validate_changed_files("crates/wit-language-server/src/main.rs", Scope::Lsp, v)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn lightweight_and_annotated_tags_resolve_to_commit_not_tag_object() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        let tag_object = "ffffffffffffffffffffffffffffffffffffffff";
+        let lightweight = format!("{commit}\trefs/tags/v0.1.3");
+        let annotated = format!("{tag_object}\trefs/tags/v0.1.3\n{commit}\trefs/tags/v0.1.3^{{}}");
+        assert_eq!(parse_remote_tag_commit(&lightweight, "v0.1.3").unwrap(), commit);
+        assert_eq!(parse_remote_tag_commit(&annotated, "v0.1.3").unwrap(), commit);
+        assert!(parse_remote_tag_commit("", "v0.1.3").is_err());
+        assert!(parse_remote_tag_commit(&format!("{commit}\trefs/tags/other"), "v0.1.3").is_err());
+        assert!(parse_remote_tag_commit(&format!("{annotated}\n{commit}\trefs/tags/v0.1.3^{{}}"), "v0.1.3").is_err());
     }
 
     #[test]
