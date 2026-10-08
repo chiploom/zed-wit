@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 publish = false
+autobenches = false # Only explicitly listed custom benchmarks are targets.
 
 [dependencies]
 tree-sitter = "=0.26.11"
@@ -12,3 +13,7 @@ tree-sitter-wit = { git = "https://github.com/bytecodealliance/tree-sitter-wit",
 [dev-dependencies]
 serde_json = "1"
 toml = "0.9"
+
+[[bench]]
+name = "parse"
+harness = false
