@@ -3,6 +3,7 @@ pub(crate) mod build;
 pub(crate) mod common;
 pub(crate) mod maintenance;
 pub(crate) mod performance;
+pub(crate) mod publish;
 pub(crate) mod release_ops;
 pub(crate) mod validation;
 
