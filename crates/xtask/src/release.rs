@@ -537,6 +537,53 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
     verify_release_assets_against(input, &root, expected_workflow_run.as_deref())
 }
 
+/// Verify a locally prepared single-target release bundle. This is not a
+/// substitute for the five-target verification and attestations in protected CD.
+pub fn verify_release_target(target: &str, input: &Path) -> Result<(), String> {
+    crate::dependency_policy::ensure_target(target)?;
+    let root = util::repo_root();
+    let name = asset_name(target);
+    let asset = input.join(&name);
+    ensure_regular_nonempty(&asset)?;
+    if fs::metadata(&asset)
+        .map_err(|error| format!("stat {}: {error}", asset.display()))?
+        .len() > MAX_BINARY_BYTES
+    {
+        return Err(format!("{} exceeds the release binary size limit", asset.display()));
+    }
+    let digest = util::sha256_file(&asset)?;
+    let sidecar = input.join(format!("{name}.sha256"));
+    ensure_regular_nonempty(&sidecar)?;
+    let actual_checksum = fs::read_to_string(&sidecar)
+        .map_err(|error| format!("read {}: {error}", sidecar.display()))?;
+    if actual_checksum != format!("{digest}  {name}\n") {
+        return Err(format!("invalid checksum: {name}"));
+    }
+    let lock_digest = util::sha256_file(&root.join("Cargo.lock"))?;
+    let version = server_version()?;
+    let revision = git_revision(&root)?;
+    let workflow_run = env::var("GITHUB_RUN_ID").ok();
+    verify_provenance(
+        &input.join(format!("{name}.provenance.json")),
+        &name,
+        target,
+        &digest,
+        &ProvenanceExpectation {
+            version: &version,
+            lock_digest: &lock_digest,
+            revision: revision.as_deref(),
+            workflow_run: workflow_run.as_deref(),
+        },
+    )?;
+    verify_license_notices(
+        &input.join(format!("{name}.licenses.txt")),
+        target,
+        &lock_digest,
+    )?;
+    println!("verified local release bundle for {target}");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
