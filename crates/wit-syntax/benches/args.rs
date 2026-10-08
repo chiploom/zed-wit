@@ -23,7 +23,11 @@ pub(crate) fn parse_iterations(args: &[String]) -> Result<usize, String> {
         ["--iterations", count] => count
             .parse::<usize>()
             .map_err(|error| format!("invalid --iterations {count:?}: {error}; {USAGE}"))?,
-        _ => return Err(format!("unexpected benchmark arguments: {options:?}; {USAGE}")),
+        _ => {
+            return Err(format!(
+                "unexpected benchmark arguments: {options:?}; {USAGE}"
+            ));
+        }
     };
 
     if !(10..=1_000_000).contains(&iterations) {
@@ -51,7 +55,10 @@ mod tests {
         assert_eq!(parse(&["--bench", "--iterations", "123"]).unwrap(), 123);
         assert_eq!(parse(&["--iterations", "456", "--bench"]).unwrap(), 456);
         assert_eq!(parse(&["--iterations", "10", "--bench"]).unwrap(), 10);
-        assert_eq!(parse(&["--bench", "--iterations", "1000000"]).unwrap(), 1_000_000);
+        assert_eq!(
+            parse(&["--bench", "--iterations", "1000000"]).unwrap(),
+            1_000_000
+        );
     }
 
     #[test]
