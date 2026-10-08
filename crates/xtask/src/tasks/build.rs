@@ -161,6 +161,13 @@ pub(crate) fn install_dev(args: &[String]) -> Result<(), String> {
     };
     dependency_policy::ensure_target(&target)?;
     finish(options)?;
+    // Fail before invoking Cargo when the requested install path is occupied.
+    // The final create_new operation remains the authoritative race guard.
+    match std::fs::symlink_metadata(&destination) {
+        Ok(_) => return Err(format!("destination already exists: {}", destination.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("stat {}: {error}", destination.display())),
+    }
     // Rebuild to avoid copying a stale binary, always using Cargo's explicit
     // target-specific layout. This matches release-build on every host.
     release_build(&["--target".into(), target.clone()])?;
