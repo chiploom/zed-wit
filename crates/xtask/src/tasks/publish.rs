@@ -595,10 +595,30 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         .map_err(|_| "merged preparation commit is not in current main".to_owned())?;
 
     let known = release_tag_history(root)?;
+    let mut matching_draft = false;
     if known.contains(&tag) {
-        // Even an existing draft requires operator inspection; never dispatch
-        // into ambiguous immutable/deleted tag state automatically.
-        return Err(format!("tag {tag} already exists; inspect draft/tag history and protected CD manually"));
+        // The protected CD workflow can resume only an unpublished draft bound
+        // to the exact validated release revision. A tag with no draft, or a
+        // published release, is never eligible for local retries.
+        let releases = gh(&[
+            "api", "--paginate", "--jq",
+            &format!(".[] | select(.tag_name == \\"{tag}\\") | [.draft, .tag_name] | @tsv"),
+            &format!("repos/{REPO}/releases?per_page=100"),
+        ], root)?;
+        let draft_rows = releases.lines().collect::<Vec<_>>();
+        if draft_rows.len() != 1 || draft_rows[0] != format!("true\\t{tag}") {
+            return Err(format!("tag {tag} has no unambiguous unpublished draft; manual review required"));
+        }
+        let remote_tag = git(&[
+            "ls-remote", "--tags", "origin", &format!("refs/tags/{tag}"),
+        ], root)?;
+        let tagged_sha = remote_tag.split_whitespace().next()
+            .filter(|sha| sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()))
+            .ok_or("resumable draft lacks a verifiable existing Git tag")?;
+        if tagged_sha != main_sha {
+            return Err("resumable draft Git tag does not match the exact validated main SHA".into());
+        }
+        matching_draft = true;
     }
     // Require the configured workflow to be enabled; do not create an alternate.
     let workflow: Value = serde_json::from_str(&gh(
@@ -610,14 +630,21 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
 
     // Conservatively refuse an uncorrelatable repeated dispatch from the same
     // protected source commit. The user must inspect previous runs manually.
-    let runs: Value = serde_json::from_str(&gh(
-        &["api", &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100")], root
-    )?).map_err(|e| format!("parse existing CD workflow runs: {e}"))?;
-    if !runs["workflow_runs"].as_array().is_some_and(|rows| rows.iter().all(|run| {
-        run["head_sha"].as_str() != Some(main_sha.as_str())
-            || run["event"].as_str() != Some("workflow_dispatch")
-    })) {
-        return Err("a prior CD workflow dispatch exists for this main SHA or run history is ambiguous; inspect before any retry".into());
+    let runs = gh(&[
+        "api", "--paginate", "--jq",
+        ".workflow_runs[] | [.head_sha, .event, .status] | @tsv",
+        &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100"),
+    ], root)?;
+    for row in runs.lines() {
+        let fields = row.split('\\t').collect::<Vec<_>>();
+        if fields.len() != 3 {
+            return Err("CD run history is ambiguous; inspect it manually".into());
+        }
+        if fields[0] == main_sha && fields[1] == "workflow_dispatch"
+            && (!matching_draft || fields[2] != "completed")
+        {
+            return Err("possible duplicate or active CD workflow for this SHA; inspect before retrying".into());
+        }
     }
 
     // GitHub's 2026 workflow_dispatch response gives the exact run ID.
