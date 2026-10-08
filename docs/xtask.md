@@ -2,6 +2,21 @@
 
 Run `cargo xtask <command>` from the workspace. Commands use the pinned Rust toolchain, `Cargo.lock`, and repository-root path resolution. See `cargo xtask help` or `cargo xtask <command> --help`.
 
+## Code organization
+
+- `crates/xtask/src/main.rs`: entry point, error reporting and exit codes only.
+- `crates/xtask/src/cli.rs`: the **single routing match** and complete help registry for all existing and new commands.
+- `crates/xtask/src/tasks/build.rs`: builds, local development setup and binary installation.
+- `crates/xtask/src/tasks/validation.rs`: test orchestration, compilation checks and quality gates.
+- `crates/xtask/src/tasks/release_ops.rs`: local release candidate checks and preparation, **not publication**.
+- `crates/xtask/src/tasks/maintenance.rs`: toolchain diagnostics, scoped cleanup and read-only grammar-pin audits.
+- `crates/xtask/src/tasks/performance.rs`: WIT parser benchmarks and optional coverage.
+- `crates/xtask/src/tasks/common.rs`: shared process, target and safe-copy utilities.
+- `crates/xtask/src/tasks/mod.rs`: module wiring and regression tests.
+- Existing `release.rs`, `licenses.rs`, `dependency_policy.rs`, `repository_policy.rs` and `zed_*.rs` retain their specialized implementations.
+
+To add a command: implement it in its domain module, register **one dispatch arm and one help entry** in `cli.rs`, and add argument and failure-path tests. Avoid adding a parallel dispatcher. See separate issue #24 for a future version-aware publish workflow.
+
 Local xtasks **never** create tags, publish GitHub Releases, submit registry updates, or change an upstream grammar pin. Publication remains exclusively in the protected CD workflow.
 
 ## Development and validation
