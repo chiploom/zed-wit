@@ -21,7 +21,7 @@ pub fn dispatch(command: &str, args: &[String]) -> Result<(), String> {
             "unknown xtask command {command:?}; run cargo xtask help"
         ));
     }
-    if args == ["--help"] || args == ["-h"] {
+    if matches!(args, [flag] if flag == "--help" || flag == "-h") {
         show_help(command);
         return Ok(());
     }
@@ -127,14 +127,6 @@ fn cargo(args: &[&str]) -> Result<(), String> {
     run("cargo", &args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>())
 }
 
-fn git(args: &[&str]) -> Result<(), String> {
-    cargo_noop()?;
-    run("git", &args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>())
-}
-
-// Keep this inexpensive helper as a separated policy boundary for local process execution.
-fn cargo_noop() -> Result<(), String> { Ok(()) }
-
 fn tool_available(program: &str, args: &[&str]) -> bool {
     Command::new(program)
         .args(args)
@@ -160,7 +152,11 @@ fn native_binary(target: Option<&str>, release_profile: bool) -> PathBuf {
         binary.push(target);
     }
     binary.push(if release_profile { "release" } else { "debug" });
-    binary.push(if cfg!(windows) { "wit-language-server.exe" } else { "wit-language-server" });
+    binary.push(if target.is_some_and(|value| value.contains("windows")) || (target.is_none() && cfg!(windows)) {
+        "wit-language-server.exe"
+    } else {
+        "wit-language-server"
+    });
     binary
 }
 
@@ -562,11 +558,12 @@ fn coverage(args: &[String]) -> Result<(), String> {
     let value = options.remove("output").unwrap_or_else(|| "target/coverage/lcov.info".into());
     finish(options)?;
     let rel = Path::new(&value);
-    let components = rel.components().collect::<Vec<_>>();
-    if rel.is_absolute() || components.iter().any(|c| matches!(c, std::path::Component::ParentDir))
-        || !value.starts_with("target/coverage/") || value == "target/coverage/"
+    let suffix = rel.strip_prefix("target/coverage")
+        .map_err(|_| "coverage output must be beneath target/coverage/".to_owned())?;
+    if suffix.components().count() != 1
+        || !matches!(suffix.components().next(), Some(std::path::Component::Normal(_)))
     {
-        return Err("coverage output must be a file beneath target/coverage/".into());
+        return Err("coverage output must be one filename beneath target/coverage/".into());
     }
     if !tool_available("cargo", &["llvm-cov", "--version"]) {
         return Err("cargo-llvm-cov is required; install with cargo install cargo-llvm-cov --locked".into());
