@@ -2,6 +2,7 @@ mod dependency_policy;
 mod licenses;
 mod release;
 mod repository_policy;
+mod tasks;
 mod util;
 mod zed_gui;
 mod zed_hosted;
@@ -203,9 +204,7 @@ fn run() -> Result<(), String> {
             util::ensure_empty_options(options)?;
             zed_hosted::run(&zed, &profile, Duration::from_secs(timeout))
         }
-        other => Err(format!(
-            "unknown xtask command {other:?}; run `cargo xtask help`"
-        )),
+        other => tasks::dispatch(other, rest),
     }
 }
 
@@ -224,4 +223,5 @@ Usage:
   cargo xtask test-zed-hosted [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <10-300>]
   cargo xtask test-zed-gui [--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] [--linux-input-backend <auto|x11|wayland|libei>] --allow-input-injection true"
     );
+    tasks::help();
 }
