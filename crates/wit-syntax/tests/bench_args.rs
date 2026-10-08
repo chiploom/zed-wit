@@ -1,7 +1,7 @@
 //! Exercise the benchmark argument parser in ordinary workspace tests.
 //! Cargo compiles the custom benchmark target with test cfg, but it has
 //! harness = false and cannot execute #[test] functions itself.
-#[path = "../benches/args.rs"]
+#[path = "../benches/parse/args.rs"]
 mod args;
 
 fn parse(input: &[&str]) -> Result<usize, String> {
