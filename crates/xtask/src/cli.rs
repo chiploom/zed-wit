@@ -52,7 +52,10 @@ pub(crate) const COMMAND_HELP: &[(&str, &str)] = &[
     ),
     ("test-lsp", ""),
     ("test-extension", ""),
-    ("install-dev", "--destination <binary-path> [--target <release-target>]"),
+    (
+        "install-dev",
+        "--destination <binary-path> [--target <release-target>]",
+    ),
     ("bench", "[--iterations <positive-integer>]"),
     ("coverage", "[--output <path-under-target>]"),
     ("changelog-check", "[--scope <lsp|extension> --tag <tag>]"),

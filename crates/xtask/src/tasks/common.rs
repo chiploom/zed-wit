@@ -80,7 +80,10 @@ pub(crate) fn host_target() -> Result<String, String> {
     Ok(host.to_owned())
 }
 
-pub(crate) fn native_binary(target: Option<&str>, release_profile: bool) -> Result<PathBuf, String> {
+pub(crate) fn native_binary(
+    target: Option<&str>,
+    release_profile: bool,
+) -> Result<PathBuf, String> {
     let mut binary = util::cargo_target_dir()?;
     if let Some(target) = target {
         binary.push(target);

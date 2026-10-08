@@ -256,15 +256,13 @@ fn copy_release_binary_new(source: &Path, artifact: &Path) -> Result<(), String>
 pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let root = util::repo_root();
     let name = asset_name(target);
-    let source =
-        util::cargo_target_dir()?
-            .join(target)
-            .join("release")
-            .join(if target.contains("windows") {
-                "wit-language-server.exe"
-            } else {
-                "wit-language-server"
-            });
+    let source = util::cargo_target_dir()?.join(target).join("release").join(
+        if target.contains("windows") {
+            "wit-language-server.exe"
+        } else {
+            "wit-language-server"
+        },
+    );
     ensure_regular_nonempty(&source)?;
     let metadata =
         fs::metadata(&source).map_err(|error| format!("stat {}: {error}", source.display()))?;

@@ -174,7 +174,10 @@ pub(crate) fn clean(args: &[String]) -> Result<(), String> {
             })?;
             cargo(&["clean", "--locked", "--target-dir", target])?;
         } else {
-            println!("dry-run: cargo clean --locked --target-dir {}", default_target.display());
+            println!(
+                "dry-run: cargo clean --locked --target-dir {}",
+                default_target.display()
+            );
         }
     }
     if !execute {

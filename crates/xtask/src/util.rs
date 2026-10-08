@@ -38,8 +38,8 @@ pub fn cargo_target_dir() -> Result<PathBuf, String> {
 }
 
 fn cargo_target_dir_from_metadata(metadata: &str) -> Result<PathBuf, String> {
-    let value: serde_json::Value = serde_json::from_str(metadata)
-        .map_err(|error| format!("parse Cargo metadata: {error}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(metadata).map_err(|error| format!("parse Cargo metadata: {error}"))?;
     let directory = value
         .get("target_directory")
         .and_then(serde_json::Value::as_str)
@@ -183,9 +183,7 @@ mod tests {
             absolute
         );
         assert!(cargo_target_dir_from_metadata("{}").is_err());
-        assert!(
-            cargo_target_dir_from_metadata(r#"{"target_directory":"relative"}"#).is_err()
-        );
+        assert!(cargo_target_dir_from_metadata(r#"{"target_directory":"relative"}"#).is_err());
     }
 
     #[test]
@@ -225,11 +223,17 @@ mod tests {
 
         let inspect = |configured: Option<(&str, &Path)>| {
             let mut cmd = Command::new("cargo");
-            cmd.args(["metadata", "--format-version", "1", "--no-deps", "--offline"])
-                .current_dir(&root)
-                .env_remove("CARGO_TARGET_DIR")
-                .env_remove("CARGO_BUILD_TARGET_DIR")
-                .env("CARGO_HOME", root.join("cargo-home"));
+            cmd.args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--no-deps",
+                "--offline",
+            ])
+            .current_dir(&root)
+            .env_remove("CARGO_TARGET_DIR")
+            .env_remove("CARGO_BUILD_TARGET_DIR")
+            .env("CARGO_HOME", root.join("cargo-home"));
             if let Some((name, value)) = configured {
                 cmd.env(name, value);
             }
@@ -248,7 +252,10 @@ mod tests {
             root.join("env-target")
         );
         assert_eq!(
-            inspect(Some(("CARGO_BUILD_TARGET_DIR", Path::new("build-env-target")))),
+            inspect(Some((
+                "CARGO_BUILD_TARGET_DIR",
+                Path::new("build-env-target")
+            ))),
             root.join("build-env-target")
         );
         let absolute = root.join("external-absolute");

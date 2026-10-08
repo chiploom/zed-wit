@@ -83,8 +83,7 @@ fn development_binary_from_cargo_messages(messages: &str) -> Result<std::path::P
             continue;
         };
         if value.get("reason").and_then(|v| v.as_str()) != Some("compiler-artifact")
-            || value.pointer("/target/name").and_then(|v| v.as_str())
-                != Some("wit-language-server")
+            || value.pointer("/target/name").and_then(|v| v.as_str()) != Some("wit-language-server")
         {
             continue;
         }
@@ -127,18 +126,22 @@ pub(crate) fn dev(args: &[String]) -> Result<(), String> {
         .map_err(|error| format!("run Cargo development build: {error}"))?;
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
     if !output.status.success() {
-        return Err(format!("Cargo development build failed with {}", output.status));
+        return Err(format!(
+            "Cargo development build failed with {}",
+            output.status
+        ));
     }
     let messages = String::from_utf8(output.stdout)
         .map_err(|error| format!("Cargo development build output was not UTF-8: {error}"))?;
     let actual = development_binary_from_cargo_messages(&messages)?;
-    let expected = util::repo_root().join("target").join("release").join(
-        if cfg!(windows) {
+    let expected = util::repo_root()
+        .join("target")
+        .join("release")
+        .join(if cfg!(windows) {
             "wit-language-server.exe"
         } else {
             "wit-language-server"
-        },
-    );
+        });
     if actual != expected {
         return Err(format!(
             "Cargo placed the development server at {}, but committed Zed settings require {}; remove the implicit build.target configuration or configure Zed manually",
@@ -164,7 +167,12 @@ pub(crate) fn install_dev(args: &[String]) -> Result<(), String> {
     // Fail before invoking Cargo when the requested install path is occupied.
     // The final create_new operation remains the authoritative race guard.
     match std::fs::symlink_metadata(&destination) {
-        Ok(_) => return Err(format!("destination already exists: {}", destination.display())),
+        Ok(_) => {
+            return Err(format!(
+                "destination already exists: {}",
+                destination.display()
+            ));
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("stat {}: {error}", destination.display())),
     }
@@ -199,7 +207,11 @@ mod tests {
 
     #[test]
     fn implicit_configured_target_changes_the_real_cargo_artifact_path() {
-        use std::{fs, process::Command, sync::atomic::{AtomicU64, Ordering}};
+        use std::{
+            fs,
+            process::Command,
+            sync::atomic::{AtomicU64, Ordering},
+        };
 
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
@@ -265,8 +277,17 @@ mod tests {
         } else {
             "wit-language-server"
         };
-        assert_eq!(actual, root.join("target").join(&host).join("release").join(binary_name));
-        assert_ne!(actual, root.join("target").join("release").join(binary_name));
+        assert_eq!(
+            actual,
+            root.join("target")
+                .join(&host)
+                .join("release")
+                .join(binary_name)
+        );
+        assert_ne!(
+            actual,
+            root.join("target").join("release").join(binary_name)
+        );
     }
 
     #[test]
