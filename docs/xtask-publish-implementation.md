@@ -105,6 +105,37 @@ Remote read/write boundaries must be explicit so a failed preparation, timeout,
 partial edit, stale default branch, retried dispatch, or duplicate PR cannot
 silently advance to publication.
 
+## Reviewed PR provenance and guarded recovery
+
+Before dispatching a publication, `--resume` fetches the merged preparation
+PR's **complete paginated file list**, compares it with GitHub's reported file
+count, and requires a reviewed scope-specific version change in each manifest's
+patch. It checks the predecessor-to-candidate transition, the reviewed PR head,
+the merged commit, and the checked-out protected `main` manifest. It supports
+merge, squash, and rebase layouts but rejects missing patches, contradictory
+history, unexplained changes to the version manifest, or an ambiguous
+predecessor. These checks establish release preparation provenance; branch
+names and PR titles are never sufficient evidence.
+
+Draft recovery resolves a lightweight tag directly and an annotated tag via
+its peeled `^{}` commit ref. The tag must target the exact validated source
+commit. A completed, known failed, cancelled, or timed-out **publication** run
+is required before dispatch can retry an unpublished draft. A previous success,
+active run, missing history, ambiguous conclusion, malformed record, or
+published release blocks an automatic retry. Other scopes and completed
+validation-only runs are distinguished by explicit run names. Protected CD
+remains responsible for idempotent publication and immutable-release gates.
+
+`--wait` checks the exact dispatch run ID, source commit, protected branch,
+workflow path (including GitHub's `@main` suffix), scope, operation, and tag.
+It never infers success from a completed validation-only run. A successful
+workflow must still be followed by verification of the non-draft immutable
+GitHub Release.
+
+All mutation tests must run in disposable Git repositories and Cargo fixtures,
+with mocked GitHub responses. Never test these stages by dispatching the
+production workflow or creating production release branches.
+
 ## Implementation sequence and regression evidence
 
 - [ ] Add the `publish` command to the **existing**
