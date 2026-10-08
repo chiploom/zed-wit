@@ -354,3 +354,302 @@ pub(crate) fn publish(args: &[String]) -> Result<(), String> {
         Operation::Resume => resume(&root, opts.scope, opts.pr.expect("validated"), opts.wait),
     }
 }
+
+
+// Keep manifest formatting intact: modify only the requested key in its TOML table.
+fn replace_manifest_version(
+    original: &str,
+    previous: Version,
+    next: Version,
+    table: Option<&str>,
+) -> Result<String, String> {
+    let mut active = table.is_none();
+    let mut replaced = false;
+    let mut output = String::with_capacity(original.len() + 10);
+    let old = format!("version = \"{}\"", previous.value());
+    let new = format!("version = \"{}\"", next.value());
+    for line in original.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            active = table.is_some_and(|expected| trimmed == expected);
+        }
+        if active && trimmed.starts_with("version = ") {
+            if replaced || !trimmed.starts_with(&old) || trimmed != old {
+                return Err("unexpected or duplicated manifest version field".into());
+            }
+            output.push_str(&line.replacen(&old, &new, 1));
+            replaced = true;
+        } else {
+            output.push_str(line);
+        }
+    }
+    if !replaced { return Err("manifest version field missing".into()); }
+    Ok(output)
+}
+fn update_manifest(path: &Path, previous: Version, next: Version, table: Option<&str>)
+    -> Result<(), String>
+{
+    let original = util::read_nonempty(path)?;
+    let updated = replace_manifest_version(&original, previous, next, table)?;
+    fs::write(path, updated).map_err(|e| format!("update {}: {e}", path.display()))
+}
+fn git(args: &[&str], root: &Path) -> Result<String, String> {
+    command("git", args, root)
+}
+fn current_branch(root: &Path) -> Result<String, String> {
+    git(&["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+}
+fn confirm_remote_main(root: &Path) -> Result<String, String> {
+    validate_worktree(root)?;
+    let remote_sha = check_remote(root)?;
+    if current_branch(root)? != "main" {
+        return Err("publish must use a checked-out main branch; no detached or feature branch".into());
+    }
+    if git(&["rev-parse", "HEAD"], root)? != remote_sha {
+        return Err("main differs from latest origin/main; synchronize before publishing".into());
+    }
+    Ok(remote_sha)
+}
+fn prepare(root: &Path, scope: Scope, bump: Bump) -> Result<(), String> {
+    let plan = plan(root, scope, bump, true)?;
+    confirm_remote_main(root)?;
+    // Avoid overwriting or resurrecting a local or remote preparation branch.
+    if git(&["show-ref", "--verify", &format!("refs/heads/{}", plan.branch)], root).is_ok() {
+        return Err(format!("local release-preparation branch already exists: {}", plan.branch));
+    }
+    if !git(&["ls-remote", "--heads", "origin", &plan.branch], root)?.is_empty() {
+        return Err(format!("remote release-preparation branch already exists: {}", plan.branch));
+    }
+    print_plan(scope, &plan)?;
+    git(&["switch", "-c", &plan.branch], root)?;
+    let paths = if scope == Scope::Lsp {
+        vec![(root.join(scope.manifest()), Some("[package]"))]
+    } else {
+        vec![
+            (root.join("Cargo.toml"), Some("[package]")),
+            (root.join("extension.toml"), None),
+        ]
+    };
+    for (path, table) in paths {
+        update_manifest(&path, plan.current, plan.candidate, table)?;
+    }
+
+    let notes = root.join(&plan.notes);
+    if let Some(parent) = notes.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("create release notes directory: {e}"))?;
+    }
+    let mut file = OpenOptions::new()
+        .write(true).create_new(true).open(&notes)
+        .map_err(|e| format!("create {}: {e}", notes.display()))?;
+    writeln!(file, "# {} {}\n\n{}\n", scope.title(), plan.candidate.value(), PREPARATION_MARKER)
+        .map_err(|e| format!("write release notes: {e}"))?;
+    let changelog = root.join("CHANGELOG.md");
+    let body = util::read_nonempty(&changelog)?;
+    if !body.contains("## Unreleased\n") {
+        return Err("CHANGELOG.md has no Unreleased heading".into());
+    }
+    let update = format!(
+        "## Unreleased\n\n### {} ({})\n\n- {}\n",
+        plan.tag, scope.name(), PREPARATION_MARKER
+    );
+    fs::write(&changelog, body.replacen("## Unreleased\n", &update, 1))
+        .map_err(|e| format!("update changelog: {e}"))?;
+
+    // Cargo updates the workspace package version in Cargo.lock. This is
+    // deliberately the non-locked invocation; submit later verifies --locked.
+    command("cargo", &["check", "--workspace", "--offline"], root)?;
+    println!("Prepared {} at {}. Edit release notes and changelog, review changes, run tests, and commit locally.", plan.tag, plan.branch);
+    println!("No branch was pushed and no pull request or release was created.");
+    println!("After reviewing and committing: cargo xtask publish --scope {} --submit --confirm", scope.name());
+    Ok(())
+}
+
+fn notes_reviewed(root: &Path, scope: Scope, version: Version) -> Result<(), String> {
+    let notes = root.join(format!(
+        "docs/releases/{}/v{}.md", scope.name(), version.value()
+    ));
+    let text = util::read_nonempty(&notes)?;
+    if text.contains(PREPARATION_MARKER) || text.contains("TODO") || text.trim().len() < 100 {
+        return Err(format!("release notes need substantive human review: {}", notes.display()));
+    }
+    let changelog = util::read_nonempty(&root.join("CHANGELOG.md"))?;
+    if !changelog.contains(&format!("### {} ({})", scope.tag(version), scope.name()))
+        || changelog.contains(PREPARATION_MARKER)
+    {
+        return Err("changelog must contain reviewed scoped release entry".into());
+    }
+    Ok(())
+}
+fn validate_changed_files(
+    paths: &str,
+    scope: Scope,
+    version: Version,
+) -> Result<(), String> {
+    let mut allowed = BTreeSet::from([
+        "Cargo.lock".to_owned(),
+        "CHANGELOG.md".to_owned(),
+        scope.manifest().to_owned(),
+        format!("docs/releases/{}/v{}.md", scope.name(), version.value()),
+    ]);
+    if scope == Scope::Extension { allowed.insert("extension.toml".into()); }
+    for file in paths.lines() {
+        if !allowed.contains(file) {
+            return Err(format!("release preparation includes unexpected change: {file}"));
+        }
+    }
+    Ok(())
+}
+fn submit(root: &Path, scope: Scope) -> Result<(), String> {
+    validate_worktree(root)?;
+    let version = manifest_version(root, scope)?;
+    let tag = scope.tag(version);
+    let branch = format!("release-prep/{}-{tag}", scope.name());
+    if current_branch(root)? != branch {
+        return Err(format!("expected release-preparation branch {branch}"));
+    }
+    let remote_sha = check_remote(root)?;
+    // The remote main revision must be known and be an ancestor. Do not
+    // silently rebase a candidate whose reviewed contents might change.
+    git(&["merge-base", "--is-ancestor", &remote_sha, "HEAD"], root)
+        .map_err(|_| "release branch is stale or origin/main was not fetched; update deliberately".to_owned())?;
+    let delta = git(&["diff", "--name-only", &remote_sha, "HEAD"], root)?;
+    validate_changed_files(&delta, scope, version)?;
+    if delta.is_empty() { return Err("release preparation branch has no changes".into()); }
+    notes_reviewed(root, scope, version)?;
+    command("cargo", &["metadata", "--no-deps", "--format-version", "1", "--locked"], root)?;
+    crate::tasks::release_ops::release_check_inner(scope.name(), &tag)?;
+    crate::tasks::validation::verify(&[])?;
+
+    validate_candidate(scope, version, &release_tag_history(root)?)?;
+    let existing = gh(
+        &["pr", "list", "-R", REPO, "--state", "all", "--head", &branch,
+          "--json", "number,headRefName,baseRefName"], root
+    )?;
+    let prs: Value = serde_json::from_str(&existing)
+        .map_err(|e| format!("parse existing preparation PRs: {e}"))?;
+    if !prs.as_array().is_some_and(Vec::is_empty) {
+        return Err("a release preparation PR already exists; review or resume it rather than duplicate".into());
+    }
+    if !git(&["ls-remote", "--heads", "origin", &branch], root)?.is_empty() {
+        return Err("release branch is already on origin; inspect and resume its PR manually".into());
+    }
+    // These two remote writes are allowed only after explicit --submit --confirm.
+    git(&["push", "--set-upstream", "origin", &format!("HEAD:refs/heads/{branch}")], root)?;
+    let title = format!("Prepare {} release {}", scope.title(), tag);
+    let body = format!(
+        "Release preparation for {}.\n\n- Scope: {}\n- Candidate: {}\n- Human-reviewed notes: docs/releases/{}/v{}.md\n\n**No tag or GitHub Release is published by this PR.** Merge through protected review, then resume with cargo xtask publish --scope {} --resume --pr <number> --confirm.",
+        tag, scope.name(), tag, scope.name(), version.value(), scope.name()
+    );
+    let created = gh(&[
+        "pr", "create", "-R", REPO, "--base", "main", "--head", &branch,
+        "--title", &title, "--body", &body
+    ], root)?;
+    println!("Release preparation PR submitted: {}", created.trim());
+    println!("No publication requested. Merge through normal review and CD policy.");
+    Ok(())
+}
+
+fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> {
+    let main_sha = confirm_remote_main(root)?;
+    let version = manifest_version(root, scope)?;
+    let tag = scope.tag(version);
+    let branch = format!("release-prep/{}-{tag}", scope.name());
+    notes_reviewed(root, scope, version)?;
+    crate::tasks::release_ops::release_check_inner(scope.name(), &tag)?;
+
+    let info: Value = serde_json::from_str(&gh(
+        &["api", &format!("repos/{REPO}/pulls/{pr}")], root
+    )?).map_err(|e| format!("parse preparation PR: {e}"))?;
+    if info["merged"].as_bool() != Some(true)
+        || info["base"]["ref"].as_str() != Some("main")
+        || info["head"]["ref"].as_str() != Some(branch.as_str())
+    {
+        return Err("release preparation PR is not merged on main for this exact tag".into());
+    }
+    let merge_sha = info["merge_commit_sha"].as_str()
+        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or("merged preparation PR omitted merge commit SHA")?;
+    git(&["merge-base", "--is-ancestor", merge_sha, &main_sha], root)
+        .map_err(|_| "merged preparation commit is not in current main".to_owned())?;
+
+    let known = release_tag_history(root)?;
+    if known.contains(&tag) {
+        // Even an existing draft requires operator inspection; never dispatch
+        // into ambiguous immutable/deleted tag state automatically.
+        return Err(format!("tag {tag} already exists; inspect draft/tag history and protected CD manually"));
+    }
+    // Require the configured workflow to be enabled; do not create an alternate.
+    let workflow: Value = serde_json::from_str(&gh(
+        &["api", &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}")], root
+    )?).map_err(|e| format!("parse protected CD workflow: {e}"))?;
+    if workflow["state"].as_str() != Some("active") {
+        return Err("protected CD workflow is not active".into());
+    }
+
+    // Conservatively refuse an uncorrelatable repeated dispatch from the same
+    // protected source commit. The user must inspect previous runs manually.
+    let runs: Value = serde_json::from_str(&gh(
+        &["api", &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100")], root
+    )?).map_err(|e| format!("parse existing CD workflow runs: {e}"))?;
+    if !runs["workflow_runs"].as_array().is_some_and(|rows| rows.iter().all(|run| {
+        run["head_sha"].as_str() != Some(main_sha.as_str())
+            || run["event"].as_str() != Some("workflow_dispatch")
+    })) {
+        return Err("a prior CD workflow dispatch exists for this main SHA or run history is ambiguous; inspect before any retry".into());
+    }
+
+    // GitHub's 2026 workflow_dispatch response gives the exact run ID.
+    // Never fall back to scanning the latest run after an ambiguous dispatch.
+    let response = gh(&[
+        "api", "-X", "POST",
+        &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/dispatches"),
+        "-F", "return_run_details=true", "-f", "ref=main",
+        "-f", "inputs[operation]=publish",
+        "-f", &format!("inputs[scope]={}", scope.name()),
+        "-f", &format!("inputs[tag]={tag}"),
+    ], root).map_err(|_| "CD dispatch may have been accepted; check GitHub Actions before retrying".to_owned())?;
+    let result: Value = serde_json::from_str(&response)
+        .map_err(|_| "CD dispatch returned no run ID; inspect GitHub Actions before retrying".to_owned())?;
+    let id = result["workflow_run_id"].as_u64()
+        .filter(|id| *id > 0)
+        .ok_or("CD dispatch omitted workflow_run_id; inspect GitHub Actions before retrying")?;
+    let run_url = result["html_url"].as_str()
+        .filter(|url| url.starts_with("https://github.com/chiploom/zed-wit/actions/runs/"))
+        .ok_or("CD dispatch returned an unexpected run URL")?;
+    println!("Protected CD dispatch requested for {tag}: {run_url} (run {id}).");
+    if !wait {
+        println!("Status: requested/pending. This is not a published release.");
+        return Ok(());
+    }
+    for _ in 0..180 {
+        let run: Value = serde_json::from_str(&gh(
+            &["api", &format!("repos/{REPO}/actions/runs/{id}")], root
+        )?).map_err(|e| format!("parse exact workflow run {id}: {e}"))?;
+        match run["status"].as_str() {
+            Some("completed") => {
+                if run["conclusion"].as_str() != Some("success") {
+                    return Err(format!(
+                        "protected CD run {id} finished with {:?}, not published",
+                        run["conclusion"].as_str()
+                    ));
+                }
+                let release: Value = serde_json::from_str(&gh(
+                    &["api", &format!("repos/{REPO}/releases/tags/{tag}")], root
+                )?).map_err(|e| format!("verify published release after CD success: {e}"))?;
+                if release["draft"].as_bool() != Some(false)
+                    || release["tag_name"].as_str() != Some(tag.as_str())
+                    || release["immutable"].as_bool() != Some(true)
+                {
+                    return Err("CD run passed, but release publication/immutability could not be verified".into());
+                }
+                println!("Published immutable release {tag}: {run_url}");
+                return Ok(());
+            }
+            Some("queued" | "in_progress" | "requested" | "waiting" | "pending") => {}
+            _ => return Err(format!("CD run {id} has unknown status; inspect {run_url}")),
+        }
+        thread::sleep(Duration::from_secs(10));
+    }
+    Err(format!("timed out watching CD run {id}; outcome pending: {run_url}"))
+}
