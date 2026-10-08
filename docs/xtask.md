@@ -65,6 +65,8 @@ Single-target local verification does not replace the existing five-target relea
 | `coverage [--output target/coverage/name.lcov]` | Generate LCOV data with optional installed `cargo-llvm-cov`. Output must be a file directly under `target/coverage`. |
 | `update-grammar [--candidate <sha>]` | Read-only check of grammar SHA in both manifests and dated compatibility notes; candidate is review guidance only, never an automatic pin update. |
 
+The parser benchmark uses a custom Cargo harness (`harness = false`). Cargo automatically supplies `--bench`; the harness handles it alongside `--iterations`. The argument parser is exercised by regular workspace tests.
+
 Cleanup examples:
 
 ```sh
