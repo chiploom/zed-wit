@@ -101,6 +101,12 @@ ambiguous and require manual review. Neither change relaxes the protected
    a terminal conclusion, and differentiate validation, waiting for approval,
    failure, cancellation, and published success.
 
+A failed post-push PR submission can be retried only when the existing remote
+preparation branch points to the same validated local commit. The tool must
+not overwrite remote branch data or create duplicate review PRs. The human
+operator inspects prior attempts when a PR already exists or a response is
+ambiguous.
+
 Remote read/write boundaries must be explicit so a failed preparation, timeout,
 partial edit, stale default branch, retried dispatch, or duplicate PR cannot
 silently advance to publication.
