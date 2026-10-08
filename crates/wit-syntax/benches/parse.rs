@@ -1,5 +1,7 @@
 //! Deterministic, dependency-free Tree-sitter WIT parser microbenchmark.
 //! Results are local measurements, not cross-machine performance guarantees.
+mod args;
+
 use std::{env, hint::black_box, time::Instant};
 
 const SOURCE: &str = r#"package chiploom:bench@0.1.0;
@@ -18,18 +20,11 @@ world preview {
 "#;
 
 fn main() {
-    let args = env::args().skip(1).collect::<Vec<_>>();
-    let iterations = match args.as_slice() {
-        [] => 2000,
-        [flag, count] if flag == "--iterations" => count
-            .parse::<usize>()
-            .expect("--iterations requires a positive integer"),
-        _ => panic!("Usage: cargo bench -p wit-syntax --bench parse -- --iterations <count>"),
-    };
-    assert!(
-        (10..=1_000_000).contains(&iterations),
-        "iterations must be 10..=1000000"
-    );
+    let iterations = args::parse_iterations(&env::args().skip(1).collect::<Vec<_>>())
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        });
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&wit_syntax::language())
