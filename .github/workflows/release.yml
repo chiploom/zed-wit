@@ -586,6 +586,38 @@ jobs:
               ;;
           esac
 
+      - name: Require unchanged unpublished draft immediately before promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          RELEASE_TITLE: ${{ needs.validate.outputs.title }}
+        run: |
+          set -euo pipefail
+          # Executed within the existing serialized, protected release job.
+          # A competing dispatch must not promote an already published release.
+          release_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+          if [ "$(jq -r '.draft' <<<"$release_json")" != "true" ] ||
+             [ "$(jq -r '.tag_name' <<<"$release_json")" != "$RELEASE_TAG" ] ||
+             [ "$(jq -r '.name' <<<"$release_json")" != "$RELEASE_TITLE" ]; then
+            echo "::error::Release changed or was already published; refusing another promotion"
+            exit 1
+          fi
+          tag_json=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG")
+          tag_type=$(jq -r '.object.type' <<<"$tag_json")
+          tag_sha=$(jq -r '.object.sha' <<<"$tag_json")
+          if [ "$tag_type" = "tag" ]; then
+            tag_sha=$(gh api "repos/$GH_REPO/git/tags/$tag_sha" --jq '.object.sha')
+          elif [ "$tag_type" != "commit" ]; then
+            echo "::error::Release tag points to an unexpected Git object"
+            exit 1
+          fi
+          if [ "$tag_sha" != "$RELEASE_SHA" ]; then
+            echo "::error::Release tag moved after candidate validation"
+            exit 1
+          fi
+
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ github.token }}
