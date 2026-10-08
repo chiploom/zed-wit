@@ -4,8 +4,8 @@ WIT adds first-class [WebAssembly Interface Types (WIT)](https://github.com/WebA
 
 The protected **v0.1.0** tag identifies the first LSP-only release, but its
 immutable GitHub Release was deleted. GitHub permanently reserves tag names used
-by immutable releases, so `v0.1.0` cannot be recreated. LSP distribution resumes
-with `v0.1.1` and has since advanced to `v0.1.2`. This is still separate from
+by immutable releases, so `v0.1.0` cannot be recreated. LSP distribution was
+restored with `v0.1.1` and has since advanced to `v0.1.2`. This is separate from
 Zed-extension publication; the extension is not yet published in the Zed registry.
 
 ## Features
@@ -124,9 +124,10 @@ GitHub release publication is separate from registry publication. The deleted
 immutable `v0.1.0` release remains represented by its protected historical tag,
 while `v0.1.1` is the published immutable recovery **LSP-only** release.
 The extension's runtime pin now targets the published immutable `v0.1.2` LSP
-release. Future CD runs explicitly choose `lsp` or `extension` scope. LSP and extension
-versions can advance independently; the extension pins a published LSP version. See [publishing](docs/publishing.md) for
-the scope contract and registry succession gate.
+release. Future CD runs explicitly choose `lsp` or `extension` scope. LSP and
+extension versions can advance independently; the extension pins a published LSP
+version. See [publishing](docs/publishing.md) for the scope contract and registry
+succession gate.
 
 ## Acknowledgements and license
 
