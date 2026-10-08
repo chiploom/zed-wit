@@ -602,11 +602,11 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         // published release, is never eligible for local retries.
         let releases = gh(&[
             "api", "--paginate", "--jq",
-            &format!(".[] | select(.tag_name == \\"{tag}\\") | [.draft, .tag_name] | @tsv"),
+            &format!(".[] | select(.tag_name == \"{tag}\") | [.draft, .tag_name] | @tsv"),
             &format!("repos/{REPO}/releases?per_page=100"),
         ], root)?;
         let draft_rows = releases.lines().collect::<Vec<_>>();
-        if draft_rows.len() != 1 || draft_rows[0] != format!("true\\t{tag}") {
+        if draft_rows.len() != 1 || draft_rows[0] != format!("true\t{tag}") {
             return Err(format!("tag {tag} has no unambiguous unpublished draft; manual review required"));
         }
         let remote_tag = git(&[
@@ -636,7 +636,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100"),
     ], root)?;
     for row in runs.lines() {
-        let fields = row.split('\\t').collect::<Vec<_>>();
+        let fields = row.split('\t').collect::<Vec<_>>();
         if fields.len() != 3 {
             return Err("CD run history is ambiguous; inspect it manually".into());
         }
