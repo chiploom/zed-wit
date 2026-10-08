@@ -231,15 +231,21 @@ struct Plan {
     main_sha: String,
 }
 
-fn version_in_manifest(source: &str, scope: Scope, extension_file: bool) -> Result<Version, String> {
+fn version_in_manifest(
+    source: &str,
+    scope: Scope,
+    extension_file: bool,
+) -> Result<Version, String> {
     let doc: toml::Value = toml::from_str(source)
         .map_err(|_| "release provenance manifest is not valid TOML".to_owned())?;
     let value = if extension_file {
         doc.get("version")
     } else {
-        doc.get("package").and_then(|package| package.get("version"))
+        doc.get("package")
+            .and_then(|package| package.get("version"))
     };
-    let raw = value.and_then(toml::Value::as_str)
+    let raw = value
+        .and_then(toml::Value::as_str)
         .ok_or("release provenance manifest omitted its version")?;
     Version::parse(raw)
 }
@@ -255,11 +261,15 @@ fn ensure_release_transition(
     current: Version,
 ) -> Result<(), String> {
     if !valid_version_transition(previous, reviewed_head)
-        || reviewed_head != merged || merged != current
+        || reviewed_head != merged
+        || merged != current
     {
         return Err(format!(
             "release PR did not introduce the exact reviewed version bump: before={}, PR={}, merged={}, current={}",
-            previous.value(), reviewed_head.value(), merged.value(), current.value()
+            previous.value(),
+            reviewed_head.value(),
+            merged.value(),
+            current.value()
         ));
     }
     Ok(())
@@ -270,27 +280,43 @@ fn remote_file_at(root: &Path, sha: &str, file: &str) -> Result<String, String> 
     }
     // GitHub's documented raw media type returns the contents, not JSON or a
     // base64 blob. All paths are fixed scope-specific repo paths.
-    gh(&[
-        "api", "-H", "Accept: application/vnd.github.raw+json",
-        &format!("repos/{REPO}/contents/{file}?ref={sha}"),
-    ], root)
+    gh(
+        &[
+            "api",
+            "-H",
+            "Accept: application/vnd.github.raw+json",
+            &format!("repos/{REPO}/contents/{file}?ref={sha}"),
+        ],
+        root,
+    )
 }
 fn valid_sha(sha: &str) -> bool {
     sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
-fn git_manifest_version(root: &Path, sha: &str, scope: Scope, extension_file: bool)
-    -> Result<Version, String>
-{
+fn git_manifest_version(
+    root: &Path,
+    sha: &str,
+    scope: Scope,
+    extension_file: bool,
+) -> Result<Version, String> {
     if !valid_sha(sha) {
         return Err("invalid release Git commit SHA".into());
     }
-    let name = if extension_file { "extension.toml" } else { scope.manifest() };
+    let name = if extension_file {
+        "extension.toml"
+    } else {
+        scope.manifest()
+    };
     let content = git(&["show", &format!("{sha}:{name}")], root)?;
     version_in_manifest(&content, scope, extension_file)
 }
 fn historical_predecessor_version(
-    root: &Path, scope: Scope, merge_sha: &str,
-    commit_count: u64, extension_file: bool, candidate: Version,
+    root: &Path,
+    scope: Scope,
+    merge_sha: &str,
+    commit_count: u64,
+    extension_file: bool,
+    candidate: Version,
 ) -> Result<Version, String> {
     let first_parent = git(&["rev-parse", &format!("{merge_sha}^")], root)?;
     let immediate = git_manifest_version(root, &first_parent, scope, extension_file)?;
@@ -298,45 +324,53 @@ fn historical_predecessor_version(
         return Ok(immediate);
     }
     if commit_count > 1 {
-        let ancestor = git(&[
-            "rev-parse", &format!("{merge_sha}~{commit_count}"),
-        ], root)?;
+        let ancestor = git(&["rev-parse", &format!("{merge_sha}~{commit_count}")], root)?;
         return git_manifest_version(root, &ancestor, scope, extension_file);
     }
     Ok(immediate)
 }
 fn verify_pr_version_transition(
-    root: &Path, scope: Scope, candidate: Version, merge_sha: &str,
-    pr_head_sha: &str, pr_commits: u64,
+    root: &Path,
+    scope: Scope,
+    candidate: Version,
+    merge_sha: &str,
+    pr_head_sha: &str,
+    pr_commits: u64,
 ) -> Result<(), String> {
-    if !valid_sha(merge_sha) || !valid_sha(pr_head_sha)
-        || !(1..=250).contains(&pr_commits) {
+    if !valid_sha(merge_sha) || !valid_sha(pr_head_sha) || !(1..=250).contains(&pr_commits) {
         return Err("release PR provenance has invalid commit identifiers or count".into());
     }
     let current = manifest_version(root, scope)?;
     let reviewed_head = version_in_manifest(
-        &remote_file_at(root, pr_head_sha, scope.manifest())?, scope, false,
+        &remote_file_at(root, pr_head_sha, scope.manifest())?,
+        scope,
+        false,
     )?;
     let merged = git_manifest_version(root, merge_sha, scope, false)?;
     // Merge and squash commits introduce the entire PR diff at the immediate
     // first parent; a rebase merge introduces N sequential PR commits.
-    let previous = historical_predecessor_version(
-        root, scope, merge_sha, pr_commits, false, candidate,
-    )?;
+    let previous =
+        historical_predecessor_version(root, scope, merge_sha, pr_commits, false, candidate)?;
     ensure_release_transition(previous, reviewed_head, merged, current)?;
     if scope == Scope::Extension {
         let checked_head = version_in_manifest(
-            &remote_file_at(root, pr_head_sha, "extension.toml")?, scope, true,
+            &remote_file_at(root, pr_head_sha, "extension.toml")?,
+            scope,
+            true,
         )?;
         let merged_extension = git_manifest_version(root, merge_sha, scope, true)?;
-        let prior_extension = historical_predecessor_version(
-            root, scope, merge_sha, pr_commits, true, candidate,
-        )?;
+        let prior_extension =
+            historical_predecessor_version(root, scope, merge_sha, pr_commits, true, candidate)?;
         let current_extension = version_in_manifest(
-            &util::read_nonempty(&root.join("extension.toml"))?, scope, true,
+            &util::read_nonempty(&root.join("extension.toml"))?,
+            scope,
+            true,
         )?;
         ensure_release_transition(
-            prior_extension, checked_head, merged_extension, current_extension,
+            prior_extension,
+            checked_head,
+            merged_extension,
+            current_extension,
         )?;
         if current_extension != candidate {
             return Err("extension release manifest does not match candidate".into());
@@ -521,7 +555,10 @@ fn validate_candidate(
 }
 fn ensure_main_branch(root: &Path) -> Result<(), String> {
     if current_branch(root)? != "main" {
-        return Err("publish planning requires a checked-out main branch; switch to main before preparing".into());
+        return Err(
+            "publish planning requires a checked-out main branch; switch to main before preparing"
+                .into(),
+        );
     }
     Ok(())
 }
@@ -627,10 +664,9 @@ fn replace_manifest_version(
     }
     Ok(output)
 }
-fn checked_release_path(root: &Path, file: &Path, existing_file: bool)
-    -> Result<(), String>
-{
-    let relative = file.strip_prefix(root)
+fn checked_release_path(root: &Path, file: &Path, existing_file: bool) -> Result<(), String> {
+    let relative = file
+        .strip_prefix(root)
         .map_err(|_| "release preparation path escapes repository root".to_owned())?;
     let mut inspected = root.to_path_buf();
     let components = relative.components().collect::<Vec<_>>();
@@ -647,22 +683,30 @@ fn checked_release_path(root: &Path, file: &Path, existing_file: bool)
             Ok(metadata) => {
                 if metadata.file_type().is_symlink() {
                     return Err(format!(
-                        "release preparation refuses symlink: {}", inspected.display()
+                        "release preparation refuses symlink: {}",
+                        inspected.display()
                     ));
                 }
                 if last {
                     if !existing_file || !metadata.is_file() {
                         return Err(format!(
-                            "release file has unexpected type or exists: {}", inspected.display()
+                            "release file has unexpected type or exists: {}",
+                            inspected.display()
                         ));
                     }
                 } else if !metadata.is_dir() {
-                    return Err(format!("release parent is not directory: {}", inspected.display()));
+                    return Err(format!(
+                        "release parent is not directory: {}",
+                        inspected.display()
+                    ));
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if existing_file {
-                    return Err(format!("required release path missing: {}", inspected.display()));
+                    return Err(format!(
+                        "required release path missing: {}",
+                        inspected.display()
+                    ));
                 }
             }
             Err(error) => return Err(format!("inspect {}: {error}", inspected.display())),
@@ -993,7 +1037,10 @@ fn parse_remote_tag_commit(rows: &str, tag: &str) -> Result<String, String> {
     // A lightweight tag has only a direct ref; annotated tags also have a
     // peeled ^{} entry. As in CD, the commit (not the annotated tag object)
     // is the relevant release identity.
-    Ok(commit.or(direct).expect("direct tag reference validated").to_owned())
+    Ok(commit
+        .or(direct)
+        .expect("direct tag reference validated")
+        .to_owned())
 }
 
 fn validate_prior_cd_runs(
@@ -1009,10 +1056,10 @@ fn validate_prior_cd_runs(
     let mut known_failed_publish = false;
     for row in runs.lines() {
         let columns = row.split('\t').collect::<Vec<_>>();
-        let [id, sha, event, status, conclusion, title] =
-            <[&str; 6]>::try_from(columns.as_slice())
-                .map_err(|_| "CD run history has malformed records; inspect manually")?;
-        let id = id.parse::<u64>()
+        let [id, sha, event, status, conclusion, title] = <[&str; 6]>::try_from(columns.as_slice())
+            .map_err(|_| "CD run history has malformed records; inspect manually")?;
+        let id = id
+            .parse::<u64>()
             .map_err(|_| "CD run history has an invalid run ID")?;
         if id == 0 || !ids.insert(id) {
             return Err("CD run history contains missing or duplicate run IDs".into());
@@ -1021,7 +1068,9 @@ fn validate_prior_cd_runs(
             continue;
         }
         if status != "completed" {
-            return Err(format!("active or ambiguous CD dispatch {id} on validated main SHA"));
+            return Err(format!(
+                "active or ambiguous CD dispatch {id} on validated main SHA"
+            ));
         }
         if title == candidate_validate {
             // A completed dry run does not reserve a release tag, regardless
@@ -1075,7 +1124,11 @@ enum WorkflowProgress {
     Succeeded,
 }
 fn classify_workflow_run(
-    run: &Value, id: u64, main_sha: &str, scope: Scope, tag: &str,
+    run: &Value,
+    id: u64,
+    main_sha: &str,
+    scope: Scope,
+    tag: &str,
 ) -> Result<WorkflowProgress, String> {
     let title = format!("CD / publish / {} / {tag}", scope.name());
     if run["id"].as_u64() != Some(id)
@@ -1098,7 +1151,9 @@ fn classify_workflow_run(
             "protected CD run {id} completed with {:?}, not published",
             run["conclusion"].as_str()
         )),
-        _ => Err(format!("CD run {id} returned an unrecognized workflow status")),
+        _ => Err(format!(
+            "CD run {id} returned an unrecognized workflow status"
+        )),
     }
 }
 fn verify_published_release(release: &Value, tag: &str) -> Result<(), String> {
@@ -1108,7 +1163,10 @@ fn verify_published_release(release: &Value, tag: &str) -> Result<(), String> {
     {
         Ok(())
     } else {
-        Err("CD run completed, but the expected non-draft immutable release was not verified".into())
+        Err(
+            "CD run completed, but the expected non-draft immutable release was not verified"
+                .into(),
+        )
     }
 }
 
@@ -1151,10 +1209,12 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         .ok_or("merged preparation PR omitted merge commit SHA")?;
     git(&["merge-base", "--is-ancestor", merge_sha, &main_sha], root)
         .map_err(|_| "merged preparation commit is not in current main".to_owned())?;
-    let head_sha = info["head"]["sha"].as_str()
+    let head_sha = info["head"]["sha"]
+        .as_str()
         .filter(|sha| valid_sha(sha))
         .ok_or("release PR is missing immutable reviewed head SHA")?;
-    let pr_commits = info["commits"].as_u64()
+    let pr_commits = info["commits"]
+        .as_u64()
         .ok_or("release PR is missing commit count")?;
     verify_pr_version_transition(root, scope, version, merge_sha, head_sha, pr_commits)?;
 
@@ -1182,7 +1242,9 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         }
         let remote_tag = git(
             &[
-                "ls-remote", "--tags", "origin",
+                "ls-remote",
+                "--tags",
+                "origin",
                 &format!("refs/tags/{tag}"),
                 &format!("refs/tags/{tag}^{{}}"),
             ],
@@ -1269,7 +1331,8 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
                 let release: Value = serde_json::from_str(&gh(
                     &["api", &format!("repos/{REPO}/releases/tags/{tag}")],
                     root,
-                )?).map_err(|e| format!("parse published release after CD success: {e}"))?;
+                )?)
+                .map_err(|e| format!("parse published release after CD success: {e}"))?;
                 verify_published_release(&release, &tag)?;
                 println!("Published immutable release {tag}: {run_url}");
                 return Ok(());
@@ -1452,7 +1515,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let path = std::env::temp_dir().join(format!(
-                "zed-wit-version-history-{}-{}", std::process::id(),
+                "zed-wit-version-history-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             match fs::create_dir(&path) {
@@ -1472,13 +1536,28 @@ mod tests {
         fs::create_dir_all(root.join("crates/wit-language-server")).unwrap();
         let manifest = root.join(Scope::Lsp.manifest());
         let write_version = |version: &str| {
-            fs::write(&manifest, format!("[package]\nname = \"fixture\"\nversion = \"{version}\"\n")).unwrap()
+            fs::write(
+                &manifest,
+                format!("[package]\nname = \"fixture\"\nversion = \"{version}\"\n"),
+            )
+            .unwrap()
         };
         let commit = |label: &str| {
             git(&["add", "."], &root).unwrap();
-            command("git", &["-c", "user.name=Fixture",
-                "-c", "user.email=fixture@example.invalid",
-                "commit", "-qm", label], &root).unwrap();
+            command(
+                "git",
+                &[
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "commit",
+                    "-qm",
+                    label,
+                ],
+                &root,
+            )
+            .unwrap();
             git(&["rev-parse", "HEAD"], &root).unwrap()
         };
         write_version("0.1.2");
@@ -1489,9 +1568,11 @@ mod tests {
         // original commits from the feature branch.
         write_version("0.1.3");
         let squash = commit("squash");
-        assert_eq!(historical_predecessor_version(
-            &root, Scope::Lsp, &squash, 3, false, candidate,
-        ).unwrap(), Version::parse("0.1.2").unwrap());
+        assert_eq!(
+            historical_predecessor_version(&root, Scope::Lsp, &squash, 3, false, candidate,)
+                .unwrap(),
+            Version::parse("0.1.2").unwrap()
+        );
 
         git(&["reset", "--hard", &origin], &root).unwrap();
         // Rebase: the version change can be in an earlier rebased commit.
@@ -1499,22 +1580,39 @@ mod tests {
         let _ = commit("first rebased");
         fs::write(root.join("notes.txt"), "reviewed notes").unwrap();
         let last_rebase = commit("second rebased");
-        assert_eq!(historical_predecessor_version(
-            &root, Scope::Lsp, &last_rebase, 2, false, candidate,
-        ).unwrap(), Version::parse("0.1.2").unwrap());
+        assert_eq!(
+            historical_predecessor_version(&root, Scope::Lsp, &last_rebase, 2, false, candidate,)
+                .unwrap(),
+            Version::parse("0.1.2").unwrap()
+        );
 
         git(&["reset", "--hard", &origin], &root).unwrap();
         git(&["switch", "-q", "-c", "release-fixture"], &root).unwrap();
         write_version("0.1.3");
         let _ = commit("feature version");
         git(&["switch", "-q", "main"], &root).unwrap();
-        command("git", &["-c", "user.name=Fixture",
-            "-c", "user.email=fixture@example.invalid",
-            "merge", "--no-ff", "-qm", "merge PR", "release-fixture"], &root).unwrap();
+        command(
+            "git",
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "merge",
+                "--no-ff",
+                "-qm",
+                "merge PR",
+                "release-fixture",
+            ],
+            &root,
+        )
+        .unwrap();
         let merged = git(&["rev-parse", "HEAD"], &root).unwrap();
-        assert_eq!(historical_predecessor_version(
-            &root, Scope::Lsp, &merged, 1, false, candidate,
-        ).unwrap(), Version::parse("0.1.2").unwrap());
+        assert_eq!(
+            historical_predecessor_version(&root, Scope::Lsp, &merged, 1, false, candidate,)
+                .unwrap(),
+            Version::parse("0.1.2").unwrap()
+        );
     }
 
     #[test]
@@ -1523,7 +1621,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let path = std::env::temp_dir().join(format!(
-                "zed-wit-files-{}-{}", std::process::id(),
+                "zed-wit-files-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             match fs::create_dir(&path) {
@@ -1542,19 +1641,23 @@ mod tests {
         fs::create_dir_all(root.join("docs/releases")).unwrap();
         fs::write(root.join("CHANGELOG.md"), "notes").unwrap();
         assert!(checked_release_path(&root, &root.join("CHANGELOG.md"), true).is_ok());
-        assert!(checked_release_path(
-            &root, &root.join("docs/releases/extension/v0.1.1.md"), false
-        ).is_ok());
+        assert!(
+            checked_release_path(
+                &root,
+                &root.join("docs/releases/extension/v0.1.1.md"),
+                false
+            )
+            .is_ok()
+        );
         assert!(checked_release_path(&root, &root.join("CHANGELOG.md"), false).is_err());
-        assert!(checked_release_path(
-            &root, &root.join("docs/../CHANGELOG.md"), true
-        ).is_err());
+        assert!(checked_release_path(&root, &root.join("docs/../CHANGELOG.md"), true).is_err());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(&root, root.join("docs/releases/escape")).unwrap();
-            assert!(checked_release_path(
-                &root, &root.join("docs/releases/escape/publish.md"), false
-            ).is_err());
+            assert!(
+                checked_release_path(&root, &root.join("docs/releases/escape/publish.md"), false)
+                    .is_err()
+            );
         }
     }
 
@@ -1564,7 +1667,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let path = std::env::temp_dir().join(format!(
-                "zed-wit-tags-{}-{}", std::process::id(),
+                "zed-wit-tags-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             match fs::create_dir(&path) {
@@ -1581,17 +1685,52 @@ mod tests {
         }
         let _cleanup = Cleanup(root.clone());
         git(&["init", "-q", "-b", "main"], &root).unwrap();
-        command("git", &["-c", "user.name=Fixture",
-            "-c", "user.email=fixture@example.invalid",
-            "commit", "--allow-empty", "-qm", "base"], &root).unwrap();
+        command(
+            "git",
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "base",
+            ],
+            &root,
+        )
+        .unwrap();
         let commit = git(&["rev-parse", "HEAD"], &root).unwrap();
         git(&["tag", "v0.1.3"], &root).unwrap();
-        command("git", &["-c", "user.name=Fixture",
-            "-c", "user.email=fixture@example.invalid",
-            "tag", "-a", "v0.1.4", "-m", "annotated"], &root).unwrap();
+        command(
+            "git",
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "tag",
+                "-a",
+                "v0.1.4",
+                "-m",
+                "annotated",
+            ],
+            &root,
+        )
+        .unwrap();
         for tag in ["v0.1.3", "v0.1.4"] {
-            let listing = command("git", &["ls-remote", "--tags", root.to_str().unwrap(),
-                &format!("refs/tags/{tag}"), &format!("refs/tags/{tag}^{{}}")], &root).unwrap();
+            let listing = command(
+                "git",
+                &[
+                    "ls-remote",
+                    "--tags",
+                    root.to_str().unwrap(),
+                    &format!("refs/tags/{tag}"),
+                    &format!("refs/tags/{tag}^{{}}"),
+                ],
+                &root,
+            )
+            .unwrap();
             assert_eq!(parse_remote_tag_commit(&listing, tag).unwrap(), commit);
         }
     }
@@ -1602,7 +1741,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let path = std::env::temp_dir().join(format!(
-                "zed-wit-preparation-{}-{}", std::process::id(),
+                "zed-wit-preparation-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             match fs::create_dir(&path) {
@@ -1621,27 +1761,50 @@ mod tests {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::create_dir_all(root.join("crates/wit-language-server/src")).unwrap();
         fs::write(root.join("src/lib.rs"), "pub fn fixture() {}\n").unwrap();
-        fs::write(root.join("crates/wit-language-server/src/lib.rs"), "pub fn fixture() {}\n").unwrap();
+        fs::write(
+            root.join("crates/wit-language-server/src/lib.rs"),
+            "pub fn fixture() {}\n",
+        )
+        .unwrap();
         fs::write(root.join("Cargo.toml"), 
             "[package]\nname = \"zed-wit\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\nmembers = [\"crates/wit-language-server\"]\nresolver = \"3\"\n"
         ).unwrap();
-        fs::write(root.join(Scope::Lsp.manifest()), 
-            "[package]\nname = \"wit-language-server\"\nversion = \"0.1.2\"\nedition = \"2024\"\n"
-        ).unwrap();
+        fs::write(
+            root.join(Scope::Lsp.manifest()),
+            "[package]\nname = \"wit-language-server\"\nversion = \"0.1.2\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
         fs::write(root.join("extension.toml"), "version = \"0.1.0\"\n").unwrap();
-        fs::write(root.join("CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n- fixture\n").unwrap();
+        fs::write(
+            root.join("CHANGELOG.md"),
+            "# Changelog\n\n## Unreleased\n\n- fixture\n",
+        )
+        .unwrap();
         command("cargo", &["generate-lockfile", "--offline"], &root).unwrap();
         git(&["init", "-q", "-b", "main"], &root).unwrap();
         git(&["add", "."], &root).unwrap();
-        command("git", &["-c", "user.name=Fixture",
-            "-c", "user.email=fixture@example.invalid",
-            "commit", "-qm", "base"], &root).unwrap();
+        command(
+            "git",
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "base",
+            ],
+            &root,
+        )
+        .unwrap();
         let before = git(&["rev-parse", "HEAD"], &root).unwrap();
         let version = Version::parse("0.1.2").unwrap();
         let candidate = version.bump(Bump::Patch).unwrap();
         let tag = Scope::Lsp.tag(candidate);
         let plan = Plan {
-            current: version, candidate, tag: tag.clone(),
+            current: version,
+            candidate,
+            tag: tag.clone(),
             branch: format!("release-prep/lsp-{tag}"),
             notes: "docs/releases/lsp/v0.1.3.md".into(),
             main_sha: before.clone(),
@@ -1650,12 +1813,22 @@ mod tests {
         git(&["switch", "-q", "-c", &plan.branch], &root).unwrap();
         apply_local_release_files(&root, Scope::Lsp, &plan).unwrap();
         assert_eq!(manifest_version(&root, Scope::Lsp).unwrap(), candidate);
-        assert_eq!(manifest_version(&root, Scope::Extension).unwrap(),
-            Version::parse("0.1.0").unwrap());
+        assert_eq!(
+            manifest_version(&root, Scope::Extension).unwrap(),
+            Version::parse("0.1.0").unwrap()
+        );
         let lock = util::read_nonempty(&root.join("Cargo.lock")).unwrap();
         assert!(lock.contains("name = \"wit-language-server\"\nversion = \"0.1.3\""));
-        assert!(util::read_nonempty(&root.join(&plan.notes)).unwrap().contains(PREPARATION_MARKER));
-        assert!(util::read_nonempty(&root.join("CHANGELOG.md")).unwrap().contains(&tag));
+        assert!(
+            util::read_nonempty(&root.join(&plan.notes))
+                .unwrap()
+                .contains(PREPARATION_MARKER)
+        );
+        assert!(
+            util::read_nonempty(&root.join("CHANGELOG.md"))
+                .unwrap()
+                .contains(&tag)
+        );
         assert!(!git(&["status", "--porcelain"], &root).unwrap().is_empty());
         assert_eq!(git(&["rev-parse", &before], &root).unwrap(), before);
         assert!(check_prepare_paths(&root, Scope::Lsp, &plan.notes).is_err());
@@ -1667,7 +1840,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let path = std::env::temp_dir().join(format!(
-                "zed-wit-publish-main-{}-{}", std::process::id(),
+                "zed-wit-publish-main-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed),
             ));
             match fs::create_dir(&path) {
@@ -1684,9 +1858,21 @@ mod tests {
         }
         let _cleanup = Cleanup(root.clone());
         git(&["init", "-q", "-b", "main"], &root).unwrap();
-        command("git", &["-c", "user.name=Fixture", "-c",
-            "user.email=fixture@example.invalid", "commit", "--allow-empty",
-            "-qm", "initial"], &root).unwrap();
+        command(
+            "git",
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "initial",
+            ],
+            &root,
+        )
+        .unwrap();
         let main_sha = git(&["rev-parse", "HEAD"], &root).unwrap();
         ensure_main_branch(&root).unwrap();
         git(&["switch", "-q", "-c", "fixture-feature"], &root).unwrap();
@@ -1703,10 +1889,21 @@ mod tests {
         assert!(ensure_release_transition(old, old, next, next).is_err());
         assert!(ensure_release_transition(old, next, old, next).is_err());
         assert!(ensure_release_transition(old, next, next, old).is_err());
-        assert!(ensure_release_transition(old, Version::parse("0.2.0").unwrap(), next, next).is_err());
-        assert!(valid_version_transition(old, Version::parse("0.2.0").unwrap()));
-        assert!(valid_version_transition(old, Version::parse("1.0.0").unwrap()));
-        assert!(!valid_version_transition(old, Version::parse("0.1.4").unwrap()));
+        assert!(
+            ensure_release_transition(old, Version::parse("0.2.0").unwrap(), next, next).is_err()
+        );
+        assert!(valid_version_transition(
+            old,
+            Version::parse("0.2.0").unwrap()
+        ));
+        assert!(valid_version_transition(
+            old,
+            Version::parse("1.0.0").unwrap()
+        ));
+        assert!(!valid_version_transition(
+            old,
+            Version::parse("0.1.4").unwrap()
+        ));
     }
 
     #[test]
@@ -1746,11 +1943,23 @@ mod tests {
         let tag_object = "ffffffffffffffffffffffffffffffffffffffff";
         let lightweight = format!("{commit}\trefs/tags/v0.1.3");
         let annotated = format!("{tag_object}\trefs/tags/v0.1.3\n{commit}\trefs/tags/v0.1.3^{{}}");
-        assert_eq!(parse_remote_tag_commit(&lightweight, "v0.1.3").unwrap(), commit);
-        assert_eq!(parse_remote_tag_commit(&annotated, "v0.1.3").unwrap(), commit);
+        assert_eq!(
+            parse_remote_tag_commit(&lightweight, "v0.1.3").unwrap(),
+            commit
+        );
+        assert_eq!(
+            parse_remote_tag_commit(&annotated, "v0.1.3").unwrap(),
+            commit
+        );
         assert!(parse_remote_tag_commit("", "v0.1.3").is_err());
         assert!(parse_remote_tag_commit(&format!("{commit}\trefs/tags/other"), "v0.1.3").is_err());
-        assert!(parse_remote_tag_commit(&format!("{annotated}\n{commit}\trefs/tags/v0.1.3^{{}}"), "v0.1.3").is_err());
+        assert!(
+            parse_remote_tag_commit(
+                &format!("{annotated}\n{commit}\trefs/tags/v0.1.3^{{}}"),
+                "v0.1.3"
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1762,15 +1971,29 @@ mod tests {
                 "{id}\t{sha}\tworkflow_dispatch\t{status}\t{conclusion}\tCD / {operation} / lsp / {tag}"
             )
         };
-        assert!(validate_prior_cd_runs(
-            &row(1, "completed", "success", "validate"), sha, Scope::Lsp, tag, false
-        ).is_ok());
+        assert!(
+            validate_prior_cd_runs(
+                &row(1, "completed", "success", "validate"),
+                sha,
+                Scope::Lsp,
+                tag,
+                false
+            )
+            .is_ok()
+        );
         for conclusion in ["failure", "cancelled", "timed_out"] {
             let failed = row(2, "completed", conclusion, "publish");
             assert!(validate_prior_cd_runs(&failed, sha, Scope::Lsp, tag, true).is_ok());
             assert!(validate_prior_cd_runs(&failed, sha, Scope::Lsp, tag, false).is_ok());
         }
-        for conclusion in ["success", "neutral", "skipped", "stale", "action_required", "unknown"] {
+        for conclusion in [
+            "success",
+            "neutral",
+            "skipped",
+            "stale",
+            "action_required",
+            "unknown",
+        ] {
             let previous = row(3, "completed", conclusion, "publish");
             assert!(validate_prior_cd_runs(&previous, sha, Scope::Lsp, tag, true).is_err());
         }
@@ -1780,12 +2003,26 @@ mod tests {
         }
         let verified_failure = row(5, "completed", "failure", "publish");
         let verified_success = row(6, "completed", "success", "publish");
-        assert!(validate_prior_cd_runs(
-            &format!("{verified_failure}\n{verified_success}"), sha, Scope::Lsp, tag, true,
-        ).is_err());
-        assert!(validate_prior_cd_runs(
-            &format!("{verified_failure}\n{verified_failure}"), sha, Scope::Lsp, tag, true,
-        ).is_err());
+        assert!(
+            validate_prior_cd_runs(
+                &format!("{verified_failure}\n{verified_success}"),
+                sha,
+                Scope::Lsp,
+                tag,
+                true,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_prior_cd_runs(
+                &format!("{verified_failure}\n{verified_failure}"),
+                sha,
+                Scope::Lsp,
+                tag,
+                true,
+            )
+            .is_err()
+        );
         assert!(validate_prior_cd_runs("", sha, Scope::Lsp, tag, true).is_err());
         assert!(validate_prior_cd_runs("malformed", sha, Scope::Lsp, tag, false).is_err());
         let legacy = format!("7\t{sha}\tworkflow_dispatch\tcompleted\tfailure\tCD");
