@@ -38,4 +38,3 @@ pub(crate) fn parse_iterations(args: &[String]) -> Result<usize, String> {
 
     Ok(iterations)
 }
-
