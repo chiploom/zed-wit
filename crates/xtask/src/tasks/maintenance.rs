@@ -233,7 +233,11 @@ pub(crate) fn update_grammar(args: &[String]) -> Result<(), String> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::safe_generated_path;
-    use std::{fs, os::unix::fs::symlink, sync::atomic::{AtomicU64, Ordering}};
+    use std::{
+        fs,
+        os::unix::fs::symlink,
+        sync::atomic::{AtomicU64, Ordering},
+    };
 
     #[test]
     fn cargo_clean_stays_in_the_default_build_directory() {
