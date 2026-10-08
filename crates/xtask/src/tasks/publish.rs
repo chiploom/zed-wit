@@ -116,7 +116,6 @@ struct Options {
     scope: Scope,
     bump: Bump,
     operation: Operation,
-    confirm: bool,
     wait: bool,
     pr: Option<u64>,
 }
