@@ -627,6 +627,59 @@ fn replace_manifest_version(
     }
     Ok(output)
 }
+fn checked_release_path(root: &Path, file: &Path, existing_file: bool)
+    -> Result<(), String>
+{
+    let relative = file.strip_prefix(root)
+        .map_err(|_| "release preparation path escapes repository root".to_owned())?;
+    let mut inspected = root.to_path_buf();
+    let components = relative.components().collect::<Vec<_>>();
+    if components.is_empty() {
+        return Err("release preparation path cannot be repository root".into());
+    }
+    for (position, component) in components.iter().enumerate() {
+        match component {
+            std::path::Component::Normal(value) => inspected.push(value),
+            _ => return Err("release preparation path contains traversal".into()),
+        }
+        let last = position == components.len() - 1;
+        match fs::symlink_metadata(&inspected) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(format!(
+                        "release preparation refuses symlink: {}", inspected.display()
+                    ));
+                }
+                if last {
+                    if !existing_file || !metadata.is_file() {
+                        return Err(format!(
+                            "release file has unexpected type or exists: {}", inspected.display()
+                        ));
+                    }
+                } else if !metadata.is_dir() {
+                    return Err(format!("release parent is not directory: {}", inspected.display()));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if existing_file {
+                    return Err(format!("required release path missing: {}", inspected.display()));
+                }
+            }
+            Err(error) => return Err(format!("inspect {}: {error}", inspected.display())),
+        }
+    }
+    Ok(())
+}
+fn check_prepare_paths(root: &Path, scope: Scope, notes: &str) -> Result<(), String> {
+    for file in ["CHANGELOG.md", "Cargo.lock", scope.manifest()] {
+        checked_release_path(root, &root.join(file), true)?;
+    }
+    if scope == Scope::Extension {
+        checked_release_path(root, &root.join("extension.toml"), true)?;
+    }
+    checked_release_path(root, &root.join(notes), false)
+}
+
 fn update_manifest(
     path: &Path,
     previous: Version,
@@ -681,6 +734,7 @@ fn prepare(root: &Path, scope: Scope, bump: Bump) -> Result<(), String> {
             plan.branch
         ));
     }
+    check_prepare_paths(root, scope, &plan.notes)?;
     print_plan(scope, &plan)?;
     git(&["switch", "-c", &plan.branch], root)?;
     let paths = if scope == Scope::Lsp {
@@ -747,6 +801,8 @@ fn notes_reviewed(root: &Path, scope: Scope, version: Version) -> Result<(), Str
         scope.name(),
         version.value()
     ));
+    checked_release_path(root, &notes, true)?;
+    checked_release_path(root, &root.join("CHANGELOG.md"), true)?;
     let text = util::read_nonempty(&notes)?;
     if text.contains(PREPARATION_MARKER) || text.contains("TODO") || text.trim().len() < 100 {
         return Err(format!(
@@ -1422,6 +1478,47 @@ mod tests {
         assert_eq!(historical_predecessor_version(
             &root, Scope::Lsp, &merged, 1, false, candidate,
         ).unwrap(), Version::parse("0.1.2").unwrap());
+    }
+
+    #[test]
+    fn release_paths_reject_filesystem_escapes_and_existing_notes() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let path = std::env::temp_dir().join(format!(
+                "zed-wit-files-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("create release file fixture: {e}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove release file fixture");
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        fs::create_dir_all(root.join("docs/releases")).unwrap();
+        fs::write(root.join("CHANGELOG.md"), "notes").unwrap();
+        assert!(checked_release_path(&root, &root.join("CHANGELOG.md"), true).is_ok());
+        assert!(checked_release_path(
+            &root, &root.join("docs/releases/extension/v0.1.1.md"), false
+        ).is_ok());
+        assert!(checked_release_path(&root, &root.join("CHANGELOG.md"), false).is_err());
+        assert!(checked_release_path(
+            &root, &root.join("docs/../CHANGELOG.md"), true
+        ).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&root, root.join("docs/releases/escape")).unwrap();
+            assert!(checked_release_path(
+                &root, &root.join("docs/releases/escape/publish.md"), false
+            ).is_err());
+        }
     }
 
     #[test]
