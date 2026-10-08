@@ -584,6 +584,21 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
     Ok(())
 }
 
+fn parse_dispatch_identity(response: &str) -> Result<(u64, String), String> {
+    let result: Value = serde_json::from_str(response)
+        .map_err(|_| "CD dispatch returned no usable run identity; inspect Actions before retrying".to_owned())?;
+    let id = result["workflow_run_id"].as_u64()
+        .filter(|id| *id > 0)
+        .ok_or("CD dispatch omitted workflow_run_id; inspect GitHub Actions before retrying")?;
+    let url = result["html_url"].as_str()
+        .ok_or("CD dispatch omitted run URL")?;
+    let expected = format!("https://github.com/{REPO}/actions/runs/{id}");
+    if url != expected {
+        return Err("CD dispatch returned an unexpected or mismatched run URL".into());
+    }
+    Ok((id, url.to_owned()))
+}
+
 fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> {
     check_release_preconditions(root)?;
     let main_sha = confirm_remote_main(root)?;
@@ -679,14 +694,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         "-f", &format!("inputs[scope]={}", scope.name()),
         "-f", &format!("inputs[tag]={tag}"),
     ], root).map_err(|_| "CD dispatch may have been accepted; check GitHub Actions before retrying".to_owned())?;
-    let result: Value = serde_json::from_str(&response)
-        .map_err(|_| "CD dispatch returned no run ID; inspect GitHub Actions before retrying".to_owned())?;
-    let id = result["workflow_run_id"].as_u64()
-        .filter(|id| *id > 0)
-        .ok_or("CD dispatch omitted workflow_run_id; inspect GitHub Actions before retrying")?;
-    let run_url = result["html_url"].as_str()
-        .filter(|url| url.starts_with("https://github.com/chiploom/zed-wit/actions/runs/"))
-        .ok_or("CD dispatch returned an unexpected run URL")?;
+    let (id, run_url) = parse_dispatch_identity(&response)?;
     println!("Protected CD dispatch requested for {tag}: {run_url} (run {id}).");
     if !wait {
         println!("Status: requested/pending. This is not a published release.");
@@ -859,6 +867,21 @@ mod tests {
         assert!(validate_changed_files("extension.toml", Scope::Lsp, v).is_err());
         assert!(validate_changed_files(".github/workflows/release.yml", Scope::Lsp, v).is_err());
         assert!(validate_changed_files("crates/wit-language-server/src/main.rs", Scope::Lsp, v).is_err());
+    }
+
+    #[test]
+    fn workflow_dispatch_must_identify_one_exact_authenticated_run() {
+        let valid = r#"{"workflow_run_id":1234,"html_url":"https://github.com/chiploom/zed-wit/actions/runs/1234"}"#;
+        assert_eq!(parse_dispatch_identity(valid).unwrap().0, 1234);
+        for response in [
+            "",
+            "{}",
+            r#"{"workflow_run_id":0,"html_url":"https://github.com/chiploom/zed-wit/actions/runs/0"}"#,
+            r#"{"workflow_run_id":1234,"html_url":"https://github.com/chiploom/zed-wit/actions/runs/1235"}"#,
+            r#"{"workflow_run_id":1234,"html_url":"https://attacker.invalid/chiploom/zed-wit/actions/runs/1234"}"#,
+        ] {
+            assert!(parse_dispatch_identity(response).is_err());
+        }
     }
 
     #[test]
