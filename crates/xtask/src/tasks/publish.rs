@@ -735,8 +735,25 @@ fn prepare(root: &Path, scope: Scope, bump: Bump) -> Result<(), String> {
         ));
     }
     check_prepare_paths(root, scope, &plan.notes)?;
+    if !util::read_nonempty(&root.join("CHANGELOG.md"))?.contains("## Unreleased\n") {
+        return Err("CHANGELOG.md has no Unreleased heading; no preparation branch created".into());
+    }
     print_plan(scope, &plan)?;
     git(&["switch", "-c", &plan.branch], root)?;
+    apply_local_release_files(root, scope, &plan)?;
+    println!(
+        "Prepared {} at {}. Edit release notes and changelog, review changes, run tests, and commit locally.",
+        plan.tag, plan.branch
+    );
+    println!("No branch was pushed and no pull request or release was created.");
+    println!(
+        "After reviewing and committing: cargo xtask publish --scope {} --submit --confirm",
+        scope.name()
+    );
+    Ok(())
+}
+
+fn apply_local_release_files(root: &Path, scope: Scope, plan: &Plan) -> Result<(), String> {
     let paths = if scope == Scope::Lsp {
         vec![(root.join(scope.manifest()), Some("[package]"))]
     } else {
@@ -783,15 +800,6 @@ fn prepare(root: &Path, scope: Scope, bump: Bump) -> Result<(), String> {
     // Cargo updates the workspace package version in Cargo.lock. This is
     // deliberately the non-locked invocation; submit later verifies --locked.
     command("cargo", &["check", "--workspace", "--offline"], root)?;
-    println!(
-        "Prepared {} at {}. Edit release notes and changelog, review changes, run tests, and commit locally.",
-        plan.tag, plan.branch
-    );
-    println!("No branch was pushed and no pull request or release was created.");
-    println!(
-        "After reviewing and committing: cargo xtask publish --scope {} --submit --confirm",
-        scope.name()
-    );
     Ok(())
 }
 
@@ -1586,6 +1594,71 @@ mod tests {
                 &format!("refs/tags/{tag}"), &format!("refs/tags/{tag}^{{}}")], &root).unwrap();
             assert_eq!(parse_remote_tag_commit(&listing, tag).unwrap(), commit);
         }
+    }
+
+    #[test]
+    fn disposable_release_preparation_updates_manifest_lock_and_review_files() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let path = std::env::temp_dir().join(format!(
+                "zed-wit-preparation-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("create temporary preparation repo: {e}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove temporary preparation repo");
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("crates/wit-language-server/src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn fixture() {}\n").unwrap();
+        fs::write(root.join("crates/wit-language-server/src/lib.rs"), "pub fn fixture() {}\n").unwrap();
+        fs::write(root.join("Cargo.toml"), 
+            "[package]\nname = \"zed-wit\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\nmembers = [\"crates/wit-language-server\"]\nresolver = \"3\"\n"
+        ).unwrap();
+        fs::write(root.join(Scope::Lsp.manifest()), 
+            "[package]\nname = \"wit-language-server\"\nversion = \"0.1.2\"\nedition = \"2024\"\n"
+        ).unwrap();
+        fs::write(root.join("extension.toml"), "version = \"0.1.0\"\n").unwrap();
+        fs::write(root.join("CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n- fixture\n").unwrap();
+        command("cargo", &["generate-lockfile", "--offline"], &root).unwrap();
+        git(&["init", "-q", "-b", "main"], &root).unwrap();
+        git(&["add", "."], &root).unwrap();
+        command("git", &["-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid",
+            "commit", "-qm", "base"], &root).unwrap();
+        let before = git(&["rev-parse", "HEAD"], &root).unwrap();
+        let version = Version::parse("0.1.2").unwrap();
+        let candidate = version.bump(Bump::Patch).unwrap();
+        let tag = Scope::Lsp.tag(candidate);
+        let plan = Plan {
+            current: version, candidate, tag: tag.clone(),
+            branch: format!("release-prep/lsp-{tag}"),
+            notes: "docs/releases/lsp/v0.1.3.md".into(),
+            main_sha: before.clone(),
+        };
+        check_prepare_paths(&root, Scope::Lsp, &plan.notes).unwrap();
+        git(&["switch", "-q", "-c", &plan.branch], &root).unwrap();
+        apply_local_release_files(&root, Scope::Lsp, &plan).unwrap();
+        assert_eq!(manifest_version(&root, Scope::Lsp).unwrap(), candidate);
+        assert_eq!(manifest_version(&root, Scope::Extension).unwrap(),
+            Version::parse("0.1.0").unwrap());
+        let lock = util::read_nonempty(&root.join("Cargo.lock")).unwrap();
+        assert!(lock.contains("name = \"wit-language-server\"\nversion = \"0.1.3\""));
+        assert!(util::read_nonempty(&root.join(&plan.notes)).unwrap().contains(PREPARATION_MARKER));
+        assert!(util::read_nonempty(&root.join("CHANGELOG.md")).unwrap().contains(&tag));
+        assert!(!git(&["status", "--porcelain"], &root).unwrap().is_empty());
+        assert_eq!(git(&["rev-parse", &before], &root).unwrap(), before);
+        assert!(check_prepare_paths(&root, Scope::Lsp, &plan.notes).is_err());
     }
 
     #[test]
