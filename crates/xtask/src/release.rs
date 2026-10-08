@@ -625,6 +625,67 @@ pub fn verify_release_target(target: &str, input: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{path::PathBuf, sync::atomic::{AtomicU64, Ordering}};
+
+    struct ArtifactDir(PathBuf);
+
+    impl ArtifactDir {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            loop {
+                let path = std::env::temp_dir().join(format!(
+                    "zed-wit-release-artifact-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => panic!("create artifact test directory: {error}"),
+                }
+            }
+        }
+    }
+
+    impl Drop for ArtifactDir {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).expect("remove artifact test directory");
+        }
+    }
+
+    #[test]
+    fn artifact_copy_refuses_existing_files_and_source_aliases() {
+        let dir = ArtifactDir::new();
+        let source = dir.0.join("source");
+        let artifact = dir.0.join("artifact");
+        fs::write(&source, b"release-binary").unwrap();
+        fs::write(&artifact, b"existing").unwrap();
+        assert!(copy_release_binary_new(&source, &artifact).is_err());
+        assert_eq!(fs::read(&artifact).unwrap(), b"existing");
+        assert!(copy_release_binary_new(&source, &source).is_err());
+        assert_eq!(fs::read(&source).unwrap(), b"release-binary");
+
+        fs::remove_file(&artifact).unwrap();
+        copy_release_binary_new(&source, &artifact).unwrap();
+        assert_eq!(fs::read(&artifact).unwrap(), b"release-binary");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn artifact_copy_refuses_dangling_symlink_without_creating_target() {
+        use std::os::unix::fs::symlink;
+        let dir = ArtifactDir::new();
+        let source = dir.0.join("source");
+        let victim = dir.0.join("victim");
+        let artifact = dir.0.join("artifact");
+        fs::write(&source, b"release-binary").unwrap();
+        symlink(&victim, &artifact).unwrap();
+        assert!(!artifact.exists(), "dangling symlink follows nonexistent target");
+        assert!(copy_release_binary_new(&source, &artifact).is_err());
+        assert!(!victim.exists(), "symlink target must remain absent");
+        assert!(fs::symlink_metadata(&artifact).unwrap().file_type().is_symlink());
+    }
+
 
     #[test]
     fn stable_release_versions_are_strict() {
