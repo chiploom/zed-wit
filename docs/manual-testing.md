@@ -216,10 +216,11 @@ covered by deterministic query tests.
 Release delivery is qualified after publication with
 `cargo xtask test-zed-hosted`. The command exercises first download, cached
 reuse, corrupted executable recovery, and missing-checksum recovery against the
-published LSP release that matches `crates/wit-language-server/Cargo.toml`.
-Platform-specific execution
-evidence is still required; the automation does not turn one host into evidence
-for another architecture or operating system.
+published LSP release selected by
+`package.metadata.zed-wit.runtime-lsp-version` in the root `Cargo.toml`.
+The adapter's runtime pin can differ from the native server crate version.
+Platform-specific execution evidence is still required; the automation does not
+turn one host into evidence for another architecture or operating system.
 
 Do not substitute a manual GUI pass when `test-zed-gui` fails because the host
 denies input injection. Treat that as an environment/platform qualification

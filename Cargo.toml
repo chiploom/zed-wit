@@ -8,7 +8,7 @@ publish = false
 repository = "https://github.com/chiploom/zed-wit"
 
 [package.metadata.zed-wit]
-runtime-lsp-version = "0.1.1"
+runtime-lsp-version = "0.1.2"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

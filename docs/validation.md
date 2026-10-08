@@ -5,6 +5,48 @@ published native release. It is not a substitute for the reusable Zed
 qualification checklist in [manual testing](manual-testing.md), and it does not
 claim Zed registry publication.
 
+## v0.1.2 LSP publication and adapter qualification — 2026-10-08
+
+The [immutable `v0.1.2` release](https://github.com/chiploom/zed-wit/releases/tag/v0.1.2),
+published on 2026-10-07, is non-draft and non-prerelease. Its protected tag
+resolves to `3d067f3ea7dffdd4d091d2d5d62be8ac025ada5b`. The release
+contains five native server binaries, their respective SHA-256 checksums,
+provenance records and license bundles, and the project licenses and
+third-party notices.
+
+### Adapter qualification — macOS ARM64
+
+[PR #21](https://github.com/chiploom/zed-wit/pull/21) records local
+qualification on 2026-10-08 using macOS ARM64 and Zed 1.23.2, at adapter
+commit `6fcce89cecbe9fb8c58cf598507cebf439abe235`. The adapter pins
+`package.metadata.zed-wit.runtime-lsp-version` to `0.1.2` independently
+of its own package version.
+
+The recorded validation covered:
+
+- download and SHA-256 sidecar verification for all five published binaries;
+- `cargo xtask test-zed` for native server startup/restart and semantic fixtures;
+- `cargo xtask test-zed-hosted` for first download, verified cache reuse,
+  corrupt-binary recovery, and missing-checksum recovery using the published
+  `v0.1.2` native server; the released macOS ARM64 binary has SHA-256
+  `6b4f46128fca48e089b5ab70534ea3aa2a1ce4488ba07520587712d6088c0c5f`;
+- `cargo xtask test-zed-gui --allow-input-injection true` for real-Zed
+  snippet insertion/tab stops and outline navigation.
+
+The hosted and GUI commands record their results respectively in
+`target/zed-hosted/profile/zed-hosted-report.json` and
+`target/zed-gui/zed-gui-report.json` in the local qualification workspace.
+
+These results were reported from the local validation environment in PR #21,
+not independently reproduced by this documentation update. The subsequent
+changes to the PR update documentation only.
+
+Real-Zed hosted delivery on macOS x86_64, Linux GNU ARM64/x86_64, and
+Windows x86_64 MSVC is not yet qualified; it is tracked in
+[issue #22](https://github.com/chiploom/zed-wit/issues/22). Native
+cross-platform CI and release-asset checksum verification are separate
+evidence and do not establish real-Zed runtime qualification.
+
 ## v0.1.1 LSP recovery publication — 2026-10-07
 
 The immutable `v0.1.1` GitHub Release restores native LSP distribution after
@@ -15,7 +57,8 @@ directly to
 The release is published, non-prerelease, immutable, and contains the complete
 23-file distribution contract: five native binaries, one
 checksum/provenance/license bundle per binary, and the project MIT, Apache-2.0,
-and third-party notice files. The extension runtime pin now targets `0.1.1`.
+and third-party notice files. At the time of this recovery qualification, the
+extension runtime pin targeted `0.1.1`; PR #21 later advanced it to `0.1.2`.
 
 ### Hosted delivery qualification — macOS ARM64
 

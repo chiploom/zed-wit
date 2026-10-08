@@ -43,8 +43,8 @@ the Zed extension registry entry; registry succession remains a separate process
 Protected tag `v0.1.0` represents the historical first **LSP-only** release,
 but its deleted immutable GitHub Release cannot be recreated under that tag.
 `v0.1.1` is the published immutable recovery release for restoring LSP
-distribution, and the extension runtime pin now targets `0.1.1`. Neither is a
-published Zed extension.
+distribution, and the extension runtime pin now targets `0.1.2`. Neither the
+LSP release nor this runtime pin publishes a Zed extension.
 
 ## Native assets
 

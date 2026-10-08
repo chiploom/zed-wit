@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Update the Zed extension runtime LSP pin to the published immutable `0.1.2`
+  release, with matching distribution and compatibility documentation. Record
+  macOS ARM64 hosted/GUI qualification and track remaining platforms in #22.
+
 - Prepare WIT Language Server `v0.1.2` against the requalified Bytecode Alliance
   WIT grammar at `f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6`; no concrete
   language-server behavior change is intended.

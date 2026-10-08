@@ -4,9 +4,9 @@ WIT adds first-class [WebAssembly Interface Types (WIT)](https://github.com/WebA
 
 The protected **v0.1.0** tag identifies the first LSP-only release, but its
 immutable GitHub Release was deleted. GitHub permanently reserves tag names used
-by immutable releases, so `v0.1.0` cannot be recreated. LSP distribution resumes
-with `v0.1.1`. This is still separate from Zed-extension publication, and the
-extension is not yet published in the Zed extension registry.
+by immutable releases, so `v0.1.0` cannot be recreated. LSP distribution was
+restored with `v0.1.1` and has since advanced to `v0.1.2`. This is separate from
+Zed-extension publication; the extension is not yet published in the Zed registry.
 
 ## Features
 
@@ -49,9 +49,9 @@ extension. Inspect **zed: open log** for startup or build failures.
 An existing registry WIT extension is overridden by the development install.
 Automatic native-server downloads follow
 `package.metadata.zed-wit.runtime-lsp-version` in the root manifest. The
-current pin is `0.1.1`, which resolves to the published immutable recovery LSP
-release. The LSP package version can advance independently without changing what
-the extension downloads.
+current pin is `0.1.2`, which resolves to the published immutable `v0.1.2`
+LSP release. The LSP package version can advance independently without changing
+what the extension downloads.
 
 ## How it works
 
@@ -122,10 +122,12 @@ registry transfer or duplicate entry is assumed.
 
 GitHub release publication is separate from registry publication. The deleted
 immutable `v0.1.0` release remains represented by its protected historical tag,
-while `v0.1.1` is the current published immutable **LSP-only** release. Future
-CD runs explicitly choose `lsp` or `extension` scope. LSP and extension
-versions can advance independently; the extension pins a published LSP version. See [publishing](docs/publishing.md) for
-the scope contract and registry succession gate.
+while `v0.1.1` is the published immutable recovery **LSP-only** release.
+The extension's runtime pin now targets the published immutable `v0.1.2` LSP
+release. Future CD runs explicitly choose `lsp` or `extension` scope. LSP and
+extension versions can advance independently; the extension pins a published LSP
+version. See [publishing](docs/publishing.md) for the scope contract and registry
+succession gate.
 
 ## Acknowledgements and license
 
