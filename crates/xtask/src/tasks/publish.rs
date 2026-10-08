@@ -1061,6 +1061,49 @@ fn validate_prior_cd_runs(
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum WorkflowProgress {
+    Pending,
+    Succeeded,
+}
+fn classify_workflow_run(
+    run: &Value, id: u64, main_sha: &str, scope: Scope, tag: &str,
+) -> Result<WorkflowProgress, String> {
+    let title = format!("CD / publish / {} / {tag}", scope.name());
+    if run["id"].as_u64() != Some(id)
+        || run["head_sha"].as_str() != Some(main_sha)
+        || run["head_branch"].as_str() != Some("main")
+        || run["event"].as_str() != Some("workflow_dispatch")
+        || run["path"].as_str() != Some(".github/workflows/release.yml")
+        || run["display_title"].as_str() != Some(title.as_str())
+    {
+        return Err("exact CD run identity differs from confirmed dispatch".into());
+    }
+    match run["status"].as_str() {
+        Some("queued" | "in_progress" | "requested" | "waiting" | "pending") => {
+            Ok(WorkflowProgress::Pending)
+        }
+        Some("completed") if run["conclusion"].as_str() == Some("success") => {
+            Ok(WorkflowProgress::Succeeded)
+        }
+        Some("completed") => Err(format!(
+            "protected CD run {id} completed with {:?}, not published",
+            run["conclusion"].as_str()
+        )),
+        _ => Err(format!("CD run {id} returned an unrecognized workflow status")),
+    }
+}
+fn verify_published_release(release: &Value, tag: &str) -> Result<(), String> {
+    if release["draft"].as_bool() == Some(false)
+        && release["tag_name"].as_str() == Some(tag)
+        && release["immutable"].as_bool() == Some(true)
+    {
+        Ok(())
+    } else {
+        Err("CD run completed, but the expected non-draft immutable release was not verified".into())
+    }
+}
+
 fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> {
     check_release_preconditions(root)?;
     let main_sha = confirm_remote_main(root)?;
@@ -1179,6 +1222,8 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
             "api",
             "-X",
             "POST",
+            "-H",
+            "X-GitHub-Api-Version: 2026-03-10",
             &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/dispatches"),
             "-F",
             "return_run_details=true",
@@ -1210,33 +1255,17 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
             root,
         )?)
         .map_err(|e| format!("parse exact workflow run {id}: {e}"))?;
-        match run["status"].as_str() {
-            Some("completed") => {
-                if run["conclusion"].as_str() != Some("success") {
-                    return Err(format!(
-                        "protected CD run {id} finished with {:?}, not published",
-                        run["conclusion"].as_str()
-                    ));
-                }
+        match classify_workflow_run(&run, id, &main_sha, scope, &tag)? {
+            WorkflowProgress::Pending => {}
+            WorkflowProgress::Succeeded => {
                 let release: Value = serde_json::from_str(&gh(
                     &["api", &format!("repos/{REPO}/releases/tags/{tag}")],
                     root,
-                )?)
-                .map_err(|e| format!("verify published release after CD success: {e}"))?;
-                if release["draft"].as_bool() != Some(false)
-                    || release["tag_name"].as_str() != Some(tag.as_str())
-                    || release["immutable"].as_bool() != Some(true)
-                {
-                    return Err(
-                        "CD run passed, but release publication/immutability could not be verified"
-                            .into(),
-                    );
-                }
+                )?).map_err(|e| format!("parse published release after CD success: {e}"))?;
+                verify_published_release(&release, &tag)?;
                 println!("Published immutable release {tag}: {run_url}");
                 return Ok(());
             }
-            Some("queued" | "in_progress" | "requested" | "waiting" | "pending") => {}
-            _ => return Err(format!("CD run {id} has unknown status; inspect {run_url}")),
         }
         thread::sleep(Duration::from_secs(10));
     }
@@ -1711,6 +1740,54 @@ mod tests {
             guard < checkout,
             "source SHA guard must precede checkout and CD work"
         );
+    }
+
+    #[test]
+    fn exact_workflow_wait_state_matrix_and_published_release_verification() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let tag = "v0.1.3";
+        let mut run = serde_json::json!({
+            "id": 19, "head_sha": sha, "head_branch": "main",
+            "event": "workflow_dispatch",
+            "path": ".github/workflows/release.yml",
+            "display_title": "CD / publish / lsp / v0.1.3",
+            "status": "waiting", "conclusion": null,
+        });
+        for status in ["requested", "queued", "waiting", "pending", "in_progress"] {
+            run["status"] = status.into();
+            assert_eq!(
+                classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).unwrap(),
+                WorkflowProgress::Pending,
+            );
+        }
+        run["status"] = "completed".into();
+        for conclusion in ["failure", "cancelled", "timed_out", "stale", "skipped"] {
+            run["conclusion"] = conclusion.into();
+            assert!(classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).is_err());
+        }
+        run["conclusion"] = "success".into();
+        assert_eq!(
+            classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).unwrap(),
+            WorkflowProgress::Succeeded,
+        );
+        run["head_sha"] = "0000000000000000000000000000000000000000".into();
+        assert!(classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).is_err());
+        run["head_sha"] = sha.into();
+        run["id"] = 20.into();
+        assert!(classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).is_err());
+
+        let published = serde_json::json!({
+            "tag_name": tag, "draft": false, "immutable": true,
+        });
+        assert!(verify_published_release(&published, tag).is_ok());
+        for invalid in [
+            serde_json::json!({"tag_name": tag, "draft": true, "immutable": true}),
+            serde_json::json!({"tag_name": tag, "draft": false, "immutable": false}),
+            serde_json::json!({"tag_name": "v0.1.4", "draft": false, "immutable": true}),
+            serde_json::json!({}),
+        ] {
+            assert!(verify_published_release(&invalid, tag).is_err());
+        }
     }
 
     #[test]
