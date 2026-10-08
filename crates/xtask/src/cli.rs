@@ -60,6 +60,10 @@ pub(crate) const COMMAND_HELP: &[(&str, &str)] = &[
     ("coverage", "[--output <path-under-target>]"),
     ("changelog-check", "[--scope <lsp|extension> --tag <tag>]"),
     ("update-grammar", "[--candidate <40-character-git-sha>]"),
+    (
+        "publish",
+        "--scope <lsp|extension> [--bump <patch|minor|major>] [--dry-run|--prepare|--submit|--resume] [--confirm] [--pr <number>] [--wait]",
+    ),
 ];
 
 pub(crate) fn run() -> Result<(), String> {
