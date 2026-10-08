@@ -281,6 +281,7 @@ pub(crate) fn dispatch(command: &str, rest: &[String]) -> Result<(), String> {
         "coverage" => tasks::performance::coverage(rest),
         "changelog-check" => tasks::release_ops::changelog_check(rest),
         "update-grammar" => tasks::maintenance::update_grammar(rest),
+        "publish" => tasks::publish::publish(rest),
         other => Err(format!(
             "unknown xtask command {other:?}; run `cargo xtask help`"
         )),
