@@ -20,15 +20,36 @@ mod tests {
     #[test]
     fn all_approved_commands_are_registered() {
         const APPROVED: [&str; 18] = [
-            "release-build", "release", "verify", "test", "build", "check",
-            "dev", "test-all", "release-check", "doctor", "clean",
-            "test-lsp", "test-extension", "install-dev", "bench",
-            "coverage", "changelog-check", "update-grammar",
+            "release-build",
+            "release",
+            "verify",
+            "test",
+            "build",
+            "check",
+            "dev",
+            "test-all",
+            "release-check",
+            "doctor",
+            "clean",
+            "test-lsp",
+            "test-extension",
+            "install-dev",
+            "bench",
+            "coverage",
+            "changelog-check",
+            "update-grammar",
         ];
         assert_eq!(crate::cli::COMMAND_HELP.len(), 27);
         for cmd in APPROVED {
-            assert!(crate::cli::COMMAND_HELP.iter().any(|(name, _)| *name == cmd));
-            assert!(crate::cli::dispatch(cmd, &["--help".into()]).is_ok(), "{cmd}");
+            assert!(
+                crate::cli::COMMAND_HELP
+                    .iter()
+                    .any(|(name, _)| *name == cmd)
+            );
+            assert!(
+                crate::cli::dispatch(cmd, &["--help".into()]).is_ok(),
+                "{cmd}"
+            );
         }
     }
     #[test]

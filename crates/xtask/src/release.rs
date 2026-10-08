@@ -547,9 +547,13 @@ pub fn verify_release_target(target: &str, input: &Path) -> Result<(), String> {
     ensure_regular_nonempty(&asset)?;
     if fs::metadata(&asset)
         .map_err(|error| format!("stat {}: {error}", asset.display()))?
-        .len() > MAX_BINARY_BYTES
+        .len()
+        > MAX_BINARY_BYTES
     {
-        return Err(format!("{} exceeds the release binary size limit", asset.display()));
+        return Err(format!(
+            "{} exceeds the release binary size limit",
+            asset.display()
+        ));
     }
     let digest = util::sha256_file(&asset)?;
     let sidecar = input.join(format!("{name}.sha256"));

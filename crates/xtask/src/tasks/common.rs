@@ -20,7 +20,11 @@ pub(crate) fn opts(args: &[String], allowed: &[&str]) -> Result<BTreeMap<String,
     util::parse_options(args, allowed)
 }
 
-pub(crate) fn bool_option(options: &mut BTreeMap<String, String>, key: &str, default: bool) -> Result<bool, String> {
+pub(crate) fn bool_option(
+    options: &mut BTreeMap<String, String>,
+    key: &str,
+    default: bool,
+) -> Result<bool, String> {
     match options.remove(key).as_deref() {
         None => Ok(default),
         Some("true") => Ok(true),
@@ -51,7 +55,10 @@ pub(crate) fn run(program: &str, args: &[String]) -> Result<(), String> {
 }
 
 pub(crate) fn cargo(args: &[&str]) -> Result<(), String> {
-    run("cargo", &args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>())
+    run(
+        "cargo",
+        &args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
+    )
 }
 
 pub(crate) fn tool_available(program: &str, args: &[&str]) -> bool {
@@ -79,18 +86,25 @@ pub(crate) fn native_binary(target: Option<&str>, release_profile: bool) -> Path
         binary.push(target);
     }
     binary.push(if release_profile { "release" } else { "debug" });
-    binary.push(if target.is_some_and(|value| value.contains("windows")) || (target.is_none() && cfg!(windows)) {
-        "wit-language-server.exe"
-    } else {
-        "wit-language-server"
-    });
+    binary.push(
+        if target.is_some_and(|value| value.contains("windows"))
+            || (target.is_none() && cfg!(windows))
+        {
+            "wit-language-server.exe"
+        } else {
+            "wit-language-server"
+        },
+    );
     binary
 }
 
 pub(crate) fn ensure_regular_file(path: &Path) -> Result<(), String> {
     let meta = fs::symlink_metadata(path).map_err(|e| format!("stat {}: {e}", path.display()))?;
     if !meta.file_type().is_file() || meta.len() == 0 {
-        return Err(format!("expected a nonempty regular file: {}", path.display()));
+        return Err(format!(
+            "expected a nonempty regular file: {}",
+            path.display()
+        ));
     }
     Ok(())
 }
@@ -100,7 +114,8 @@ pub(crate) fn copy_new_file(source: &Path, destination: &Path) -> Result<(), Str
     if source == destination {
         return Err("source and destination are the same".into());
     }
-    let mut source_file = File::open(source).map_err(|e| format!("open {}: {e}", source.display()))?;
+    let mut source_file =
+        File::open(source).map_err(|e| format!("open {}: {e}", source.display()))?;
     let mut dest = OpenOptions::new()
         .write(true)
         .create_new(true)

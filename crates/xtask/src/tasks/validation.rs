@@ -1,11 +1,23 @@
 //! Quality gates and test orchestration.
+use super::{
+    build::build,
+    common::{bool_option, cargo, finish, no_args, opts, run, tool_available},
+};
 use crate::{dependency_policy, repository_policy, util};
-use super::{build::build, common::{bool_option, cargo, finish, no_args, opts, run, tool_available}};
 
 pub(crate) fn check(args: &[String]) -> Result<(), String> {
     no_args(args, "check")?;
     cargo(&["fmt", "--all", "--", "--check"])?;
-    cargo(&["clippy", "--workspace", "--all-targets", "--all-features", "--locked", "--", "-D", "warnings"])?;
+    cargo(&[
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--all-features",
+        "--locked",
+        "--",
+        "-D",
+        "warnings",
+    ])?;
     cargo(&["check", "--workspace", "--locked"])
 }
 
@@ -21,9 +33,8 @@ pub(crate) fn test(args: &[String]) -> Result<(), String> {
     if filter.is_some() && runner == "nextest" {
         return Err("--filter requires the cargo test runner".into());
     }
-    let nextest = filter.is_none()
-        && runner != "cargo"
-        && tool_available("cargo", &["nextest", "--version"]);
+    let nextest =
+        filter.is_none() && runner != "cargo" && tool_available("cargo", &["nextest", "--version"]);
     if runner == "nextest" && !nextest {
         return Err("cargo-nextest not installed; install it or use --runner cargo".into());
     }
@@ -64,7 +75,14 @@ pub(crate) fn test_all(args: &[String]) -> Result<(), String> {
     let with_zed = bool_option(&mut options, "with-zed", false)?;
     finish(options)?;
     test(&[])?;
-    cargo(&["test", "--doc", "--workspace", "--exclude", "xtask", "--locked"])?;
+    cargo(&[
+        "test",
+        "--doc",
+        "--workspace",
+        "--exclude",
+        "xtask",
+        "--locked",
+    ])?;
     build(&["--kind".into(), "extension".into()])?;
     if with_zed {
         crate::zed_smoke::run(
@@ -73,7 +91,9 @@ pub(crate) fn test_all(args: &[String]) -> Result<(), String> {
             std::time::Duration::from_secs(90),
         )?;
     } else {
-        eprintln!("SKIPPED: real-Zed smoke/hosted/GUI tests (opt in with --with-zed true; hosted/GUI retain dedicated commands)");
+        eprintln!(
+            "SKIPPED: real-Zed smoke/hosted/GUI tests (opt in with --with-zed true; hosted/GUI retain dedicated commands)"
+        );
     }
     Ok(())
 }

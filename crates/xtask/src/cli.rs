@@ -1,5 +1,8 @@
 //! Single command dispatcher and command-help registry.
-use crate::{dependency_policy, licenses, release, repository_policy, tasks, util, zed_gui, zed_hosted, zed_smoke};
+use crate::{
+    dependency_policy, licenses, release, repository_policy, tasks, util, zed_gui, zed_hosted,
+    zed_smoke,
+};
 use std::{env, path::PathBuf, time::Duration};
 
 pub(crate) const COMMAND_HELP: &[(&str, &str)] = &[
@@ -9,20 +12,44 @@ pub(crate) const COMMAND_HELP: &[(&str, &str)] = &[
     ("validate-release", "--tag <tag> --scope <lsp|extension>"),
     ("verify-release-assets", "[--input <dir>]"),
     ("check-no-python", ""),
-    ("test-zed", "[--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>]"),
-    ("test-zed-hosted", "[--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <10-300>]"),
-    ("test-zed-gui", "[--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] [--linux-input-backend <auto|x11|wayland|libei>] --allow-input-injection true"),
-    ("release-build", "[--target <release-target>] [--output <binary-path>]"),
-    ("release", "--scope <lsp|extension> --tag <tag> [--target <release-target>] [--output <dir>]"),
+    (
+        "test-zed",
+        "[--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>]",
+    ),
+    (
+        "test-zed-hosted",
+        "[--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <10-300>]",
+    ),
+    (
+        "test-zed-gui",
+        "[--zed <binary>] [--profile <target-subdir>] [--timeout-seconds <5-180>] [--settle-milliseconds <100-5000>] [--linux-input-backend <auto|x11|wayland|libei>] --allow-input-injection true",
+    ),
+    (
+        "release-build",
+        "[--target <release-target>] [--output <binary-path>]",
+    ),
+    (
+        "release",
+        "--scope <lsp|extension> --tag <tag> [--target <release-target>] [--output <dir>]",
+    ),
     ("verify", ""),
-    ("test", "[--package <name>] [--filter <substring>] [--runner <auto|cargo|nextest>]"),
-    ("build", "[--kind <server|extension>] [--release <true|false>] [--target <triple>]"),
+    (
+        "test",
+        "[--package <name>] [--filter <substring>] [--runner <auto|cargo|nextest>]",
+    ),
+    (
+        "build",
+        "[--kind <server|extension>] [--release <true|false>] [--target <triple>]",
+    ),
     ("check", ""),
     ("dev", ""),
     ("test-all", "[--with-zed <true|false>]"),
     ("release-check", "--scope <lsp|extension> --tag <tag>"),
     ("doctor", ""),
-    ("clean", "--scope <dist|profiles|coverage|build|all> [--execute <true|false>]"),
+    (
+        "clean",
+        "--scope <dist|profiles|coverage|build|all> [--execute <true|false>]",
+    ),
     ("test-lsp", ""),
     ("test-extension", ""),
     ("install-dev", "--destination <binary-path>"),
@@ -247,7 +274,9 @@ pub(crate) fn dispatch(command: &str, rest: &[String]) -> Result<(), String> {
         "coverage" => tasks::performance::coverage(rest),
         "changelog-check" => tasks::release_ops::changelog_check(rest),
         "update-grammar" => tasks::maintenance::update_grammar(rest),
-        other => Err(format!("unknown xtask command {other:?}; run `cargo xtask help`")),
+        other => Err(format!(
+            "unknown xtask command {other:?}; run `cargo xtask help`"
+        )),
     }
 }
 
