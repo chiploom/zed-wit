@@ -288,6 +288,23 @@ fn git_manifest_version(root: &Path, sha: &str, scope: Scope, extension_file: bo
     let content = git(&["show", &format!("{sha}:{name}")], root)?;
     version_in_manifest(&content, scope, extension_file)
 }
+fn historical_predecessor_version(
+    root: &Path, scope: Scope, merge_sha: &str,
+    commit_count: u64, extension_file: bool, candidate: Version,
+) -> Result<Version, String> {
+    let first_parent = git(&["rev-parse", &format!("{merge_sha}^")], root)?;
+    let immediate = git_manifest_version(root, &first_parent, scope, extension_file)?;
+    if valid_version_transition(immediate, candidate) {
+        return Ok(immediate);
+    }
+    if commit_count > 1 {
+        let ancestor = git(&[
+            "rev-parse", &format!("{merge_sha}~{commit_count}"),
+        ], root)?;
+        return git_manifest_version(root, &ancestor, scope, extension_file);
+    }
+    Ok(immediate)
+}
 fn verify_pr_version_transition(
     root: &Path, scope: Scope, candidate: Version, merge_sha: &str,
     pr_head_sha: &str, pr_commits: u64,
@@ -303,35 +320,18 @@ fn verify_pr_version_transition(
     let merged = git_manifest_version(root, merge_sha, scope, false)?;
     // Merge and squash commits introduce the entire PR diff at the immediate
     // first parent; a rebase merge introduces N sequential PR commits.
-    let immediate = git(&["rev-parse", &format!("{merge_sha}^")], root)?;
-    let predecessor = git_manifest_version(root, &immediate, scope, false)?;
-    let previous = if valid_version_transition(predecessor, candidate) {
-        predecessor
-    } else if pr_commits > 1 {
-        let ancestor = git(&[
-            "rev-parse", &format!("{merge_sha}~{pr_commits}"),
-        ], root)?;
-        git_manifest_version(root, &ancestor, scope, false)?
-    } else {
-        predecessor
-    };
+    let previous = historical_predecessor_version(
+        root, scope, merge_sha, pr_commits, false, candidate,
+    )?;
     ensure_release_transition(previous, reviewed_head, merged, current)?;
     if scope == Scope::Extension {
         let checked_head = version_in_manifest(
             &remote_file_at(root, pr_head_sha, "extension.toml")?, scope, true,
         )?;
         let merged_extension = git_manifest_version(root, merge_sha, scope, true)?;
-        let before_extension = git_manifest_version(root, &immediate, scope, true)?;
-        let prior_extension = if valid_version_transition(before_extension, candidate) {
-            before_extension
-        } else if pr_commits > 1 {
-            let ancestor = git(&[
-                "rev-parse", &format!("{merge_sha}~{pr_commits}"),
-            ], root)?;
-            git_manifest_version(root, &ancestor, scope, true)?
-        } else {
-            before_extension
-        };
+        let prior_extension = historical_predecessor_version(
+            root, scope, merge_sha, pr_commits, true, candidate,
+        )?;
         let current_extension = version_in_manifest(
             &util::read_nonempty(&root.join("extension.toml"))?, scope, true,
         )?;
@@ -1350,6 +1350,115 @@ mod tests {
             "git@github.com:chiploom/zed-wit-other",
         ] {
             assert!(!origin_is_expected(invalid));
+        }
+    }
+
+    #[test]
+    fn historical_version_transition_handles_merge_squash_and_rebase_layouts() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let path = std::env::temp_dir().join(format!(
+                "zed-wit-version-history-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("create temporary Git fixture: {e}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove temporary Git history");
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        git(&["init", "-q", "-b", "main"], &root).unwrap();
+        fs::create_dir_all(root.join("crates/wit-language-server")).unwrap();
+        let manifest = root.join(Scope::Lsp.manifest());
+        let write_version = |version: &str| {
+            fs::write(&manifest, format!("[package]\nname = \"fixture\"\nversion = \"{version}\"\n")).unwrap()
+        };
+        let commit = |label: &str| {
+            git(&["add", "."], &root).unwrap();
+            command("git", &["-c", "user.name=Fixture",
+                "-c", "user.email=fixture@example.invalid",
+                "commit", "-qm", label], &root).unwrap();
+            git(&["rev-parse", "HEAD"], &root).unwrap()
+        };
+        write_version("0.1.2");
+        let origin = commit("base");
+        let candidate = Version::parse("0.1.3").unwrap();
+
+        // Squash: one new commit on main regardless of the number of
+        // original commits from the feature branch.
+        write_version("0.1.3");
+        let squash = commit("squash");
+        assert_eq!(historical_predecessor_version(
+            &root, Scope::Lsp, &squash, 3, false, candidate,
+        ).unwrap(), Version::parse("0.1.2").unwrap());
+
+        git(&["reset", "--hard", &origin], &root).unwrap();
+        // Rebase: the version change can be in an earlier rebased commit.
+        write_version("0.1.3");
+        let _ = commit("first rebased");
+        fs::write(root.join("notes.txt"), "reviewed notes").unwrap();
+        let last_rebase = commit("second rebased");
+        assert_eq!(historical_predecessor_version(
+            &root, Scope::Lsp, &last_rebase, 2, false, candidate,
+        ).unwrap(), Version::parse("0.1.2").unwrap());
+
+        git(&["reset", "--hard", &origin], &root).unwrap();
+        git(&["switch", "-q", "-c", "release-fixture"], &root).unwrap();
+        write_version("0.1.3");
+        let _ = commit("feature version");
+        git(&["switch", "-q", "main"], &root).unwrap();
+        command("git", &["-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid",
+            "merge", "--no-ff", "-qm", "merge PR", "release-fixture"], &root).unwrap();
+        let merged = git(&["rev-parse", "HEAD"], &root).unwrap();
+        assert_eq!(historical_predecessor_version(
+            &root, Scope::Lsp, &merged, 1, false, candidate,
+        ).unwrap(), Version::parse("0.1.2").unwrap());
+    }
+
+    #[test]
+    fn real_lightweight_and_annotated_refs_peel_to_same_commit() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let path = std::env::temp_dir().join(format!(
+                "zed-wit-tags-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("create temporary Git fixture: {e}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove temporary Git tag fixture");
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        git(&["init", "-q", "-b", "main"], &root).unwrap();
+        command("git", &["-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid",
+            "commit", "--allow-empty", "-qm", "base"], &root).unwrap();
+        let commit = git(&["rev-parse", "HEAD"], &root).unwrap();
+        git(&["tag", "v0.1.3"], &root).unwrap();
+        command("git", &["-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid",
+            "tag", "-a", "v0.1.4", "-m", "annotated"], &root).unwrap();
+        for tag in ["v0.1.3", "v0.1.4"] {
+            let listing = command("git", &["ls-remote", "--tags", root.to_str().unwrap(),
+                &format!("refs/tags/{tag}"), &format!("refs/tags/{tag}^{{}}")], &root).unwrap();
+            assert_eq!(parse_remote_tag_commit(&listing, tag).unwrap(), commit);
         }
     }
 
