@@ -205,6 +205,46 @@ fn json_string<'a>(value: &'a Value, key: &str, path: &Path) -> Result<&'a str, 
         .ok_or_else(|| format!("{} omitted string field {key:?}", path.display()))
 }
 
+/// Claim the artifact pathname atomically. std::fs::copy can overwrite
+/// an existing file even when an earlier existence check appeared clear.
+fn copy_release_binary_new(source: &Path, artifact: &Path) -> Result<(), String> {
+    let mut input = fs::File::open(source)
+        .map_err(|error| format!("open {}: {error}", source.display()))?;
+    let meta = input
+        .metadata()
+        .map_err(|error| format!("stat {}: {error}", source.display()))?;
+    if !meta.is_file() || meta.len() == 0 {
+        return Err(format!("expected a nonempty regular file: {}", source.display()));
+    }
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(artifact)
+        .map_err(|error| format!("create {} (will not overwrite): {error}", artifact.display()))?;
+    std::io::copy(&mut input, &mut output).map_err(|error| {
+        format!(
+            "copy {} to {}: {error}; incomplete artifact may remain",
+            source.display(),
+            artifact.display()
+        )
+    })?;
+    output
+        .flush()
+        .and_then(|()| output.sync_all())
+        .map_err(|error| {
+            format!(
+                "write {}: {error}; incomplete artifact may remain",
+                artifact.display()
+            )
+        })?;
+    output.set_permissions(meta.permissions()).map_err(|error| {
+        format!(
+            "set permissions {}: {error}; artifact may remain",
+            artifact.display()
+        )
+    })
+}
+
 pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let root = util::repo_root();
     let name = asset_name(target);
@@ -231,7 +271,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let provenance = output.join(format!("{name}.provenance.json"));
     if [&artifact, &checksum, &provenance]
         .iter()
-        .any(|path| path.exists())
+        .any(|path| fs::symlink_metadata(path).is_ok())
     {
         return Err(format!(
             "refusing to overwrite release artifacts for {target}"
@@ -244,13 +284,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
         return Err("release CI checkout must be clean and committed".into());
     }
 
-    fs::copy(&source, &artifact).map_err(|error| {
-        format!(
-            "copy {} to {}: {error}",
-            source.display(),
-            artifact.display()
-        )
-    })?;
+    copy_release_binary_new(&source, &artifact)?;
     let digest = util::sha256_file(&artifact)?;
     util::write_new(&checksum, &format!("{digest}  {name}\n"))?;
 
