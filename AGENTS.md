@@ -18,6 +18,9 @@ Read [architecture](docs/architecture.md) before changing boundaries and
 
 ## Commands
 
+See [docs/xtask.md](docs/xtask.md) for the Rust development command reference. Local release preparation never publishes, tags, attests, or bypasses protected CD.
+
+
 ```sh
 cargo xtask check-no-python
 cargo xtask check-dependencies
