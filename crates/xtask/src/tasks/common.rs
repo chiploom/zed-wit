@@ -130,7 +130,10 @@ where
         .metadata()
         .map_err(|e| format!("stat open source {}: {e}", source.display()))?;
     if !source_meta.is_file() || source_meta.len() == 0 {
-        return Err(format!("expected a nonempty regular file: {}", source.display()));
+        return Err(format!(
+            "expected a nonempty regular file: {}",
+            source.display()
+        ));
     }
     let mut dest = OpenOptions::new()
         .write(true)
@@ -146,20 +149,19 @@ where
             destination.display()
         )
     })?;
-    dest.flush()
-        .and_then(|()| dest.sync_all())
-        .map_err(|e| {
-            format!(
-                "write {}: {e}; incomplete destination may remain",
-                destination.display()
-            )
-        })?;
-    dest.set_permissions(source_meta.permissions()).map_err(|e| {
+    dest.flush().and_then(|()| dest.sync_all()).map_err(|e| {
         format!(
-            "permissions {}: {e}; destination may remain",
+            "write {}: {e}; incomplete destination may remain",
             destination.display()
         )
     })?;
+    dest.set_permissions(source_meta.permissions())
+        .map_err(|e| {
+            format!(
+                "permissions {}: {e}; destination may remain",
+                destination.display()
+            )
+        })?;
     println!("installed {}", destination.display());
     Ok(())
 }

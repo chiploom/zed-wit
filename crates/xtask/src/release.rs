@@ -208,19 +208,27 @@ fn json_string<'a>(value: &'a Value, key: &str, path: &Path) -> Result<&'a str, 
 /// Claim the artifact pathname atomically. std::fs::copy can overwrite
 /// an existing file even when an earlier existence check appeared clear.
 fn copy_release_binary_new(source: &Path, artifact: &Path) -> Result<(), String> {
-    let mut input = fs::File::open(source)
-        .map_err(|error| format!("open {}: {error}", source.display()))?;
+    let mut input =
+        fs::File::open(source).map_err(|error| format!("open {}: {error}", source.display()))?;
     let meta = input
         .metadata()
         .map_err(|error| format!("stat {}: {error}", source.display()))?;
     if !meta.is_file() || meta.len() == 0 {
-        return Err(format!("expected a nonempty regular file: {}", source.display()));
+        return Err(format!(
+            "expected a nonempty regular file: {}",
+            source.display()
+        ));
     }
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(artifact)
-        .map_err(|error| format!("create {} (will not overwrite): {error}", artifact.display()))?;
+        .map_err(|error| {
+            format!(
+                "create {} (will not overwrite): {error}",
+                artifact.display()
+            )
+        })?;
     std::io::copy(&mut input, &mut output).map_err(|error| {
         format!(
             "copy {} to {}: {error}; incomplete artifact may remain",
@@ -683,12 +691,19 @@ mod tests {
         let artifact = dir.0.join("artifact");
         fs::write(&source, b"release-binary").unwrap();
         symlink(&victim, &artifact).unwrap();
-        assert!(!artifact.exists(), "dangling symlink follows nonexistent target");
+        assert!(
+            !artifact.exists(),
+            "dangling symlink follows nonexistent target"
+        );
         assert!(copy_release_binary_new(&source, &artifact).is_err());
         assert!(!victim.exists(), "symlink target must remain absent");
-        assert!(fs::symlink_metadata(&artifact).unwrap().file_type().is_symlink());
+        assert!(
+            fs::symlink_metadata(&artifact)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
     }
-
 
     #[test]
     fn stable_release_versions_are_strict() {

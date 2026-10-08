@@ -27,7 +27,10 @@ pub fn root_relative(path: PathBuf) -> PathBuf {
 
 /// Resolve Cargo's build output location, including its standard environment override.
 pub fn cargo_target_dir() -> PathBuf {
-    cargo_target_dir_for(&repo_root(), std::env::var_os("CARGO_TARGET_DIR").as_deref())
+    cargo_target_dir_for(
+        &repo_root(),
+        std::env::var_os("CARGO_TARGET_DIR").as_deref(),
+    )
 }
 
 fn cargo_target_dir_for(root: &Path, override_dir: Option<&OsStr>) -> PathBuf {

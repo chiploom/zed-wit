@@ -113,9 +113,7 @@ fn validate_cargo_clean_target(root: &Path, target: &Path) -> Result<(), String>
                 .into(),
         );
     }
-    if fs::symlink_metadata(target)
-        .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    {
+    if fs::symlink_metadata(target).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         return Err("refusing cargo clean through a symlinked target directory".into());
     }
     Ok(())
