@@ -233,7 +233,22 @@ fn gh(args: &[&str], root: &Path) -> Result<String, String> {
     command("gh", args, root)
         .map_err(|_| format!("GitHub CLI request failed for {}; verify gh auth, permissions and connectivity", REPO))
 }
+fn origin_is_expected(origin: &str) -> bool {
+    matches!(
+        origin.trim_end_matches('/'),
+        "git@github.com:chiploom/zed-wit"
+            | "git@github.com:chiploom/zed-wit.git"
+            | "https://github.com/chiploom/zed-wit"
+            | "https://github.com/chiploom/zed-wit.git"
+            | "ssh://git@github.com/chiploom/zed-wit"
+            | "ssh://git@github.com/chiploom/zed-wit.git"
+    )
+}
 fn check_remote(root: &Path) -> Result<String, String> {
+    let origin = command("git", &["remote", "get-url", "origin"], root)?;
+    if !origin_is_expected(&origin) {
+        return Err("origin must be the canonical chiploom/zed-wit repository; refusing ambiguous remote identity".into());
+    }
     let repo: Value = serde_json::from_str(&gh(
         &["repo", "view", REPO, "--json", "nameWithOwner,defaultBranchRef"], root
     )?).map_err(|e| format!("parse gh repository metadata: {e}"))?;
@@ -752,6 +767,25 @@ mod tests {
         assert!(edited.starts_with("id = \"wit\"\nversion = \"0.1.3\""));
         assert!(edited.contains("[grammars.wit]\nversion = \"other\""));
         assert!(replace_manifest_version(input, next, old, Some("[package]")).is_err());
+    }
+
+    #[test]
+    fn only_canonical_git_remotes_are_authorized() {
+        for valid in [
+            "git@github.com:chiploom/zed-wit.git",
+            "https://github.com/chiploom/zed-wit",
+            "https://github.com/chiploom/zed-wit.git",
+        ] {
+            assert!(origin_is_expected(valid));
+        }
+        for invalid in [
+            "https://github.com/attacker/zed-wit",
+            "https://evil.example/chiploom/zed-wit",
+            "https://token@github.com/chiploom/zed-wit",
+            "git@github.com:chiploom/zed-wit-other",
+        ] {
+            assert!(!origin_is_expected(invalid));
+        }
     }
 
     #[test]
