@@ -934,31 +934,49 @@ fn validate_prior_cd_runs(
 ) -> Result<(), String> {
     let candidate_validate = format!("CD / validate / {} / {tag}", scope.name());
     let candidate_publish = format!("CD / publish / {} / {tag}", scope.name());
+    let mut ids = BTreeSet::new();
+    let mut known_failed_publish = false;
     for row in runs.lines() {
         let columns = row.split('\t').collect::<Vec<_>>();
-        if columns.len() != 4 {
-            return Err("CD run history is ambiguous; inspect it manually".into());
+        let [id, sha, event, status, conclusion, title] =
+            <[&str; 6]>::try_from(columns.as_slice())
+                .map_err(|_| "CD run history has malformed records; inspect manually")?;
+        let id = id.parse::<u64>()
+            .map_err(|_| "CD run history has an invalid run ID")?;
+        if id == 0 || !ids.insert(id) {
+            return Err("CD run history contains missing or duplicate run IDs".into());
         }
-        let [sha, event, status, title] =
-            <[&str; 4]>::try_from(columns.as_slice()).expect("validated column count");
         if sha != main_sha || event != "workflow_dispatch" {
             continue;
         }
-        // A queued or running release is never safe to overlap, even across
-        // scopes: the protected CD workflow serializes all release operations.
         if status != "completed" {
-            return Err("another CD workflow dispatch is active on this commit".into());
+            return Err(format!("active or ambiguous CD dispatch {id} on validated main SHA"));
         }
-        // The fixed run-name is introduced with this xtask frontend. Older
-        // history with unknown inputs cannot be classified; fail closed.
         if title == candidate_validate {
+            // A completed dry run does not reserve a release tag, regardless
+            // of whether its validation succeeded.
+            if conclusion == "unknown" {
+                return Err("validation CD run has unknown conclusion".into());
+            }
             continue;
         }
         if title == candidate_publish {
-            if matching_draft {
-                continue;
+            match conclusion {
+                "failure" | "cancelled" | "timed_out" => {
+                    known_failed_publish = true;
+                }
+                "success" => {
+                    return Err(format!(
+                        "CD run {id} reports publication success; do not redispatch even if a draft exists"
+                    ));
+                }
+                _ => {
+                    return Err(format!(
+                        "CD run {id} conclusion {conclusion:?} is not a verified retryable failure"
+                    ));
+                }
             }
-            return Err("previous publication attempt exists without a matching draft".into());
+            continue;
         }
         let known_other_release = title
             .strip_prefix("CD / validate / ")
@@ -967,8 +985,15 @@ fn validate_prior_cd_runs(
                 suffix.starts_with("lsp / v") || suffix.starts_with("extension / v-extension-")
             });
         if !known_other_release {
-            return Err("CD workflow history does not identify prior release intent".into());
+            return Err(format!(
+                "CD run {id} does not identify a known operation and release scope"
+            ));
         }
+    }
+    if matching_draft && !known_failed_publish {
+        return Err(
+            "unpublished release draft has no verified failed, cancelled or timed-out CD run; inspect recovery manually".into()
+        );
     }
     Ok(())
 }
@@ -1077,7 +1102,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
             "api",
             "--paginate",
             "--jq",
-            ".workflow_runs[] | [.head_sha, .event, .status, .display_title] | @tsv",
+            ".workflow_runs[] | [.id, .head_sha, .event, .status, (.conclusion // \"unknown\"), .display_title] | @tsv",
             &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100"),
         ],
         root,
@@ -1381,23 +1406,46 @@ mod tests {
     }
 
     #[test]
-    fn cd_run_history_distinguishes_validation_publish_and_other_scope() {
+    fn cd_run_retry_matrix_requires_known_safe_terminal_failures() {
         let sha = "0123456789abcdef0123456789abcdef01234567";
         let tag = "v0.1.3";
-        let other = format!(
-            "{sha}\tworkflow_dispatch\tcompleted\tCD / publish / extension / v-extension-0.1.1"
-        );
-        let validated = format!("{sha}\tworkflow_dispatch\tcompleted\tCD / validate / lsp / {tag}");
-        let published = format!("{sha}\tworkflow_dispatch\tcompleted\tCD / publish / lsp / {tag}");
-        let queued = format!("{sha}\tworkflow_dispatch\tqueued\tCD / validate / lsp / {tag}");
-        let legacy = format!("{sha}\tworkflow_dispatch\tcompleted\tCD");
-        assert!(validate_prior_cd_runs(&validated, sha, Scope::Lsp, tag, false).is_ok());
-        assert!(validate_prior_cd_runs(&other, sha, Scope::Lsp, tag, false).is_ok());
-        assert!(validate_prior_cd_runs(&published, sha, Scope::Lsp, tag, false).is_err());
-        assert!(validate_prior_cd_runs(&published, sha, Scope::Lsp, tag, true).is_ok());
-        assert!(validate_prior_cd_runs(&queued, sha, Scope::Lsp, tag, true).is_err());
-        assert!(validate_prior_cd_runs(&legacy, sha, Scope::Lsp, tag, true).is_err());
+        let row = |id: u64, status: &str, conclusion: &str, operation: &str| {
+            format!(
+                "{id}\t{sha}\tworkflow_dispatch\t{status}\t{conclusion}\tCD / {operation} / lsp / {tag}"
+            )
+        };
+        assert!(validate_prior_cd_runs(
+            &row(1, "completed", "success", "validate"), sha, Scope::Lsp, tag, false
+        ).is_ok());
+        for conclusion in ["failure", "cancelled", "timed_out"] {
+            let failed = row(2, "completed", conclusion, "publish");
+            assert!(validate_prior_cd_runs(&failed, sha, Scope::Lsp, tag, true).is_ok());
+            assert!(validate_prior_cd_runs(&failed, sha, Scope::Lsp, tag, false).is_ok());
+        }
+        for conclusion in ["success", "neutral", "skipped", "stale", "action_required", "unknown"] {
+            let previous = row(3, "completed", conclusion, "publish");
+            assert!(validate_prior_cd_runs(&previous, sha, Scope::Lsp, tag, true).is_err());
+        }
+        for status in ["queued", "in_progress", "waiting", "pending"] {
+            let active = row(4, status, "unknown", "publish");
+            assert!(validate_prior_cd_runs(&active, sha, Scope::Lsp, tag, true).is_err());
+        }
+        let verified_failure = row(5, "completed", "failure", "publish");
+        let verified_success = row(6, "completed", "success", "publish");
+        assert!(validate_prior_cd_runs(
+            &format!("{verified_failure}\n{verified_success}"), sha, Scope::Lsp, tag, true,
+        ).is_err());
+        assert!(validate_prior_cd_runs(
+            &format!("{verified_failure}\n{verified_failure}"), sha, Scope::Lsp, tag, true,
+        ).is_err());
+        assert!(validate_prior_cd_runs("", sha, Scope::Lsp, tag, true).is_err());
         assert!(validate_prior_cd_runs("malformed", sha, Scope::Lsp, tag, false).is_err());
+        let legacy = format!("7\t{sha}\tworkflow_dispatch\tcompleted\tfailure\tCD");
+        assert!(validate_prior_cd_runs(&legacy, sha, Scope::Lsp, tag, true).is_err());
+        let other_scope = format!(
+            "8\t{sha}\tworkflow_dispatch\tcompleted\tsuccess\tCD / publish / extension / v-extension-0.1.1"
+        );
+        assert!(validate_prior_cd_runs(&other_scope, sha, Scope::Lsp, tag, false).is_ok());
     }
 
     #[test]
