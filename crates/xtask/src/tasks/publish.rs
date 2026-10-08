@@ -2602,6 +2602,13 @@ mod tests {
               "git@github.com:chiploom/zed-wit.git"],
             &root,
         ).unwrap();
+        // Git ignores pushInsteadOf when an explicit remote pushurl exists.
+        // Remove it to exercise the actual push-only rewriting contract.
+        git(
+            &["remote", "set-url", "--delete", "--push", "origin",
+              "https://github.com/chiploom/zed-wit.git"],
+            &root,
+        ).unwrap();
         git(
             &["config", "--local",
               "url.https://github.com/attacker/.pushInsteadOf",
