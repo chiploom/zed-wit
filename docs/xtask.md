@@ -119,8 +119,10 @@ run tests and commit the limited release-preparation files yourself.
 `--submit --confirm` checks the dedicated branch, file allowlist, reviewed
 notes, locked Cargo metadata, local verification, remote tag history, fresh base
 and duplicate PR state. Only then does it push the branch and create a PR to
-`main`. It never merges. If GitHub accepts a push but PR creation fails, inspect
-the existing remote branch rather than retrying blindly.
+`main`. It never merges. If GitHub accepts a push but PR creation fails, the same confirmed submit
+operation can retry PR creation only when the remote preparation branch still
+matches the exact validated local HEAD. Changed remote refs, existing PRs,
+and ambiguous prior outcomes require manual review; no force-push is permitted.
 
 `--resume --pr N --confirm` must be invoked after that exact preparation PR
 merges to `main`. It checks that the PR's release-preparation commit is on the
