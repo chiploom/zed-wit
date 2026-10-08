@@ -84,7 +84,10 @@ pub(crate) fn dispatch(command: &str, rest: &[String]) -> Result<(), String> {
         && let Some((_, options)) = COMMAND_HELP.iter().find(|(name, _)| *name == command)
     {
         println!("Usage: cargo xtask {command} {options}");
-        if matches!(command, "release" | "release-build" | "release-check" | "publish") {
+        if matches!(
+            command,
+            "release" | "release-build" | "release-check" | "publish"
+        ) {
             println!("Local preparation only: protected CD controls publication.");
         }
         if command == "update-grammar" {
