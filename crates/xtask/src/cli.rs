@@ -258,3 +258,27 @@ fn print_help() {
     }
     println!("Publication and protected tag creation remain CD-only actions.");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn command_registry_is_unique_and_all_help_paths_work() {
+        assert_eq!(COMMAND_HELP.len(), 27);
+        let mut seen = BTreeSet::new();
+        for (command, _) in COMMAND_HELP {
+            assert!(seen.insert(*command), "duplicate command: {command}");
+            assert!(dispatch(command, &["--help".into()]).is_ok(), "{command}");
+            assert!(dispatch(command, &["-h".into()]).is_ok(), "{command}");
+        }
+    }
+
+    #[test]
+    fn unknown_command_does_not_fall_back_to_any_implicit_action() {
+        assert!(dispatch("publish", &[]).is_err());
+        assert!(dispatch("missing-command", &[]).is_err());
+        assert!(dispatch("publish", &["--help".into()]).is_err());
+    }
+}
