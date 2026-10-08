@@ -1175,16 +1175,18 @@ mod tests {
             "Cargo.toml\nextension.toml\nCargo.lock\nCHANGELOG.md\ndocs/releases/extension/v0.1.3.md",
             Scope::Extension, v
         ).is_ok());
-        assert!(validate_changed_files(
-            "CHANGELOG.md\ndocs/releases/lsp/v0.1.3.md",
-            Scope::Lsp,
-            v
-        ).is_err());
-        assert!(validate_changed_files(
-            "Cargo.toml\nCHANGELOG.md\ndocs/releases/extension/v0.1.3.md",
-            Scope::Extension,
-            v
-        ).is_err());
+        assert!(
+            validate_changed_files("CHANGELOG.md\ndocs/releases/lsp/v0.1.3.md", Scope::Lsp, v)
+                .is_err()
+        );
+        assert!(
+            validate_changed_files(
+                "Cargo.toml\nCHANGELOG.md\ndocs/releases/extension/v0.1.3.md",
+                Scope::Extension,
+                v
+            )
+            .is_err()
+        );
         assert!(validate_changed_files("extension.toml", Scope::Lsp, v).is_err());
         assert!(validate_changed_files(".github/workflows/release.yml", Scope::Lsp, v).is_err());
         assert!(
