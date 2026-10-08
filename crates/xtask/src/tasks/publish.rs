@@ -648,10 +648,21 @@ fn validate_changed_files(paths: &str, scope: Scope, version: Version) -> Result
     if scope == Scope::Extension {
         allowed.insert("extension.toml".into());
     }
-    for file in paths.lines() {
-        if !allowed.contains(file) {
+    let changed = paths.lines().collect::<BTreeSet<_>>();
+    for file in &changed {
+        if !allowed.contains(*file) {
             return Err(format!(
                 "release preparation includes unexpected change: {file}"
+            ));
+        }
+    }
+    // A release-preparation PR must contain the actual version bump, not just
+    // a correctly named branch with notes. Keep lockfile and changelog
+    // changes part of the reviewed commit contract.
+    for required in &allowed {
+        if !changed.contains(required.as_str()) {
+            return Err(format!(
+                "release preparation is missing required change: {required}"
             ));
         }
     }
@@ -1164,6 +1175,16 @@ mod tests {
             "Cargo.toml\nextension.toml\nCargo.lock\nCHANGELOG.md\ndocs/releases/extension/v0.1.3.md",
             Scope::Extension, v
         ).is_ok());
+        assert!(validate_changed_files(
+            "CHANGELOG.md\ndocs/releases/lsp/v0.1.3.md",
+            Scope::Lsp,
+            v
+        ).is_err());
+        assert!(validate_changed_files(
+            "Cargo.toml\nCHANGELOG.md\ndocs/releases/extension/v0.1.3.md",
+            Scope::Extension,
+            v
+        ).is_err());
         assert!(validate_changed_files("extension.toml", Scope::Lsp, v).is_err());
         assert!(validate_changed_files(".github/workflows/release.yml", Scope::Lsp, v).is_err());
         assert!(
