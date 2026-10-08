@@ -1660,6 +1660,23 @@ mod tests {
     }
 
     #[test]
+    fn mocked_remote_run_history_has_no_atomic_dispatch_reservation() {
+        // Two independent checkouts can both read a valid empty API listing
+        // before GitHub accepts either workflow dispatch. This is explicitly
+        // NOT an at-most-once protocol. Protected CD must recheck tag/draft
+        // state under its serialized environment approval boundary.
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        assert!(validate_prior_cd_runs("", sha, Scope::Lsp, "v0.1.3", false).is_ok());
+        assert!(validate_prior_cd_runs("", sha, Scope::Lsp, "v0.1.3", false).is_ok());
+        let pending = format!(
+            "9\\t{sha}\\tworkflow_dispatch\\tqueued\\tunknown\\tCD / publish / lsp / v0.1.3"
+        );
+        assert!(validate_prior_cd_runs(&pending, sha, Scope::Lsp, "v0.1.3", false).is_err());
+        // An ambiguous or rejected dispatch cannot justify blind retry.
+        assert!(parse_dispatch_identity("{}").is_err());
+    }
+
+    #[test]
     fn overlapping_same_checkout_dispatch_attempts_are_refused() {
         use std::sync::{Arc, Barrier};
         use std::thread;
