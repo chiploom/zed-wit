@@ -81,7 +81,7 @@ pub(crate) fn host_target() -> Result<String, String> {
 }
 
 pub(crate) fn native_binary(target: Option<&str>, release_profile: bool) -> PathBuf {
-    let mut binary = util::repo_root().join("target");
+    let mut binary = util::cargo_target_dir();
     if let Some(target) = target {
         binary.push(target);
     }
