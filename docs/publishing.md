@@ -77,6 +77,38 @@ a newline, a `<asset>.provenance.json` build record, and an
 dependency closure and pinned Rust standard library. Build provenance JSON is not
 itself a cryptographic attestation.
 
+## Version-aware preparation frontend
+
+The optional `cargo xtask publish --scope lsp|extension` command provides a
+**read-only version plan** by default. See [xtask publish stages](xtask.md#version-aware-release-preparation-and-protected-cd)
+and the [implementation contract](xtask-publish-implementation.md).
+It does not create tags, GitHub Releases, registry submissions or attestations.
+
+The only authorized path to a new publication is:
+
+1. Run a read-only plan on clean, current `main`. Check exact next version,
+   candidate tag, remote collision history and expected release note files.
+2. Use `--prepare --confirm` to create a local branch, bump only the chosen
+   release stream and `Cargo.lock`, and generate **unreviewed** notes/changelog
+   placeholders. No PR or publication is created by this stage.
+3. Have a human replace the placeholders, review and commit the scoped changes,
+   then explicitly invoke `--submit --confirm` to run checks, push the release
+   branch, and open a PR. Review and merge it through normal `main` protections.
+4. On the new protected `main`, use `--resume --pr N --confirm` to revalidate
+   the exact merged preparation PR and request **only** the existing
+   `release.yml` workflow with `operation=publish`. `--wait` watches the
+   exact returned run ID, never an inferred most-recent run.
+5. CD remains responsible for protected tags, environment approval,
+   attestation, immutable GitHub Releases and the five-target native artifact
+   contract; no local xtask action may bypass it.
+
+A successful dispatch means **requested**, not published. Missing/ambiguous
+GitHub history, an existing non-draft tag, duplicate active CD runs, denied
+permissions, or a reserved immutable tag requires human inspection rather than
+blind retry. Because deleted immutable-release tags may be invisible to listing
+APIs, the existing protected workflow remains the authoritative final gate.
+LSP upgrades do not change the extension runtime LSP pin automatically.
+
 ## Release gate
 
 The CD workflow is dispatched from the protected default branch with either
