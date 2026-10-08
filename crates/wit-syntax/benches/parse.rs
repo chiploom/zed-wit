@@ -1,5 +1,6 @@
 //! Deterministic, dependency-free Tree-sitter WIT parser microbenchmark.
 //! Results are local measurements, not cross-machine performance guarantees.
+#[path = "parse/args.rs"]
 mod args;
 
 use std::{env, hint::black_box, time::Instant};
