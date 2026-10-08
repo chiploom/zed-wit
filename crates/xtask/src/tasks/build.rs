@@ -191,6 +191,77 @@ mod tests {
     }
 
     #[test]
+    fn implicit_configured_target_changes_the_real_cargo_artifact_path() {
+        use std::{fs, process::Command, sync::atomic::{AtomicU64, Ordering}};
+
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let candidate = std::env::temp_dir().join(format!(
+                "zed-wit-implicit-target-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("create Cargo fixture: {error}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove Cargo fixture");
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        fs::create_dir(root.join("src")).unwrap();
+        fs::create_dir(root.join(".cargo")).unwrap();
+        fs::create_dir(root.join("cargo-home")).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"wit-language-server\"\nversion = \"0.0.1\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        let host = super::host_target().unwrap();
+        fs::write(
+            root.join(".cargo/config.toml"),
+            format!("[build]\ntarget = \"{host}\"\n"),
+        )
+        .unwrap();
+        let output = Command::new("cargo")
+            .args([
+                "build",
+                "--release",
+                "--offline",
+                "--message-format=json-render-diagnostics",
+            ])
+            .env_remove("CARGO_BUILD_TARGET")
+            .env_remove("CARGO_TARGET_DIR")
+            .env_remove("CARGO_BUILD_TARGET_DIR")
+            .env("CARGO_HOME", root.join("cargo-home"))
+            .current_dir(&root)
+            .output()
+            .expect("build Cargo test fixture");
+        assert!(
+            output.status.success(),
+            "fixture compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let actual = super::development_binary_from_cargo_messages(
+            &String::from_utf8(output.stdout).unwrap(),
+        )
+        .unwrap();
+        let binary_name = if cfg!(windows) {
+            "wit-language-server.exe"
+        } else {
+            "wit-language-server"
+        };
+        assert_eq!(actual, root.join("target").join(&host).join("release").join(binary_name));
+        assert_ne!(actual, root.join("target").join("release").join(binary_name));
+    }
+
+    #[test]
     fn dev_rejects_a_build_path_different_from_committed_zed_settings() {
         let root = Path::new("example-repo");
         assert!(ensure_development_target(root, &root.join("target")).is_ok());
