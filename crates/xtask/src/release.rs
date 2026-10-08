@@ -257,7 +257,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let root = util::repo_root();
     let name = asset_name(target);
     let source =
-        util::cargo_target_dir()
+        util::cargo_target_dir()?
             .join(target)
             .join("release")
             .join(if target.contains("windows") {
