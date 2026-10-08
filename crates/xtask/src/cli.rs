@@ -76,14 +76,14 @@ pub(crate) fn dispatch(command: &str, rest: &[String]) -> Result<(), String> {
     if matches!(rest, [flag] if flag == "--help" || flag == "-h")
         && let Some((_, options)) = COMMAND_HELP.iter().find(|(name, _)| *name == command)
     {
-            println!("Usage: cargo xtask {command} {options}");
-            if matches!(command, "release" | "release-build" | "release-check") {
-                println!("Local preparation only: protected CD controls publication.");
-            }
-            if command == "update-grammar" {
-                println!("Read-only grammar compatibility audit: never changes the pin.");
-            }
-            return Ok(());
+        println!("Usage: cargo xtask {command} {options}");
+        if matches!(command, "release" | "release-build" | "release-check") {
+            println!("Local preparation only: protected CD controls publication.");
+        }
+        if command == "update-grammar" {
+            println!("Read-only grammar compatibility audit: never changes the pin.");
+        }
+        return Ok(());
     }
     match command {
         "check-dependencies" => {
