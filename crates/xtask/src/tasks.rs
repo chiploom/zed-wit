@@ -349,11 +349,12 @@ fn changelog_check_inner(scope: Option<&str>, tag: Option<&str>) -> Result<(), S
     }
     match (scope, tag) {
         (Some(scope), Some(tag)) => {
-            let version = match scope {
+            let maybe_version = match scope {
                 "lsp" => tag.strip_prefix('v'),
                 "extension" => tag.strip_prefix("v-extension-"),
                 _ => return Err(format!("unsupported release scope {scope:?}")),
-            }.ok_or_else(|| "tag does not match release scope".to_owned())?;
+            };
+            let version = maybe_version.ok_or_else(|| "tag does not match release scope".to_owned())?;
             if version.split('.').count() != 3
                 || !version.split('.').all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && (s == "0" || !s.starts_with('0')))
             {
