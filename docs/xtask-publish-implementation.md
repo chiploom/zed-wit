@@ -1,7 +1,8 @@
 # Version-aware xtask publish: implementation contract
 
-Status: **design and implementation checklist only**. The `cargo xtask publish` command is
-**not implemented** by this document. This work belongs to [issue #24](https://github.com/chiploom/zed-wit/issues/24)
+Status: **implementation in progress**. The Rust `cargo xtask publish` frontend
+has been added on this draft branch. Local and cross-platform validation, threat
+model review, and GitHub CD integration qualification are still required. This work belongs to [issue #24](https://github.com/chiploom/zed-wit/issues/24)
 and is stacked on the xtask refactor in [PR #25](https://github.com/chiploom/zed-wit/pull/25).
 
 The source of truth for existing release behavior remains [publishing.md](publishing.md).
@@ -16,7 +17,9 @@ Proposed interface, subject to implementation tests:
 
 ```text
 cargo xtask publish --scope <lsp|extension> [--bump <patch|minor|major>] [--dry-run]
-cargo xtask publish --scope <lsp|extension> --resume [--confirm] [--wait]
+cargo xtask publish --scope <lsp|extension> [--bump <patch|minor|major>] --prepare --confirm
+cargo xtask publish --scope <lsp|extension> --submit --confirm
+cargo xtask publish --scope <lsp|extension> --resume --pr <number> --confirm [--wait]
 ```
 
 - **Default means planning**, not remote writes or publication. A patch bump is
@@ -119,6 +122,7 @@ silently advance to publication.
   workspace tests, release checks, and targeted isolated-destination tests.
   Record absent optional/hosted/cross-platform qualification honestly.
 
-This document establishes review boundaries, not evidence that any checkbox
-has been implemented. Do not mark the stacked PR ready for review or merge
-until the issue's acceptance criteria are implemented and validated.
+This document establishes security boundaries and the current CLI contract.
+The issue remains open and PR #26 remains a draft. No release has been
+requested or published; do not mark it ready to merge until implementation,
+independent audits and full local/platform qualification are complete.
