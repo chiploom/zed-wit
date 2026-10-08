@@ -6,7 +6,7 @@ use std::{
     collections::BTreeSet,
     fs::{self, OpenOptions},
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
     thread,
     time::Duration,
@@ -217,9 +217,9 @@ fn manifest_version(root: &Path, scope: Scope) -> Result<Version, String> {
         let extension: toml::Value = toml::from_str(
             &util::read_nonempty(&root.join("extension.toml"))?
         ).map_err(|e| format!("parse extension.toml: {e}"))?;
-        let other = extension.get("version").and_then(toml::Value::as_str)
-            .ok_or("extension.toml omitted version")
-            .and_then(Version::parse)?;
+        let other_raw = extension.get("version").and_then(toml::Value::as_str)
+            .ok_or_else(|| "extension.toml omitted version".to_owned())?;
+        let other = Version::parse(other_raw)?;
         if version != other { return Err("extension manifest versions disagree".into()); }
     }
     Ok(version)
