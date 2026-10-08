@@ -119,7 +119,13 @@ run tests and commit the limited release-preparation files yourself.
 `--submit --confirm` checks the dedicated branch, file allowlist, reviewed
 notes, locked Cargo metadata, local verification, remote tag history, fresh base
 and duplicate PR state. Only then does it push the branch and create a PR to
-`main`. It never merges. If GitHub accepts a push but PR creation fails, the same confirmed submit
+`main`. It never merges. The submit stage validates the fetch repository **and** every effective push
+destination, including Git URL rewrites. It rejects multiple push URLs, pins
+the actual push to the single authorized canonical GitHub URL, and uses an
+explicit absent-ref lease when creating the branch. A competing branch
+creation cannot be advanced implicitly; Git rejects the stale lease.
+
+If GitHub accepts a push but PR creation fails, the same confirmed submit
 operation can retry PR creation only when the remote preparation branch still
 matches the exact validated local HEAD. Changed remote refs, existing PRs,
 and ambiguous prior outcomes require manual review; no force-push is permitted.
