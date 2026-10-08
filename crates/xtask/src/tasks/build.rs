@@ -103,7 +103,7 @@ fn development_binary_from_cargo_messages(messages: &str) -> Result<std::path::P
 
 pub(crate) fn dev(args: &[String]) -> Result<(), String> {
     no_args(args, "dev")?;
-    ensure_development_target(&util::repo_root(), &util::cargo_target_dir())?;
+    ensure_development_target(&util::repo_root(), &util::cargo_target_dir()?)?;
     let template = util::read_nonempty(&util::repo_root().join(".zed/settings.example.json"))?;
     if !template.contains("target/release/wit-language-server") {
         return Err(
