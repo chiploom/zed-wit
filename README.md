@@ -5,8 +5,8 @@ WIT adds first-class [WebAssembly Interface Types (WIT)](https://github.com/WebA
 The protected **v0.1.0** tag identifies the first LSP-only release, but its
 immutable GitHub Release was deleted. GitHub permanently reserves tag names used
 by immutable releases, so `v0.1.0` cannot be recreated. LSP distribution resumes
-with `v0.1.1`. This is still separate from Zed-extension publication, and the
-extension is not yet published in the Zed extension registry.
+with `v0.1.1` and has since advanced to `v0.1.2`. This is still separate from
+Zed-extension publication; the extension is not yet published in the Zed registry.
 
 ## Features
 
