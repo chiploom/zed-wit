@@ -106,6 +106,21 @@ pub(crate) fn safe_generated_path(root: &Path, relative: &str) -> Result<PathBuf
     Ok(path)
 }
 
+fn validate_cargo_clean_target(root: &Path, target: &Path) -> Result<(), String> {
+    if target != root.join("target") {
+        return Err(
+            "refusing cargo clean outside the repository default target/; run cargo clean --locked explicitly for custom CARGO_TARGET_DIR"
+                .into(),
+        );
+    }
+    if fs::symlink_metadata(target)
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err("refusing cargo clean through a symlinked target directory".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn clean(args: &[String]) -> Result<(), String> {
     let mut options = opts(args, &["scope", "execute"])?;
     let scope = util::required_option(&mut options, "scope")?;
@@ -130,8 +145,8 @@ pub(crate) fn clean(args: &[String]) -> Result<(), String> {
         .drain(..)
         .map(|p| safe_generated_path(&root, p))
         .collect::<Result<Vec<_>, _>>()?;
-    if matches!(scope.as_str(), "build" | "all") && root.join("target").is_symlink() {
-        return Err("refusing cargo clean through a symlinked target directory".into());
+    if matches!(scope.as_str(), "build" | "all") {
+        validate_cargo_clean_target(&root, &util::cargo_target_dir())?;
     }
     if execute && cfg!(windows) && matches!(scope.as_str(), "build" | "all") {
         return Err(
@@ -219,6 +234,14 @@ pub(crate) fn update_grammar(args: &[String]) -> Result<(), String> {
 mod tests {
     use super::safe_generated_path;
     use std::{fs, os::unix::fs::symlink, sync::atomic::{AtomicU64, Ordering}};
+
+    #[test]
+    fn cargo_clean_stays_in_the_default_build_directory() {
+        let root = std::env::temp_dir().join("zed-wit-xtask-path-validation");
+        assert!(super::validate_cargo_clean_target(&root, &root.join("target")).is_ok());
+        assert!(super::validate_cargo_clean_target(&root, &root.join("other-build")).is_err());
+        assert!(super::validate_cargo_clean_target(&root, &std::env::temp_dir()).is_err());
+    }
 
     #[test]
     fn cleanup_rejects_symlinked_target_and_leaf_directories() {
