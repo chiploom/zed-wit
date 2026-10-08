@@ -231,6 +231,123 @@ struct Plan {
     main_sha: String,
 }
 
+fn version_in_manifest(source: &str, scope: Scope, extension_file: bool) -> Result<Version, String> {
+    let doc: toml::Value = toml::from_str(source)
+        .map_err(|_| "release provenance manifest is not valid TOML".to_owned())?;
+    let value = if extension_file {
+        doc.get("version")
+    } else {
+        doc.get("package").and_then(|package| package.get("version"))
+    };
+    let raw = value.and_then(toml::Value::as_str)
+        .ok_or("release provenance manifest omitted its version")?;
+    Version::parse(raw)
+}
+fn valid_version_transition(previous: Version, candidate: Version) -> bool {
+    [Bump::Patch, Bump::Minor, Bump::Major]
+        .iter()
+        .any(|bump| previous.bump(*bump).is_ok_and(|next| next == candidate))
+}
+fn ensure_release_transition(
+    previous: Version,
+    reviewed_head: Version,
+    merged: Version,
+    current: Version,
+) -> Result<(), String> {
+    if !valid_version_transition(previous, reviewed_head)
+        || reviewed_head != merged || merged != current
+    {
+        return Err(format!(
+            "release PR did not introduce the exact reviewed version bump: before={}, PR={}, merged={}, current={}",
+            previous.value(), reviewed_head.value(), merged.value(), current.value()
+        ));
+    }
+    Ok(())
+}
+fn remote_file_at(root: &Path, sha: &str, file: &str) -> Result<String, String> {
+    if !valid_sha(sha) {
+        return Err("invalid immutable PR source SHA".into());
+    }
+    // GitHub's documented raw media type returns the contents, not JSON or a
+    // base64 blob. All paths are fixed scope-specific repo paths.
+    gh(&[
+        "api", "-H", "Accept: application/vnd.github.raw+json",
+        &format!("repos/{REPO}/contents/{file}?ref={sha}"),
+    ], root)
+}
+fn valid_sha(sha: &str) -> bool {
+    sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+fn git_manifest_version(root: &Path, sha: &str, scope: Scope, extension_file: bool)
+    -> Result<Version, String>
+{
+    if !valid_sha(sha) {
+        return Err("invalid release Git commit SHA".into());
+    }
+    let name = if extension_file { "extension.toml" } else { scope.manifest() };
+    let content = git(&["show", &format!("{sha}:{name}")], root)?;
+    version_in_manifest(&content, scope, extension_file)
+}
+fn verify_pr_version_transition(
+    root: &Path, scope: Scope, candidate: Version, merge_sha: &str,
+    pr_head_sha: &str, pr_commits: u64,
+) -> Result<(), String> {
+    if !valid_sha(merge_sha) || !valid_sha(pr_head_sha)
+        || !(1..=250).contains(&pr_commits) {
+        return Err("release PR provenance has invalid commit identifiers or count".into());
+    }
+    let current = manifest_version(root, scope)?;
+    let reviewed_head = version_in_manifest(
+        &remote_file_at(root, pr_head_sha, scope.manifest())?, scope, false,
+    )?;
+    let merged = git_manifest_version(root, merge_sha, scope, false)?;
+    // Merge and squash commits introduce the entire PR diff at the immediate
+    // first parent; a rebase merge introduces N sequential PR commits.
+    let immediate = git(&["rev-parse", &format!("{merge_sha}^")], root)?;
+    let predecessor = git_manifest_version(root, &immediate, scope, false)?;
+    let previous = if valid_version_transition(predecessor, candidate) {
+        predecessor
+    } else if pr_commits > 1 {
+        let ancestor = git(&[
+            "rev-parse", &format!("{merge_sha}~{pr_commits}"),
+        ], root)?;
+        git_manifest_version(root, &ancestor, scope, false)?
+    } else {
+        predecessor
+    };
+    ensure_release_transition(previous, reviewed_head, merged, current)?;
+    if scope == Scope::Extension {
+        let checked_head = version_in_manifest(
+            &remote_file_at(root, pr_head_sha, "extension.toml")?, scope, true,
+        )?;
+        let merged_extension = git_manifest_version(root, merge_sha, scope, true)?;
+        let before_extension = git_manifest_version(root, &immediate, scope, true)?;
+        let prior_extension = if valid_version_transition(before_extension, candidate) {
+            before_extension
+        } else if pr_commits > 1 {
+            let ancestor = git(&[
+                "rev-parse", &format!("{merge_sha}~{pr_commits}"),
+            ], root)?;
+            git_manifest_version(root, &ancestor, scope, true)?
+        } else {
+            before_extension
+        };
+        let current_extension = version_in_manifest(
+            &util::read_nonempty(&root.join("extension.toml"))?, scope, true,
+        )?;
+        ensure_release_transition(
+            prior_extension, checked_head, merged_extension, current_extension,
+        )?;
+        if current_extension != candidate {
+            return Err("extension release manifest does not match candidate".into());
+        }
+    }
+    if current != candidate {
+        return Err("current main release version does not match the merged PR".into());
+    }
+    Ok(())
+}
+
 fn manifest_version(root: &Path, scope: Scope) -> Result<Version, String> {
     let path = root.join(scope.manifest());
     let manifest: toml::Value = toml::from_str(&util::read_nonempty(&path)?)
@@ -838,6 +955,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     if info["merged"].as_bool() != Some(true)
         || info["base"]["ref"].as_str() != Some("main")
         || info["head"]["ref"].as_str() != Some(branch.as_str())
+        || info["head"]["repo"]["full_name"].as_str() != Some(REPO)
     {
         return Err("release preparation PR is not merged on main for this exact tag".into());
     }
@@ -861,6 +979,12 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         .ok_or("merged preparation PR omitted merge commit SHA")?;
     git(&["merge-base", "--is-ancestor", merge_sha, &main_sha], root)
         .map_err(|_| "merged preparation commit is not in current main".to_owned())?;
+    let head_sha = info["head"]["sha"].as_str()
+        .filter(|sha| valid_sha(sha))
+        .ok_or("release PR is missing immutable reviewed head SHA")?;
+    let pr_commits = info["commits"].as_u64()
+        .ok_or("release PR is missing commit count")?;
+    verify_pr_version_transition(root, scope, version, merge_sha, head_sha, pr_commits)?;
 
     let known = release_tag_history(root)?;
     let mut matching_draft = false;
@@ -1162,6 +1286,21 @@ mod tests {
         ] {
             assert!(!origin_is_expected(invalid));
         }
+    }
+
+    #[test]
+    fn pr_filenames_cannot_substitute_for_a_reviewed_version_transition() {
+        let old = Version::parse("0.1.2").unwrap();
+        let next = Version::parse("0.1.3").unwrap();
+        assert!(ensure_release_transition(old, next, next, next).is_ok());
+        assert!(ensure_release_transition(next, next, next, next).is_err());
+        assert!(ensure_release_transition(old, old, next, next).is_err());
+        assert!(ensure_release_transition(old, next, old, next).is_err());
+        assert!(ensure_release_transition(old, next, next, old).is_err());
+        assert!(ensure_release_transition(old, Version::parse("0.2.0").unwrap(), next, next).is_err());
+        assert!(valid_version_transition(old, Version::parse("0.2.0").unwrap()));
+        assert!(valid_version_transition(old, Version::parse("1.0.0").unwrap()));
+        assert!(!valid_version_transition(old, Version::parse("0.1.4").unwrap()));
     }
 
     #[test]
