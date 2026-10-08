@@ -18,7 +18,7 @@ Read [architecture](docs/architecture.md) before changing boundaries and
 
 ## Commands
 
-See [docs/xtask.md](docs/xtask.md) for the Rust development command reference. Local release preparation never publishes, tags, attests, or bypasses protected CD.
+See [docs/xtask.md](docs/xtask.md) for the Rust development command reference. Register all command routing/help in `crates/xtask/src/cli.rs` and keep implementations in their domain modules under `tasks/`. Do not add a second dispatcher. Local release preparation never publishes, tags, attests, or bypasses protected CD; the future publish command is tracked separately in #24.
 
 
 ```sh
