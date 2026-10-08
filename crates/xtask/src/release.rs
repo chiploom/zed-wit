@@ -625,7 +625,10 @@ pub fn verify_release_target(target: &str, input: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{path::PathBuf, sync::atomic::{AtomicU64, Ordering}};
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
 
     struct ArtifactDir(PathBuf);
 
