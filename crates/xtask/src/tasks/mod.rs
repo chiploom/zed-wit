@@ -40,7 +40,7 @@ mod tests {
             "changelog-check",
             "update-grammar",
         ];
-        assert_eq!(crate::cli::COMMAND_HELP.len(), 27);
+        assert_eq!(crate::cli::COMMAND_HELP.len(), 28);
         for cmd in APPROVED {
             assert!(
                 crate::cli::COMMAND_HELP
