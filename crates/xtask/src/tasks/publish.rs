@@ -1191,6 +1191,18 @@ mod tests {
     }
 
     #[test]
+    fn protected_workflow_rejects_changed_main_sha_before_release_validation() {
+        let workflow = include_str!("../../../../.github/workflows/release.yml");
+        assert!(workflow.contains("run-name: CD / ${{ inputs.operation }} / ${{ inputs.scope }} / ${{ inputs.tag }}"));
+        assert!(workflow.contains("expected_sha:"));
+        assert!(workflow.contains("EXPECTED_SHA: ${{ inputs.expected_sha }}"));
+        assert!(workflow.contains("if [ \"$GITHUB_SHA\" != \"$EXPECTED_SHA\" ]; then"));
+        let guard = workflow.find("Require expected release commit when provided").unwrap();
+        let checkout = workflow.find("uses: actions/checkout@").unwrap();
+        assert!(guard < checkout, "source SHA guard must precede checkout and CD work");
+    }
+
+    #[test]
     fn workflow_dispatch_must_identify_one_exact_authenticated_run() {
         let valid = r#"{"workflow_run_id":1234,"html_url":"https://github.com/chiploom/zed-wit/actions/runs/1234"}"#;
         assert_eq!(parse_dispatch_identity(valid).unwrap().0, 1234);
