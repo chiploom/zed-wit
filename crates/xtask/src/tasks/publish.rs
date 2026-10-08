@@ -1308,6 +1308,52 @@ fn parse_remote_tag_commit(rows: &str, tag: &str) -> Result<String, String> {
         .to_owned())
 }
 
+struct LocalDispatchLock {
+    path: std::path::PathBuf,
+}
+impl Drop for LocalDispatchLock {
+    fn drop(&mut self) {
+        // The lock is advisory, scoped to this Git common directory. Cross-
+        // checkout and cross-machine idempotency must remain in protected CD.
+        let _ = fs::remove_file(&self.path);
+    }
+}
+fn try_acquire_dispatch_lock(path: &Path) -> Result<LocalDispatchLock, String> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| {
+            format!(
+                "another local publish dispatch is active (or a stale lock needs inspection) at {}: {error}",
+                path.display()
+            )
+        })?;
+    writeln!(file, "pid={}", std::process::id())
+        .map_err(|error| format!("write dispatch guard {}: {error}", path.display()))?;
+    Ok(LocalDispatchLock { path: path.to_path_buf() })
+}
+fn acquire_dispatch_lock(root: &Path, scope: Scope, tag: &str) -> Result<LocalDispatchLock, String> {
+    if !tag.starts_with('v') || !tag.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-'
+    }) {
+        return Err("invalid tag for local dispatch lock path".into());
+    }
+    let common = git(&["rev-parse", "--git-common-dir"], root)?;
+    let common_path = Path::new(&common);
+    let common_path = if common_path.is_absolute() {
+        common_path.to_path_buf()
+    } else {
+        root.join(common_path)
+    };
+    let meta = fs::symlink_metadata(&common_path)
+        .map_err(|error| format!("inspect git common directory: {error}"))?;
+    if !meta.is_dir() || meta.file_type().is_symlink() {
+        return Err("git common directory is not a real directory".into());
+    }
+    let lock_name = format!("xtask-publish-{}-{tag}.lock", scope.name());
+    try_acquire_dispatch_lock(&common_path.join(lock_name))
+}
 fn validate_prior_cd_runs(
     runs: &str,
     main_sha: &str,
@@ -1494,6 +1540,10 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         pr_commits,
     )?;
 
+    // Serialize this checkout's entire history-check -> dispatch transition.
+    // A separate checkout can still issue a concurrent request; protected CD
+    // enforces the definitive publication boundary.
+    let _dispatch_guard = acquire_dispatch_lock(root, scope, &tag)?;
     let known = release_tag_history(root)?;
     let mut matching_draft = false;
     if known.contains(&tag) {
@@ -1607,6 +1657,43 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn overlapping_same_checkout_dispatch_attempts_are_refused() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let candidate = std::env::temp_dir().join(format!(
+                "zed-wit-dispatch-lock-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("create dispatch lock fixture: {error}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { fs::remove_dir_all(&self.0).expect("remove lock fixture"); }
+        }
+        let _cleanup = Cleanup(root.clone());
+        let lock = root.join("dispatch.lock");
+        let first = try_acquire_dispatch_lock(&lock).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let thread_lock = lock.clone();
+        let thread_barrier = Arc::clone(&barrier);
+        let handle = thread::spawn(move || {
+            thread_barrier.wait();
+            try_acquire_dispatch_lock(&thread_lock).is_err()
+        });
+        barrier.wait();
+        assert!(handle.join().unwrap(), "a simultaneous request acquired the lock");
+        drop(first);
+        assert!(try_acquire_dispatch_lock(&lock).is_ok(), "a completed dispatch lock must release");
     }
 
     #[test]
