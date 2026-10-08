@@ -25,7 +25,7 @@ pub(crate) fn release_build(args: &[String]) -> Result<(), String> {
         &target,
     ])?;
     if let Some(destination) = output {
-        copy_new_file(&native_binary(Some(&target), true), &destination)?;
+        copy_new_file(&native_binary(Some(&target), true)?, &destination)?;
     }
     Ok(())
 }
@@ -101,7 +101,7 @@ pub(crate) fn install_dev(args: &[String]) -> Result<(), String> {
     let destination =
         util::root_relative(util::required_option(&mut options, "destination")?.into());
     finish(options)?;
-    let source = native_binary(None, true);
+    let source = native_binary(None, true)?;
     copy_new_file(&source, &destination)
 }
 
