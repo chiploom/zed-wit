@@ -187,7 +187,6 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         scope,
         bump: bump.unwrap_or(Bump::Patch),
         operation,
-        confirm,
         wait,
         pr,
     })
