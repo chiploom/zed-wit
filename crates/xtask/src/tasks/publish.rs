@@ -499,11 +499,42 @@ fn origin_is_expected(origin: &str) -> bool {
             | "ssh://git@github.com/chiploom/zed-wit.git"
     )
 }
+fn validate_push_destinations(listing: &str) -> Result<String, String> {
+    let destinations = listing.lines().collect::<Vec<_>>();
+    if destinations.is_empty() {
+        return Err("origin has no effective push destination".into());
+    }
+    // Git pushes to every configured pushurl. Even if all are canonical,
+    // multiple targets introduce unnecessary multi-ref partial-failure states.
+    for url in &destinations {
+        if !origin_is_expected(url) {
+            return Err("origin has an unexpected effective push destination".into());
+        }
+    }
+    if destinations.len() != 1 {
+        return Err("origin must have exactly one effective canonical push destination".into());
+    }
+    Ok(destinations[0].to_owned())
+}
+fn canonical_push_destination(root: &Path) -> Result<String, String> {
+    let urls = command("git", &["remote", "get-url", "--push", "--all", "origin"], root)?;
+    let push_url = validate_push_destinations(&urls)?;
+    // An explicit URL passed to git push can itself be rewritten through
+    // url.*.insteadOf. Check its final expansion before pinning the transport.
+    let expanded = command("git", &["ls-remote", "--get-url", &push_url], root)?;
+    if expanded != push_url {
+        return Err("canonical push URL is rewritten again; refusing ambiguous transport".into());
+    }
+    Ok(push_url)
+}
 fn check_remote(root: &Path) -> Result<String, String> {
     let origin = command("git", &["remote", "get-url", "origin"], root)?;
     if !origin_is_expected(&origin) {
         return Err("origin must be the canonical chiploom/zed-wit repository; refusing ambiguous remote identity".into());
     }
+    // Fetch identity alone is insufficient: remote.origin.pushurl and URL
+    // rewriting can redirect a subsequent push to another repository.
+    canonical_push_destination(root)?;
     let repo: Value = serde_json::from_str(&gh(
         &[
             "repo",
@@ -1077,18 +1108,26 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
     // Resume only if the remote ref is exactly the validated local commit;
     // never force-push or silently replace another person's branch.
     let head_sha = git(&["rev-parse", "HEAD"], root)?;
-    let remote_ref = git(&["ls-remote", "--heads", "origin", &branch], root)?;
+    let push_url = canonical_push_destination(root)?;
+    let ref_name = format!("refs/heads/{branch}");
+    let remote_ref = git(&["ls-remote", "--heads", &push_url, &ref_name], root)?;
     let push_state = classify_preparation_branch(&remote_ref, &branch, &head_sha)?;
     if push_state == PreparationPush::PushNew {
-        if check_remote(root)? != remote_sha {
-            return Err("remote main moved before PR submission; inspect and revalidate".into());
+        if check_remote(root)? != remote_sha
+            || canonical_push_destination(root)? != push_url
+        {
+            return Err("remote identity or default branch moved before PR submission".into());
         }
+        // Explicit empty expected value atomically asserts the branch does
+        // not exist on the server. Git rejects a competing branch creation
+        // even when its commit is an ancestor of our HEAD.
         git(
             &[
                 "push",
-                "--set-upstream",
-                "origin",
-                &format!("HEAD:refs/heads/{branch}"),
+                "--porcelain",
+                &format!("--force-with-lease={ref_name}:"),
+                &push_url,
+                &format!("HEAD:{ref_name}"),
             ],
             root,
         )?;
@@ -1096,6 +1135,12 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
         println!(
             "Remote preparation branch already matches validated local HEAD; resuming PR creation without a new push."
         );
+    }
+    let written_ref = git(&["ls-remote", "--heads", &push_url, &ref_name], root)?;
+    if classify_preparation_branch(&written_ref, &branch, &head_sha)?
+        != PreparationPush::ExistingExactCommit
+    {
+        return Err("remote preparation branch moved or vanished after submission".into());
     }
     let title = format!("Prepare {} release {}", scope.title(), tag);
     let body = format!(
@@ -1114,6 +1159,28 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
         ],
         root,
     )?;
+    let created_url = created.trim();
+    let number = created_url
+        .strip_prefix("https://github.com/chiploom/zed-wit/pull/")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value != 0)
+        .ok_or("GitHub returned an ambiguous preparation PR URL; inspect remotely")?;
+    let created_pr: Value = serde_json::from_str(&gh(
+        &["api", &format!("repos/{REPO}/pulls/{number}")], root,
+    )?).map_err(|_| "cannot verify created PR identity; inspect remotely".to_owned())?;
+    if created_pr["base"]["ref"].as_str() != Some("main")
+        || created_pr["head"]["ref"].as_str() != Some(branch.as_str())
+        || created_pr["head"]["repo"]["full_name"].as_str() != Some(REPO)
+        || created_pr["head"]["sha"].as_str() != Some(head_sha.as_str())
+    {
+        return Err("created PR head, repository, or base differs from validated submission".into());
+    }
+    let final_ref = git(&["ls-remote", "--heads", &push_url, &ref_name], root)?;
+    if classify_preparation_branch(&final_ref, &branch, &head_sha)?
+        != PreparationPush::ExistingExactCommit
+    {
+        return Err("remote preparation branch changed during PR creation".into());
+    }
     println!("Release preparation PR submitted: {}", created.trim());
     println!("No publication requested. Merge through normal review and CD policy.");
     Ok(())
@@ -2342,6 +2409,25 @@ mod tests {
             serde_json::json!({}),
         ] {
             assert!(verify_published_release(&invalid, tag).is_err());
+        }
+    }
+
+    #[test]
+    fn effective_push_urls_reject_redirects_and_multiple_destinations() {
+        for url in [
+            "git@github.com:chiploom/zed-wit.git",
+            "https://github.com/chiploom/zed-wit.git",
+            "ssh://git@github.com/chiploom/zed-wit",
+        ] {
+            assert_eq!(validate_push_destinations(url).unwrap(), url);
+        }
+        for bad in [
+            "",
+            "https://github.com/untrusted/zed-wit.git",
+            "git@github.com:chiploom/zed-wit.git\\nhttps://github.com/untrusted/zed-wit",
+            "https://github.com/chiploom/zed-wit\\nhttps://github.com/chiploom/zed-wit",
+        ] {
+            assert!(validate_push_destinations(bad).is_err(), "allowed {bad:?}");
         }
     }
 
