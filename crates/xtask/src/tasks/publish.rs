@@ -1273,6 +1273,14 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         ],
         root,
     )?;
+    let expected_file_count = info["changed_files"].as_u64()
+        .ok_or("merged release PR omitted its changed file count")?;
+    let downloaded_file_count = reviewed_files.lines().count() as u64;
+    if expected_file_count != downloaded_file_count {
+        return Err(format!(
+            "incomplete GitHub PR file listing: expected {expected_file_count}, received {downloaded_file_count}"
+        ));
+    }
     let reviewed_predecessor = reviewed_pr_file_versions(&reviewed_files, scope, version)?;
     let merge_sha = info["merge_commit_sha"]
         .as_str()
