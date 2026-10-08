@@ -193,8 +193,10 @@ fn copy_new_file(source: &Path, destination: &Path) -> Result<(), String> {
     let permissions = fs::metadata(source)
         .map_err(|e| format!("stat {}: {e}", source.display()))?
         .permissions();
-    fs::set_permissions(destination, permissions)
-        .map_err(|e| format!("permissions {}: {e}", destination.display()))?;
+    if let Err(error) = fs::set_permissions(destination, permissions) {
+        let _ = fs::remove_file(destination);
+        return Err(format!("permissions {}: {error}", destination.display()));
+    }
     println!("installed {}", destination.display());
     Ok(())
 }
@@ -398,10 +400,17 @@ fn prepare_release(args: &[String]) -> Result<(), String> {
     let scope = util::required_option(&mut options, "scope")?;
     let tag = util::required_option(&mut options, "tag")?;
     let target = options.remove("target");
+    let specified_output = options.remove("output");
+    if scope == "extension" && specified_output.is_some() {
+        return Err("--output is only supported for LSP release preparation".into());
+    }
     let output = util::root_relative(
-        options.remove("output").unwrap_or_else(|| "dist".into()).into()
+        specified_output.unwrap_or_else(|| "dist".into()).into()
     );
     finish(options)?;
+    if scope == "extension" && target.is_some() {
+        return Err("extension release preparation does not accept --target".into());
+    }
     // Validate before building so invalid candidate releases perform no build work.
     release_check_inner(&scope, &tag)?;
     match scope.as_str() {
@@ -415,9 +424,6 @@ fn prepare_release(args: &[String]) -> Result<(), String> {
             println!("Local release artifacts prepared. Complete five-target CD validation and protected publication separately.");
         }
         "extension" => {
-            if target.is_some() {
-                return Err("extension release preparation does not accept --target".into());
-            }
             build(&["--kind".into(), "extension".into(), "--release".into(), "true".into()])?;
             println!("Extension Wasm candidate built locally. Published LSP dependency and protected CD publication must be verified separately.");
         }
@@ -450,6 +456,22 @@ fn doctor(args: &[String]) -> Result<(), String> {
         }
     } else {
         errors.push("cannot inspect installed Rust targets".into());
+    }
+    let compiler_found = if cfg!(windows) {
+        tool_available("where", &["cl"])
+    } else {
+        tool_available("cc", &["--version"]) || tool_available("clang", &["--version"])
+    };
+    if compiler_found {
+        println!("OK: native C compiler");
+    } else {
+        errors.push("missing a native C compiler; install Xcode CLT, GCC/Clang, or MSVC Build Tools".into());
+    }
+    if let Ok(host) = host_target() {
+        println!("Host target: {host}");
+        if !dependency_policy::TARGETS.contains(&host.as_str()) {
+            println!("NOTE: host is not among the five native release targets");
+        }
     }
     for (name, program, args) in [
         ("cargo-nextest", "cargo", vec!["nextest", "--version"]),
