@@ -214,6 +214,7 @@ mod tests {
                 Err(error) => panic!("create Cargo fixture: {error}"),
             }
         };
+        let root = fs::canonicalize(root).expect("canonicalize Cargo fixture root");
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
