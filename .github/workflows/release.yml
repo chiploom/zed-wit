@@ -1,4 +1,5 @@
 name: CD
+run-name: CD / ${{ inputs.operation }} / ${{ inputs.scope }} / ${{ inputs.tag }}
 
 on:
   workflow_dispatch:
@@ -23,6 +24,10 @@ on:
         options:
           - validate
           - publish
+      expected_sha:
+        description: Optional exact main commit to require for version-aware xtask dispatch
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -56,6 +61,22 @@ jobs:
           if [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
             echo "::error::CD must be dispatched from $DEFAULT_BRANCH"
             exit 1
+          fi
+
+      - name: Require expected release commit when provided
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$EXPECTED_SHA" ]; then
+            if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Expected release SHA must be 40 lowercase hex characters"
+              exit 1
+            fi
+            if [ "$GITHUB_SHA" != "$EXPECTED_SHA" ]; then
+              echo "::error::Default branch advanced after release planning; do not publish a different revision"
+              exit 1
+            fi
           fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
