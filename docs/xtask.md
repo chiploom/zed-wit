@@ -55,6 +55,8 @@ cargo xtask release --scope lsp --tag v0.1.3 --target aarch64-apple-darwin --out
 cargo xtask release --scope extension --tag v-extension-0.1.0
 ```
 
+Release packaging creates each binary and sidecar only if its destination does not already exist, including dangling symlinks. An I/O failure can leave an incomplete newly created file; inspect and remove that candidate explicitly before retrying.
+
 Single-target local verification does not replace the existing five-target release asset contract, GitHub attestation, immutable tags, protected `release` environment, or published-download validation. See [publishing](publishing.md). Zed registry succession requires independent authorization.
 
 ## Maintenance and optional tooling
