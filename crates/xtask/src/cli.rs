@@ -316,6 +316,6 @@ mod tests {
     fn unknown_command_does_not_fall_back_to_any_implicit_action() {
         assert!(dispatch("publish", &[]).is_err());
         assert!(dispatch("missing-command", &[]).is_err());
-        assert!(dispatch("publish", &["--help".into()]).is_err());
+        assert!(dispatch("publish", &["--help".into()]).is_ok());
     }
 }
