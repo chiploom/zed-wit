@@ -109,7 +109,7 @@ pub(crate) fn safe_generated_path(root: &Path, relative: &str) -> Result<PathBuf
 fn validate_cargo_clean_target(root: &Path, target: &Path) -> Result<(), String> {
     if target != root.join("target") {
         return Err(
-            "refusing cargo clean outside the repository default target/; run cargo clean --locked explicitly for custom CARGO_TARGET_DIR"
+            "refusing cargo clean outside the repository default target/; run cargo clean --locked explicitly for a nondefault Cargo target directory"
                 .into(),
         );
     }
@@ -165,10 +165,16 @@ pub(crate) fn clean(args: &[String]) -> Result<(), String> {
         }
     }
     if matches!(scope.as_str(), "build" | "all") {
+        let default_target = root.join("target");
         if execute {
-            cargo(&["clean", "--locked"])?;
+            // Cargo's CLI target-dir override wins over environment and config.
+            // Never allow configuration to redirect destructive cleanup.
+            let target = default_target.to_str().ok_or_else(|| {
+                "repository target path cannot be represented as a Cargo argument".to_owned()
+            })?;
+            cargo(&["clean", "--locked", "--target-dir", target])?;
         } else {
-            println!("dry-run: cargo clean --locked");
+            println!("dry-run: cargo clean --locked --target-dir {}", default_target.display());
         }
     }
     if !execute {
