@@ -97,12 +97,19 @@ pub(crate) fn dev(args: &[String]) -> Result<(), String> {
 }
 
 pub(crate) fn install_dev(args: &[String]) -> Result<(), String> {
-    let mut options = opts(args, &["destination"])?;
+    let mut options = opts(args, &["destination", "target"])?;
     let destination =
         util::root_relative(util::required_option(&mut options, "destination")?.into());
+    let target = match options.remove("target") {
+        Some(target) => target,
+        None => host_target()?,
+    };
+    dependency_policy::ensure_target(&target)?;
     finish(options)?;
-    let source = native_binary(None, true)?;
-    copy_new_file(&source, &destination)
+    // Rebuild to avoid copying a stale binary, always using Cargo's explicit
+    // target-specific layout. This matches release-build on every host.
+    release_build(&["--target".into(), target.clone()])?;
+    copy_new_file(&native_binary(Some(&target), true)?, &destination)
 }
 
 #[cfg(test)]
