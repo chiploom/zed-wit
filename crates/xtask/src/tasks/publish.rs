@@ -268,6 +268,27 @@ fn validate_worktree(root: &Path) -> Result<(), String> {
     if !status.is_empty() { return Err("publish requires a clean working tree".into()); }
     Ok(())
 }
+fn check_release_preconditions(root: &Path) -> Result<(), String> {
+    let toolchain: toml::Value = toml::from_str(&util::read_nonempty(
+        &root.join("rust-toolchain.toml"),
+    )?).map_err(|e| format!("parse pinned toolchain: {e}"))?;
+    if toolchain["toolchain"]["channel"].as_str() != Some("1.99.0") {
+        return Err("unexpected Rust toolchain pin; review before publishing".into());
+    }
+    let rustc = command("rustc", &["--version"], root)?;
+    if !rustc.starts_with("rustc 1.99.0 ") {
+        return Err(format!("publish requires pinned rustc 1.99.0; found {rustc}"));
+    }
+    let changelog = util::read_nonempty(&root.join("CHANGELOG.md"))?;
+    if !changelog.contains("# Changelog") || !changelog.contains("## Unreleased") {
+        return Err("CHANGELOG.md must contain Changelog and Unreleased headings".into());
+    }
+    // A failed authentication check must not print GH_TOKEN or token-shaped
+    // stderr. No CLI invocation below includes user-supplied shell fragments.
+    gh(&["auth", "status"], root)?;
+    Ok(())
+}
+
 fn release_tag_history(root: &Path) -> Result<BTreeSet<String>, String> {
     let refs = command("git", &["ls-remote", "--tags", "origin"], root)?;
     let mut tags = BTreeSet::new();
@@ -309,6 +330,7 @@ fn validate_candidate(scope: Scope, candidate: Version, tags: &BTreeSet<String>)
     Ok(())
 }
 fn plan(root: &Path, scope: Scope, bump: Bump, remote: bool) -> Result<Plan, String> {
+    if remote { check_release_preconditions(root)?; }
     let current = manifest_version(root, scope)?;
     let candidate = current.bump(bump)?;
     let tag = scope.tag(candidate);
@@ -564,6 +586,7 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
 }
 
 fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> {
+    check_release_preconditions(root)?;
     let main_sha = confirm_remote_main(root)?;
     let version = manifest_version(root, scope)?;
     let tag = scope.tag(version);
