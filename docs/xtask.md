@@ -77,6 +77,8 @@ cargo xtask clean --scope profiles --execute true
 cargo xtask clean --scope build --execute true
 ```
 
+For `clean --scope build|all`, xtask refuses a non-default `CARGO_TARGET_DIR` to avoid deleting build data outside the repository's allowlisted `target/`. When intentionally cleaning a custom Cargo target directory, run `cargo clean --locked` yourself after checking the configured path.
+
 On Windows, running `cargo clean` from the active `xtask.exe` would attempt to remove that locked executable. For `--scope build` or `--scope all`, invoke `cargo clean --locked` directly instead. The xtask command rejects destructive execution of those scopes on Windows.
 
 No command deletes personal Zed data or modifies release tags. For grammar requalification, see [upstream compatibility](upstream-compatibility.md) and issue #17. Changing a pin requires reviewing tree-sitter queries, generated metadata, WIT fixtures and Cargo.lock.
