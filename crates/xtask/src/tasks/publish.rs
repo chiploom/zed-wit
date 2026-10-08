@@ -651,3 +651,134 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     }
     Err(format!("timed out watching CD run {id}; outcome pending: {run_url}"))
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn strict_stable_semver_and_checked_bumps() {
+        let zero = Version::parse("0.1.2").unwrap();
+        assert_eq!(zero.bump(Bump::Patch).unwrap().value(), "0.1.3");
+        assert_eq!(zero.bump(Bump::Minor).unwrap().value(), "0.2.0");
+        assert_eq!(zero.bump(Bump::Major).unwrap().value(), "1.0.0");
+        let higher = Version::parse("12.34.56").unwrap();
+        assert_eq!(higher.bump(Bump::Minor).unwrap().value(), "12.35.0");
+        for bad in [
+            "", "1", "1.2", "1.2.3.4", "01.0.0", "0.01.0", "0.0.01",
+            "1.2.3-rc.1", "1.2.3+meta", "-1.2.3", "1.2.a",
+            "18446744073709551616.1.1",
+        ] {
+            assert!(Version::parse(bad).is_err(), "accepted {bad:?}");
+        }
+        assert!(Version::parse("0.0.18446744073709551615")
+            .unwrap().bump(Bump::Patch).is_err());
+        assert!(Version::parse("0.18446744073709551615.1")
+            .unwrap().bump(Bump::Minor).is_err());
+        assert!(Version::parse("18446744073709551615.0.0")
+            .unwrap().bump(Bump::Major).is_err());
+    }
+
+    #[test]
+    fn scope_separation_and_historic_collisions() {
+        let version = Version::parse("0.1.3").unwrap();
+        assert_eq!(Scope::Lsp.tag(version), "v0.1.3");
+        assert_eq!(Scope::Extension.tag(version), "v-extension-0.1.3");
+        assert_ne!(Scope::Lsp.manifest(), Scope::Extension.manifest());
+        let mut visible = BTreeSet::from([
+            "v0.1.1".into(),
+            "v-extension-0.1.2".into(),
+        ]);
+        assert!(validate_candidate(Scope::Lsp, version, &visible).is_ok());
+        assert!(validate_candidate(Scope::Extension, version, &visible).is_ok());
+        visible.insert("v0.1.3".into());
+        assert!(validate_candidate(Scope::Lsp, version, &visible).is_err());
+        assert!(validate_candidate(Scope::Extension, version, &visible).is_ok());
+        visible.insert("v-extension-0.2.0".into());
+        assert!(validate_candidate(Scope::Extension, version, &visible).is_err());
+    }
+
+    #[test]
+    fn parse_requires_explicit_confirm_and_rejects_ambiguous_stages() {
+        let planned = parse_args(&args(&["--scope", "lsp"])).unwrap();
+        assert_eq!(planned.operation, Operation::Plan);
+        assert_eq!(planned.bump, Bump::Patch);
+        assert_eq!(
+            parse_args(&args(&["--scope", "extension", "--bump", "minor"]))
+                .unwrap().bump, Bump::Minor
+        );
+        let approved = parse_args(&args(&[
+            "--scope", "lsp", "--resume", "--pr", "25", "--confirm", "--wait",
+        ])).unwrap();
+        assert_eq!(approved.operation, Operation::Resume);
+        assert_eq!(approved.pr, Some(25));
+        assert!(approved.wait);
+        for invalid in [
+            vec!["--scope", "lsp", "--confirm"],
+            vec!["--scope", "lsp", "--prepare"],
+            vec!["--scope", "lsp", "--submit"],
+            vec!["--scope", "lsp", "--resume", "--pr", "3"],
+            vec!["--scope", "lsp", "--wait"],
+            vec!["--scope", "lsp", "--dry-run", "--confirm"],
+            vec!["--scope", "lsp", "--prepare", "--confirm", "--dry-run"],
+            vec!["--scope", "lsp", "--resume", "--confirm", "--pr", "0"],
+            vec!["--scope", "lsp", "--resume", "--confirm"],
+            vec!["--scope", "lsp", "--prepare", "--confirm", "--pr", "3"],
+            vec!["--scope", "lsp", "--resume", "--confirm", "--pr", "3",
+                 "--bump", "major"],
+            vec!["--scope", "lsp", "--scope", "extension"],
+            vec!["--scope", "lsp", "--resume", "--submit", "--confirm", "--pr", "3"],
+            vec!["--scope", "lsp", "--unknown"],
+        ] {
+            assert!(parse_args(&args(&invalid)).is_err(), "accepted {invalid:?}");
+        }
+    }
+
+    #[test]
+    fn version_edits_are_scope_bounded_and_preserve_other_fields() {
+        let old = Version::parse("0.1.2").unwrap();
+        let next = Version::parse("0.1.3").unwrap();
+        let input = "[package]\nname = \"server\"\nversion = \"0.1.2\"\n\n[dependencies]\nversion = \"99.0.0\"\n";
+        let changed = replace_manifest_version(input, old, next, Some("[package]")).unwrap();
+        assert!(changed.contains("version = \"0.1.3\""));
+        assert!(changed.contains("[dependencies]\nversion = \"99.0.0\""));
+        let extension = "id = \"wit\"\nversion = \"0.1.2\"\n\n[grammars.wit]\nversion = \"other\"\n";
+        let edited = replace_manifest_version(extension, old, next, None).unwrap();
+        assert!(edited.starts_with("id = \"wit\"\nversion = \"0.1.3\""));
+        assert!(edited.contains("[grammars.wit]\nversion = \"other\""));
+        assert!(replace_manifest_version(input, next, old, Some("[package]")).is_err());
+    }
+
+    #[test]
+    fn preparation_limits_changed_files_by_scope_and_version() {
+        let v = Version::parse("0.1.3").unwrap();
+        assert!(validate_changed_files(
+            "crates/wit-language-server/Cargo.toml\nCargo.lock\nCHANGELOG.md\ndocs/releases/lsp/v0.1.3.md",
+            Scope::Lsp, v
+        ).is_ok());
+        assert!(validate_changed_files(
+            "Cargo.toml\nextension.toml\nCargo.lock\nCHANGELOG.md\ndocs/releases/extension/v0.1.3.md",
+            Scope::Extension, v
+        ).is_ok());
+        assert!(validate_changed_files("extension.toml", Scope::Lsp, v).is_err());
+        assert!(validate_changed_files(".github/workflows/release.yml", Scope::Lsp, v).is_err());
+        assert!(validate_changed_files("crates/wit-language-server/src/main.rs", Scope::Lsp, v).is_err());
+    }
+
+    #[test]
+    fn malformed_arguments_fail_before_network_or_filesystem_access() {
+        // These must be rejected by the pure argument phase, regardless of
+        // GitHub credentials and regardless of the current working directory.
+        assert!(publish(&args(&[
+            "--scope", "lsp", "--resume", "--confirm", "--pr", "abc",
+        ])).is_err());
+        assert!(publish(&args(&["--scope", "invalid"])).is_err());
+        assert!(publish(&args(&["--scope", "lsp", "--prepare"])).is_err());
+        assert!(publish(&args(&["--scope", "lsp", "--resume", "--confirm"])).is_err());
+    }
+}
