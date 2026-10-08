@@ -1,6 +1,6 @@
 //! Native server and adapter builds, plus developer installs.
 use crate::{dependency_policy, util};
-use super::common::{cargo, copy_new_file, finish, native_binary, no_args, opts, bool_option, run};
+use super::common::{cargo, copy_new_file, finish, host_target, native_binary, no_args, opts, bool_option, run};
 
 pub(crate) fn release_build(args: &[String]) -> Result<(), String> {
     let mut options = opts(args, &["target", "output"])?;
