@@ -111,6 +111,39 @@ Remote read/write boundaries must be explicit so a failed preparation, timeout,
 partial edit, stale default branch, retried dispatch, or duplicate PR cannot
 silently advance to publication.
 
+## Race-resistant remote submission and dispatch
+
+Release-preparation submission checks `remote.origin.pushurl` and expanded Git
+`pushInsteadOf`/URL rewriting, requiring exactly one effective canonical
+destination. It then pushes to that explicit verified URL with an empty
+`--force-with-lease=<branch-ref>:` expected value: creation must be atomic
+and fails if a concurrent actor creates the branch. The post-push and
+post-PR checks revalidate exact remote and PR-head SHA. Recovery still accepts
+only an already-existing remote branch pointing to the identical commit.
+
+Before checking workflow history and dispatching CD, `--resume` creates an
+exclusive lock file in the checkout's Git common directory. This prevents
+simultaneous dispatch attempts from the same Git checkout or shared worktree.
+It is a **local advisory lock**, not a distributed transaction: separate clones
+or computers can still dispatch independently if GitHub run-list visibility
+lags. When a stale lock remains after an interrupted process, inspect active
+Actions runs before manually clearing it. The frontend never claims globally
+at-most-once dispatch.
+
+The existing serialized, environment-protected CD workflow is the final
+publication authority. Its protected publish job rechecks the unpublished
+draft, scope/title and exact release tag commit immediately before promoting
+the release; an already-published or moved release fails closed. The existing
+native build, five-target verification, attestations, reviewer approvals and
+immutable-release enforcement are unchanged. Because GitHub Actions allows
+pending concurrency runs to be replaced, a dispatch acceptance is never
+reported as successful publication.
+
+On resume, same-scope version monotonicity is reevaluated against all known
+remote tags/releases. Only the exact verified draft under safe recovery may
+be excluded from the candidate collision check; any different same-scope
+version at or above the candidate still blocks the dispatch.
+
 ## Reviewed PR provenance and guarded recovery
 
 Before dispatching a publication, `--resume` fetches the merged preparation
