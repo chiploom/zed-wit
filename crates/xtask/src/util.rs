@@ -25,20 +25,30 @@ pub fn root_relative(path: PathBuf) -> PathBuf {
     }
 }
 
-/// Resolve Cargo's build output location, including its standard environment override.
-pub fn cargo_target_dir() -> PathBuf {
-    cargo_target_dir_for(
-        &repo_root(),
-        std::env::var_os("CARGO_TARGET_DIR").as_deref(),
-    )
+/// Ask Cargo to resolve build.target-dir, including environment variables and
+/// the complete configuration hierarchy. Never guess the effective path.
+pub fn cargo_target_dir() -> Result<PathBuf, String> {
+    let root = repo_root();
+    let metadata = command_output(
+        "cargo",
+        ["metadata", "--format-version", "1", "--no-deps", "--locked"],
+        &root,
+    )?;
+    cargo_target_dir_from_metadata(&metadata)
 }
 
-fn cargo_target_dir_for(root: &Path, override_dir: Option<&OsStr>) -> PathBuf {
-    match override_dir {
-        Some(dir) if Path::new(dir).is_absolute() => PathBuf::from(dir),
-        Some(dir) if !dir.is_empty() => root.join(dir),
-        _ => root.join("target"),
+fn cargo_target_dir_from_metadata(metadata: &str) -> Result<PathBuf, String> {
+    let value: serde_json::Value = serde_json::from_str(metadata)
+        .map_err(|error| format!("parse Cargo metadata: {error}"))?;
+    let directory = value
+        .get("target_directory")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "Cargo metadata omitted target_directory".to_owned())?;
+    let target = PathBuf::from(directory);
+    if !target.is_absolute() {
+        return Err("Cargo metadata target_directory must be absolute".into());
     }
+    Ok(target)
 }
 
 pub fn command_output<I, S>(program: &str, args: I, cwd: &Path) -> Result<String, String>
@@ -165,18 +175,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cargo_target_dir_follows_default_relative_and_absolute_overrides() {
-        let root = PathBuf::from("/example/project");
-        assert_eq!(cargo_target_dir_for(&root, None), root.join("target"));
+    fn cargo_target_dir_parser_rejects_incomplete_or_relative_metadata() {
         assert_eq!(
-            cargo_target_dir_for(&root, Some(OsStr::new("local-build"))),
-            root.join("local-build")
+            cargo_target_dir_from_metadata(r#"{"target_directory":"/tmp/build-output"}"#)
+                .unwrap(),
+            PathBuf::from("/tmp/build-output")
         );
-        let absolute = std::env::temp_dir().join("zed-wit-custom-target");
-        assert!(absolute.is_absolute());
+        assert!(cargo_target_dir_from_metadata("{}").is_err());
+        assert!(
+            cargo_target_dir_from_metadata(r#"{"target_directory":"relative"}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn cargo_target_dir_uses_real_cargo_configuration_in_disposable_workspace() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let candidate = std::env::temp_dir().join(format!(
+                "zed-wit-metadata-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("create Cargo metadata fixture: {error}"),
+            }
+        };
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove Cargo metadata fixture");
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        fs::create_dir(root.join("src")).unwrap();
+        fs::create_dir(root.join(".cargo")).unwrap();
+        fs::create_dir(root.join("cargo-home")).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"xtask-metadata-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn fixture() {}\n").unwrap();
+
+        let inspect = |configured: Option<(&str, &Path)>| {
+            let mut cmd = Command::new("cargo");
+            cmd.args(["metadata", "--format-version", "1", "--no-deps", "--offline"])
+                .current_dir(&root)
+                .env_remove("CARGO_TARGET_DIR")
+                .env_remove("CARGO_BUILD_TARGET_DIR")
+                .env("CARGO_HOME", root.join("cargo-home"));
+            if let Some((name, value)) = configured {
+                cmd.env(name, value);
+            }
+            let output = cmd.output().expect("execute Cargo metadata");
+            assert!(
+                output.status.success(),
+                "Cargo metadata failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            cargo_target_dir_from_metadata(&String::from_utf8(output.stdout).unwrap()).unwrap()
+        };
+
+        assert_eq!(inspect(None), root.join("target"));
         assert_eq!(
-            cargo_target_dir_for(&root, Some(absolute.as_os_str())),
+            inspect(Some(("CARGO_TARGET_DIR", Path::new("env-target")))),
+            root.join("env-target")
+        );
+        assert_eq!(
+            inspect(Some(("CARGO_BUILD_TARGET_DIR", Path::new("build-env-target")))),
+            root.join("build-env-target")
+        );
+        let absolute = root.join("external-absolute");
+        assert_eq!(
+            inspect(Some(("CARGO_BUILD_TARGET_DIR", &absolute))),
             absolute
+        );
+        fs::write(
+            root.join(".cargo/config.toml"),
+            "[build]\ntarget-dir = \"configured-target\"\n",
+        )
+        .unwrap();
+        assert_eq!(inspect(None), root.join("configured-target"));
+        assert_eq!(
+            inspect(Some(("CARGO_TARGET_DIR", Path::new("env-override")))),
+            root.join("env-override")
         );
     }
 
