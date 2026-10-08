@@ -176,10 +176,11 @@ mod tests {
 
     #[test]
     fn cargo_target_dir_parser_rejects_incomplete_or_relative_metadata() {
+        let absolute = std::env::temp_dir().join("zed-wit-metadata-output");
+        let sample = serde_json::json!({"target_directory": absolute});
         assert_eq!(
-            cargo_target_dir_from_metadata(r#"{"target_directory":"/tmp/build-output"}"#)
-                .unwrap(),
-            PathBuf::from("/tmp/build-output")
+            cargo_target_dir_from_metadata(&sample.to_string()).unwrap(),
+            absolute
         );
         assert!(cargo_target_dir_from_metadata("{}").is_err());
         assert!(
