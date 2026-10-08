@@ -80,8 +80,8 @@ pub(crate) fn host_target() -> Result<String, String> {
     Ok(host.to_owned())
 }
 
-pub(crate) fn native_binary(target: Option<&str>, release_profile: bool) -> PathBuf {
-    let mut binary = util::cargo_target_dir();
+pub(crate) fn native_binary(target: Option<&str>, release_profile: bool) -> Result<PathBuf, String> {
+    let mut binary = util::cargo_target_dir()?;
     if let Some(target) = target {
         binary.push(target);
     }
@@ -95,7 +95,7 @@ pub(crate) fn native_binary(target: Option<&str>, release_profile: bool) -> Path
             "wit-language-server"
         },
     );
-    binary
+    Ok(binary)
 }
 
 pub(crate) fn ensure_regular_file(path: &Path) -> Result<(), String> {
