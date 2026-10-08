@@ -971,6 +971,36 @@ fn validate_changed_files(paths: &str, scope: Scope, version: Version) -> Result
     }
     Ok(())
 }
+#[derive(Debug, PartialEq, Eq)]
+enum PreparationPush {
+    PushNew,
+    ExistingExactCommit,
+}
+fn classify_preparation_branch(
+    remote_refs: &str, branch: &str, local_sha: &str,
+) -> Result<PreparationPush, String> {
+    if !valid_sha(local_sha) {
+        return Err("local release preparation commit SHA is invalid".into());
+    }
+    let refs = remote_refs.lines().collect::<Vec<_>>();
+    if refs.is_empty() {
+        return Ok(PreparationPush::PushNew);
+    }
+    if refs.len() != 1 {
+        return Err("multiple remote preparation refs were returned".into());
+    }
+    let parts = refs[0].split_whitespace().collect::<Vec<_>>();
+    if parts.len() != 2 || parts[1] != format!("refs/heads/{branch}")
+        || !valid_sha(parts[0])
+    {
+        return Err("remote preparation branch lookup was ambiguous".into());
+    }
+    if parts[0] != local_sha {
+        return Err("remote preparation branch exists at a different commit; do not overwrite".into());
+    }
+    Ok(PreparationPush::ExistingExactCommit)
+}
+
 fn submit(root: &Path, scope: Scope) -> Result<(), String> {
     validate_worktree(root)?;
     let version = manifest_version(root, scope)?;
@@ -1044,21 +1074,28 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
                 .into(),
         );
     }
-    if !git(&["ls-remote", "--heads", "origin", &branch], root)?.is_empty() {
-        return Err(
-            "release branch is already on origin; inspect and resume its PR manually".into(),
-        );
+    // A prior attempt may have pushed successfully before gh pr create failed.
+    // Resume only if the remote ref is exactly the validated local commit;
+    // never force-push or silently replace another person's branch.
+    let head_sha = git(&["rev-parse", "HEAD"], root)?;
+    let remote_ref = git(&["ls-remote", "--heads", "origin", &branch], root)?;
+    let push_state = classify_preparation_branch(&remote_ref, &branch, &head_sha)?;
+    if push_state == PreparationPush::PushNew {
+        if check_remote(root)? != remote_sha {
+            return Err("remote main moved before PR submission; inspect and revalidate".into());
+        }
+        git(
+            &[
+                "push",
+                "--set-upstream",
+                "origin",
+                &format!("HEAD:refs/heads/{branch}"),
+            ],
+            root,
+        )?;
+    } else {
+        println!("Remote preparation branch already matches validated local HEAD; resuming PR creation without a new push.");
     }
-    // These two remote writes are allowed only after explicit --submit --confirm.
-    git(
-        &[
-            "push",
-            "--set-upstream",
-            "origin",
-            &format!("HEAD:refs/heads/{branch}"),
-        ],
-        root,
-    )?;
     let title = format!("Prepare {} release {}", scope.title(), tag);
     let body = format!(
         "Release preparation for {}.\n\n- Scope: {}\n- Candidate: {}\n- Human-reviewed notes: docs/releases/{}/v{}.md\n\n**No tag or GitHub Release is published by this PR.** Merge through protected review, then resume with cargo xtask publish --scope {} --resume --pr <number> --confirm.",
@@ -2265,6 +2302,29 @@ mod tests {
         ] {
             assert!(verify_published_release(&invalid, tag).is_err());
         }
+    }
+
+    #[test]
+    fn partial_submit_recovers_only_an_identical_remote_branch() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let branch = "release-prep/lsp-v0.1.3";
+        assert_eq!(classify_preparation_branch("", branch, sha).unwrap(), PreparationPush::PushNew);
+        let matching = format!("{sha}\trefs/heads/{branch}");
+        assert_eq!(
+            classify_preparation_branch(&matching, branch, sha).unwrap(),
+            PreparationPush::ExistingExactCommit
+        );
+        assert!(classify_preparation_branch(
+            &format!("ffffffffffffffffffffffffffffffffffffffff\trefs/heads/{branch}"),
+            branch, sha
+        ).is_err());
+        assert!(classify_preparation_branch(
+            &format!("{matching}\n{matching}"), branch, sha
+        ).is_err());
+        assert!(classify_preparation_branch(
+            &format!("{sha}\trefs/heads/another-branch"), branch, sha
+        ).is_err());
+        assert!(classify_preparation_branch("broken", branch, sha).is_err());
     }
 
     #[test]
