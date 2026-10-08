@@ -649,6 +649,25 @@ fn validate_candidate(
     }
     Ok(())
 }
+fn validate_resume_candidate(
+    scope: Scope,
+    candidate: Version,
+    known_tags: &BTreeSet<String>,
+    matching_draft: bool,
+) -> Result<(), String> {
+    if !matching_draft {
+        return validate_candidate(scope, candidate, known_tags);
+    }
+    let exact = scope.tag(candidate);
+    if !known_tags.contains(&exact) {
+        return Err("release draft recovery lacks its exact reserved tag".into());
+    }
+    // Only the exact verified resumable draft may be exempted. Every other
+    // same-stream tag still participates in monotonic version validation.
+    let mut other_tags = known_tags.clone();
+    other_tags.remove(&exact);
+    validate_candidate(scope, candidate, &other_tags)
+}
 fn ensure_main_branch(root: &Path) -> Result<(), String> {
     if current_branch(root)? != "main" {
         return Err(
@@ -1515,6 +1534,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         }
         matching_draft = true;
     }
+    validate_resume_candidate(scope, version, &known, matching_draft)?;
     // Require the configured workflow to be enabled; do not create an alternate.
     let workflow: Value = serde_json::from_str(&gh(
         &[
@@ -1587,6 +1607,28 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn resume_checks_monotonicity_beyond_an_exact_resumable_draft() {
+        let candidate = Version::parse("0.1.3").unwrap();
+        let scope = Scope::Lsp;
+        let old = BTreeSet::from(["v0.1.2".into()]);
+        assert!(validate_resume_candidate(scope, candidate, &old, false).is_ok());
+        let equal = BTreeSet::from(["v0.1.3".into()]);
+        assert!(validate_resume_candidate(scope, candidate, &equal, false).is_err());
+        assert!(validate_resume_candidate(scope, candidate, &equal, true).is_ok());
+        let higher = BTreeSet::from(["v0.1.4".into()]);
+        assert!(validate_resume_candidate(scope, candidate, &higher, false).is_err());
+        assert!(validate_resume_candidate(scope, candidate, &higher, true).is_err());
+        let draft_and_higher = BTreeSet::from(["v0.1.3".into(), "v0.1.4".into()]);
+        assert!(validate_resume_candidate(scope, candidate, &draft_and_higher, true).is_err());
+        let unrelated = BTreeSet::from(["v-extension-1.0.0".into()]);
+        assert!(validate_resume_candidate(scope, candidate, &unrelated, false).is_ok());
+        let extension = Scope::Extension;
+        assert!(validate_resume_candidate(extension, candidate, &old, false).is_ok());
+        let other_draft = BTreeSet::from(["v-extension-0.1.3".into(), "v0.2.0".into()]);
+        assert!(validate_resume_candidate(extension, candidate, &other_draft, true).is_ok());
     }
 
     #[test]
