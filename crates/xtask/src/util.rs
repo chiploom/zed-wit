@@ -25,6 +25,19 @@ pub fn root_relative(path: PathBuf) -> PathBuf {
     }
 }
 
+/// Resolve Cargo's build output location, including its standard environment override.
+pub fn cargo_target_dir() -> PathBuf {
+    cargo_target_dir_for(&repo_root(), std::env::var_os("CARGO_TARGET_DIR").as_deref())
+}
+
+fn cargo_target_dir_for(root: &Path, override_dir: Option<&OsStr>) -> PathBuf {
+    match override_dir {
+        Some(dir) if Path::new(dir).is_absolute() => PathBuf::from(dir),
+        Some(dir) if !dir.is_empty() => root.join(dir),
+        _ => root.join("target"),
+    }
+}
+
 pub fn command_output<I, S>(program: &str, args: I, cwd: &Path) -> Result<String, String>
 where
     I: IntoIterator<Item = S>,
@@ -147,6 +160,22 @@ pub fn ensure_empty_options(options: BTreeMap<String, String>) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cargo_target_dir_follows_default_relative_and_absolute_overrides() {
+        let root = PathBuf::from("/example/project");
+        assert_eq!(cargo_target_dir_for(&root, None), root.join("target"));
+        assert_eq!(
+            cargo_target_dir_for(&root, Some(OsStr::new("local-build"))),
+            root.join("local-build")
+        );
+        let absolute = std::env::temp_dir().join("zed-wit-custom-target");
+        assert!(absolute.is_absolute());
+        assert_eq!(
+            cargo_target_dir_for(&root, Some(absolute.as_os_str())),
+            absolute
+        );
+    }
 
     #[test]
     fn sha256_hex_encoding_is_canonical() {
