@@ -214,3 +214,49 @@ pub(crate) fn update_grammar(args: &[String]) -> Result<(), String> {
     );
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::safe_generated_path;
+    use std::{fs, os::unix::fs::symlink, sync::atomic::{AtomicU64, Ordering}};
+
+    #[test]
+    fn cleanup_rejects_symlinked_target_and_leaf_directories() {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let path = std::env::temp_dir().join(format!(
+                "zed-wit-clean-safety-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("create test directory: {error}"),
+            }
+        };
+        struct Remove(std::path::PathBuf);
+        impl Drop for Remove {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove test directory");
+            }
+        }
+        let _cleanup = Remove(root.clone());
+        let external = root.join("external");
+        fs::create_dir(&external).unwrap();
+        symlink(&external, root.join("target")).unwrap();
+
+        assert!(safe_generated_path(&root, "target/coverage").is_err());
+        assert!(safe_generated_path(&root, "target/zed-smoke").is_err());
+        fs::remove_file(root.join("target")).unwrap();
+
+        fs::create_dir(root.join("target")).unwrap();
+        symlink(&external, root.join("target/coverage")).unwrap();
+        assert!(safe_generated_path(&root, "target/coverage").is_err());
+
+        symlink(&external, root.join("dist")).unwrap();
+        assert!(safe_generated_path(&root, "dist").is_err());
+        assert!(safe_generated_path(&root, "target/zed-smoke").is_ok());
+        assert!(external.is_dir());
+    }
+}
