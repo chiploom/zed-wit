@@ -19,7 +19,7 @@ To add a command: implement it in its domain module, register **one dispatch arm
 
 Local xtasks **never** create tags, publish GitHub Releases, submit registry updates, or change an upstream grammar pin. Publication remains exclusively in the protected CD workflow.
 
-Native binary lookup and local release packaging follow Cargo's `CARGO_TARGET_DIR` override (absolute or repository-relative) when present; otherwise they use the default `target/` directory. The committed Zed settings example remains configured for the default build directory.
+Native binary lookup and local release packaging follow Cargo's `CARGO_TARGET_DIR` override (absolute or repository-relative) when present; otherwise they use the default `target/` directory. The committed Zed settings example remains configured for the default build directory, so `cargo xtask dev` rejects a custom target directory rather than pointing Zed to the wrong executable.
 
 ## Development and validation
 
