@@ -247,7 +247,8 @@ mod tests {
             .find("      - name: Verify draft asset scope\n")
             .unwrap();
         let end = workflow[start..]
-            .find("\n      - name: Publish draft release\n")
+            .find("\n      - name: Require unchanged unpublished draft immediately before promotion\n")
+            .or_else(|| workflow[start..].find("\n      - name: Publish draft release\n"))
             .map(|offset| start + offset)
             .unwrap();
         let step = &workflow[start..end];
