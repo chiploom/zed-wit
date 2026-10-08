@@ -537,7 +537,11 @@ fn validate_no_rewrite_of_pinned_url(config: &str, push_url: &str) -> Result<(),
     Ok(())
 }
 fn canonical_push_destination(root: &Path) -> Result<String, String> {
-    let urls = command("git", &["remote", "get-url", "--push", "--all", "origin"], root)?;
+    let urls = command(
+        "git",
+        &["remote", "get-url", "--push", "--all", "origin"],
+        root,
+    )?;
     let push_url = validate_push_destinations(&urls)?;
     // An explicit URL passed to git push can itself be rewritten through
     // url.*.insteadOf. Check its final expansion before pinning the transport.
@@ -1157,9 +1161,7 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
     let remote_ref = git(&["ls-remote", "--heads", &push_url, &ref_name], root)?;
     let push_state = classify_preparation_branch(&remote_ref, &branch, &head_sha)?;
     if push_state == PreparationPush::PushNew {
-        if check_remote(root)? != remote_sha
-            || canonical_push_destination(root)? != push_url
-        {
+        if check_remote(root)? != remote_sha || canonical_push_destination(root)? != push_url {
             return Err("remote identity or default branch moved before PR submission".into());
         }
         // Explicit empty expected value atomically asserts the branch does
@@ -1210,14 +1212,18 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
         .filter(|value| *value != 0)
         .ok_or("GitHub returned an ambiguous preparation PR URL; inspect remotely")?;
     let created_pr: Value = serde_json::from_str(&gh(
-        &["api", &format!("repos/{REPO}/pulls/{number}")], root,
-    )?).map_err(|_| "cannot verify created PR identity; inspect remotely".to_owned())?;
+        &["api", &format!("repos/{REPO}/pulls/{number}")],
+        root,
+    )?)
+    .map_err(|_| "cannot verify created PR identity; inspect remotely".to_owned())?;
     if created_pr["base"]["ref"].as_str() != Some("main")
         || created_pr["head"]["ref"].as_str() != Some(branch.as_str())
         || created_pr["head"]["repo"]["full_name"].as_str() != Some(REPO)
         || created_pr["head"]["sha"].as_str() != Some(head_sha.as_str())
     {
-        return Err("created PR head, repository, or base differs from validated submission".into());
+        return Err(
+            "created PR head, repository, or base differs from validated submission".into(),
+        );
     }
     let final_ref = git(&["ls-remote", "--heads", &push_url, &ref_name], root)?;
     if classify_preparation_branch(&final_ref, &branch, &head_sha)?
@@ -1356,12 +1362,20 @@ fn try_acquire_dispatch_lock(path: &Path) -> Result<LocalDispatchLock, String> {
         })?;
     writeln!(file, "pid={}", std::process::id())
         .map_err(|error| format!("write dispatch guard {}: {error}", path.display()))?;
-    Ok(LocalDispatchLock { path: path.to_path_buf() })
+    Ok(LocalDispatchLock {
+        path: path.to_path_buf(),
+    })
 }
-fn acquire_dispatch_lock(root: &Path, scope: Scope, tag: &str) -> Result<LocalDispatchLock, String> {
-    if !tag.starts_with('v') || !tag.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-'
-    }) {
+fn acquire_dispatch_lock(
+    root: &Path,
+    scope: Scope,
+    tag: &str,
+) -> Result<LocalDispatchLock, String> {
+    if !tag.starts_with('v')
+        || !tag
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
+    {
         return Err("invalid tag for local dispatch lock path".into());
     }
     let common = git(&["rev-parse", "--git-common-dir"], root)?;
@@ -1693,9 +1707,8 @@ mod tests {
         let sha = "0123456789abcdef0123456789abcdef01234567";
         assert!(validate_prior_cd_runs("", sha, Scope::Lsp, "v0.1.3", false).is_ok());
         assert!(validate_prior_cd_runs("", sha, Scope::Lsp, "v0.1.3", false).is_ok());
-        let pending = format!(
-            "9\t{sha}\tworkflow_dispatch\tqueued\tunknown\tCD / publish / lsp / v0.1.3"
-        );
+        let pending =
+            format!("9\t{sha}\tworkflow_dispatch\tqueued\tunknown\tCD / publish / lsp / v0.1.3");
         assert!(validate_prior_cd_runs(&pending, sha, Scope::Lsp, "v0.1.3", false).is_err());
         // An ambiguous or rejected dispatch cannot justify blind retry.
         assert!(parse_dispatch_identity("{}").is_err());
@@ -1703,13 +1716,14 @@ mod tests {
 
     #[test]
     fn overlapping_same_checkout_dispatch_attempts_are_refused() {
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::sync::{Arc, Barrier};
         use std::thread;
-        use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let candidate = std::env::temp_dir().join(format!(
-                "zed-wit-dispatch-lock-{}-{}", std::process::id(),
+                "zed-wit-dispatch-lock-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed),
             ));
             match fs::create_dir(&candidate) {
@@ -1720,7 +1734,9 @@ mod tests {
         };
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
-            fn drop(&mut self) { fs::remove_dir_all(&self.0).expect("remove lock fixture"); }
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove lock fixture");
+            }
         }
         let _cleanup = Cleanup(root.clone());
         let lock = root.join("dispatch.lock");
@@ -1733,9 +1749,15 @@ mod tests {
             try_acquire_dispatch_lock(&thread_lock).is_err()
         });
         barrier.wait();
-        assert!(handle.join().unwrap(), "a simultaneous request acquired the lock");
+        assert!(
+            handle.join().unwrap(),
+            "a simultaneous request acquired the lock"
+        );
         drop(first);
-        assert!(try_acquire_dispatch_lock(&lock).is_ok(), "a completed dispatch lock must release");
+        assert!(
+            try_acquire_dispatch_lock(&lock).is_ok(),
+            "a completed dispatch lock must release"
+        );
     }
 
     #[test]
@@ -2523,8 +2545,14 @@ mod tests {
         let publish_step = workflow.find("Publish draft release").unwrap();
         assert!(idempotency_gate < publish_step);
         let publish = workflow.find("environment: release").unwrap();
-        assert!(publish < idempotency_gate, "promotion guard runs inside protected release job");
-        assert!(workflow.contains("Release changed or was already published; refusing another promotion"));
+        assert!(
+            publish < idempotency_gate,
+            "promotion guard runs inside protected release job"
+        );
+        assert!(
+            workflow
+                .contains("Release changed or was already published; refusing another promotion")
+        );
         assert!(workflow.contains("Release tag moved after candidate validation"));
         let guard = workflow
             .find("Require expected release commit when provided")
@@ -2599,7 +2627,8 @@ mod tests {
         assert!(validate_no_rewrite_of_pinned_url(unrelated, url).is_ok());
         let rewrite = "url.file:///tmp/untrusted.git.pushinsteadof\nhttps://github.com/chiploom/zed-wit.git\0";
         assert!(validate_no_rewrite_of_pinned_url(rewrite, url).is_err());
-        let rewrite_fetch = "url.file:///tmp/untrusted.git.insteadof\nhttps://github.com/chiploom/\0";
+        let rewrite_fetch =
+            "url.file:///tmp/untrusted.git.insteadof\nhttps://github.com/chiploom/\0";
         assert!(validate_no_rewrite_of_pinned_url(rewrite_fetch, url).is_err());
         assert!(validate_no_rewrite_of_pinned_url("unrelated.flag\0", url).is_ok());
         assert!(validate_no_rewrite_of_pinned_url("url.bad.pushinsteadof\0", url).is_err());
@@ -2611,7 +2640,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let path = std::env::temp_dir().join(format!(
-                "zed-wit-effective-push-{}-{}", std::process::id(),
+                "zed-wit-effective-push-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed),
             ));
             match fs::create_dir(&path) {
@@ -2622,74 +2652,142 @@ mod tests {
         };
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
-            fn drop(&mut self) { fs::remove_dir_all(&self.0).expect("remove URL fixture"); }
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove URL fixture");
+            }
         }
         let _cleanup = Cleanup(root.clone());
         git(&["init", "-q"], &root).unwrap();
-        git(&["remote", "add", "origin", "https://github.com/chiploom/zed-wit.git"], &root).unwrap();
+        git(
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/chiploom/zed-wit.git",
+            ],
+            &root,
+        )
+        .unwrap();
         assert_eq!(
             canonical_push_destination(&root).unwrap(),
             "https://github.com/chiploom/zed-wit.git"
         );
         git(
-            &["remote", "set-url", "--push", "origin",
-              "https://github.com/attacker/repository.git"],
+            &[
+                "remote",
+                "set-url",
+                "--push",
+                "origin",
+                "https://github.com/attacker/repository.git",
+            ],
             &root,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(canonical_push_destination(&root).is_err());
         assert_eq!(
             git(&["remote", "get-url", "origin"], &root).unwrap(),
             "https://github.com/chiploom/zed-wit.git"
         );
         git(
-            &["remote", "set-url", "--push", "origin",
-              "https://github.com/chiploom/zed-wit.git"],
+            &[
+                "remote",
+                "set-url",
+                "--push",
+                "origin",
+                "https://github.com/chiploom/zed-wit.git",
+            ],
             &root,
-        ).unwrap();
+        )
+        .unwrap();
         git(
-            &["remote", "set-url", "--push", "--add", "origin",
-              "git@github.com:chiploom/zed-wit.git"],
+            &[
+                "remote",
+                "set-url",
+                "--push",
+                "--add",
+                "origin",
+                "git@github.com:chiploom/zed-wit.git",
+            ],
             &root,
-        ).unwrap();
-        assert!(canonical_push_destination(&root).is_err(), "multiple destinations must not be pushed");
+        )
+        .unwrap();
+        assert!(
+            canonical_push_destination(&root).is_err(),
+            "multiple destinations must not be pushed"
+        );
         git(
-            &["remote", "set-url", "--delete", "--push", "origin",
-              "git@github.com:chiploom/zed-wit.git"],
+            &[
+                "remote",
+                "set-url",
+                "--delete",
+                "--push",
+                "origin",
+                "git@github.com:chiploom/zed-wit.git",
+            ],
             &root,
-        ).unwrap();
+        )
+        .unwrap();
         // Git ignores pushInsteadOf when an explicit remote pushurl exists.
         // Remove it to exercise the actual push-only rewriting contract.
         // Even with explicit canonical pushurl, a raw 'git push URL' would
         // apply this rule. The pinned-URL rewrite preflight must reject it.
         git(
-            &["config", "--local",
-              "url.file:///tmp/zed-wit-untrusted.git.pushInsteadOf",
-              "https://github.com/chiploom/zed-wit.git"],
+            &[
+                "config",
+                "--local",
+                "url.file:///tmp/zed-wit-untrusted.git.pushInsteadOf",
+                "https://github.com/chiploom/zed-wit.git",
+            ],
             &root,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(canonical_push_destination(&root).is_err());
         git(
-            &["config", "--local", "--unset-all",
-              "url.file:///tmp/zed-wit-untrusted.git.pushInsteadOf"],
+            &[
+                "config",
+                "--local",
+                "--unset-all",
+                "url.file:///tmp/zed-wit-untrusted.git.pushInsteadOf",
+            ],
             &root,
-        ).unwrap();
+        )
+        .unwrap();
         git(
-            &["remote", "set-url", "--delete", "--push", "origin",
-              "https://github.com/chiploom/zed-wit.git"],
+            &[
+                "remote",
+                "set-url",
+                "--delete",
+                "--push",
+                "origin",
+                "https://github.com/chiploom/zed-wit.git",
+            ],
             &root,
-        ).unwrap();
+        )
+        .unwrap();
         git(
-            &["config", "--local",
-              "url.https://github.com/attacker/.pushInsteadOf",
-              "https://github.com/chiploom/"],
+            &[
+                "config",
+                "--local",
+                "url.https://github.com/attacker/.pushInsteadOf",
+                "https://github.com/chiploom/",
+            ],
             &root,
-        ).unwrap();
-        assert!(canonical_push_destination(&root).is_err(), "pushInsteadOf rewrite must not redirect push");
+        )
+        .unwrap();
+        assert!(
+            canonical_push_destination(&root).is_err(),
+            "pushInsteadOf rewrite must not redirect push"
+        );
         git(
-            &["config", "--local", "--unset-all",
-              "url.https://github.com/attacker/.pushInsteadOf"],
+            &[
+                "config",
+                "--local",
+                "--unset-all",
+                "url.https://github.com/attacker/.pushInsteadOf",
+            ],
             &root,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(
             canonical_push_destination(&root).unwrap(),
             "https://github.com/chiploom/zed-wit.git"
@@ -2702,7 +2800,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let path = std::env::temp_dir().join(format!(
-                "zed-wit-atomic-push-{}-{}", std::process::id(),
+                "zed-wit-atomic-push-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed),
             ));
             match fs::create_dir(&path) {
@@ -2713,7 +2812,9 @@ mod tests {
         };
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
-            fn drop(&mut self) { fs::remove_dir_all(&self.0).expect("remove bare Git fixture"); }
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove bare Git fixture");
+            }
         }
         let _cleanup = Cleanup(root.clone());
         let bare = root.join("remote.git");
@@ -2724,11 +2825,21 @@ mod tests {
         let commit = |msg: &str| {
             command(
                 "git",
-                &["-c", "user.name=Fixture", "-c",
-                  "user.email=fixture@example.invalid", "-c",
-                  "commit.gpgSign=false", "commit", "--allow-empty", "-qm", msg],
+                &[
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgSign=false",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    msg,
+                ],
                 &working,
-            ).unwrap();
+            )
+            .unwrap();
             git(&["rev-parse", "HEAD"], &working).unwrap()
         };
         let initial = commit("initial");
@@ -2740,13 +2851,19 @@ mod tests {
         assert_ne!(initial, advanced);
         // Reproduces the TOCTOU window: an ordinary push would be a legal
         // fast-forward, but this explicit empty expected SHA must reject it.
-        assert!(git(
-            &[
-                "push", "--porcelain", &format!("--force-with-lease={reference}:"),
-                url, &format!("HEAD:{reference}"),
-            ],
-            &working,
-        ).is_err());
+        assert!(
+            git(
+                &[
+                    "push",
+                    "--porcelain",
+                    &format!("--force-with-lease={reference}:"),
+                    url,
+                    &format!("HEAD:{reference}"),
+                ],
+                &working,
+            )
+            .is_err()
+        );
         let remote = git(&["ls-remote", "--heads", url, &reference], &working).unwrap();
         assert_eq!(
             classify_preparation_branch(&remote, branch, &initial).unwrap(),
@@ -2756,10 +2873,17 @@ mod tests {
 
         let new_branch = "release-prep/lsp-v0.1.4";
         let new_ref = format!("refs/heads/{new_branch}");
-        git(&[
-            "push", "--porcelain", &format!("--force-with-lease={new_ref}:"),
-            url, &format!("HEAD:{new_ref}"),
-        ], &working).unwrap();
+        git(
+            &[
+                "push",
+                "--porcelain",
+                &format!("--force-with-lease={new_ref}:"),
+                url,
+                &format!("HEAD:{new_ref}"),
+            ],
+            &working,
+        )
+        .unwrap();
         let created = git(&["ls-remote", "--heads", url, &new_ref], &working).unwrap();
         assert_eq!(
             classify_preparation_branch(&created, new_branch, &advanced).unwrap(),
