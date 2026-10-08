@@ -1273,6 +1273,13 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     let branch = format!("release-prep/{}-{tag}", scope.name());
     notes_reviewed(root, scope, version)?;
     crate::tasks::release_ops::release_check_inner(scope.name(), &tag)?;
+    // A filename-only Cargo.lock change is not proof of consistency. Cargo
+    // must accept the complete current workspace without regenerating it.
+    command(
+        "cargo",
+        &["metadata", "--no-deps", "--format-version", "1", "--locked"],
+        root,
+    )?;
 
     let info: Value =
         serde_json::from_str(&gh(&["api", &format!("repos/{REPO}/pulls/{pr}")], root)?)
