@@ -63,7 +63,10 @@ pub(crate) fn build(args: &[String]) -> Result<(), String> {
     run("cargo", &command)
 }
 
-fn ensure_development_target(root: &std::path::Path, actual: &std::path::Path) -> Result<(), String> {
+fn ensure_development_target(
+    root: &std::path::Path,
+    actual: &std::path::Path,
+) -> Result<(), String> {
     if actual != root.join("target") {
         return Err(
             "dev's committed Zed settings example requires the default target/ directory; customize Zed settings for a non-default CARGO_TARGET_DIR"
