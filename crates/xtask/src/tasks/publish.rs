@@ -1176,7 +1176,9 @@ mod tests {
     fn cd_run_history_distinguishes_validation_publish_and_other_scope() {
         let sha = "0123456789abcdef0123456789abcdef01234567";
         let tag = "v0.1.3";
-        let other = format!("{sha}\tworkflow_dispatch\tcompleted\tCD / publish / extension / v-extension-0.1.1");
+        let other = format!(
+            "{sha}\tworkflow_dispatch\tcompleted\tCD / publish / extension / v-extension-0.1.1"
+        );
         let validated = format!("{sha}\tworkflow_dispatch\tcompleted\tCD / validate / lsp / {tag}");
         let published = format!("{sha}\tworkflow_dispatch\tcompleted\tCD / publish / lsp / {tag}");
         let queued = format!("{sha}\tworkflow_dispatch\tqueued\tCD / validate / lsp / {tag}");
@@ -1193,13 +1195,20 @@ mod tests {
     #[test]
     fn protected_workflow_rejects_changed_main_sha_before_release_validation() {
         let workflow = include_str!("../../../../.github/workflows/release.yml");
-        assert!(workflow.contains("run-name: CD / ${{ inputs.operation }} / ${{ inputs.scope }} / ${{ inputs.tag }}"));
+        assert!(workflow.contains(
+            "run-name: CD / ${{ inputs.operation }} / ${{ inputs.scope }} / ${{ inputs.tag }}"
+        ));
         assert!(workflow.contains("expected_sha:"));
         assert!(workflow.contains("EXPECTED_SHA: ${{ inputs.expected_sha }}"));
         assert!(workflow.contains("if [ \"$GITHUB_SHA\" != \"$EXPECTED_SHA\" ]; then"));
-        let guard = workflow.find("Require expected release commit when provided").unwrap();
+        let guard = workflow
+            .find("Require expected release commit when provided")
+            .unwrap();
         let checkout = workflow.find("uses: actions/checkout@").unwrap();
-        assert!(guard < checkout, "source SHA guard must precede checkout and CD work");
+        assert!(
+            guard < checkout,
+            "source SHA guard must precede checkout and CD work"
+        );
     }
 
     #[test]
