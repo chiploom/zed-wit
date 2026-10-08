@@ -43,3 +43,20 @@ fn rejects_duplicates_unknown_options_and_invalid_iteration_counts() {
         assert!(parse(&input).is_err(), "unexpectedly accepted {input:?}");
     }
 }
+
+#[test]
+fn cargo_discovers_only_the_declared_parse_benchmark() {
+    let manifest: toml::Value =
+        toml::from_str(include_str!("../Cargo.toml")).expect("valid wit-syntax manifest");
+    assert_eq!(
+        manifest["package"]["autobenches"].as_bool(),
+        Some(false),
+        "benchmarks must be explicitly declared to avoid Cargo discovering parser helpers"
+    );
+    let benches = manifest["bench"]
+        .as_array()
+        .expect("explicit benchmark targets");
+    assert_eq!(benches.len(), 1);
+    assert_eq!(benches[0]["name"].as_str(), Some("parse"));
+    assert_eq!(benches[0]["harness"].as_bool(), Some(false));
+}
