@@ -535,6 +535,9 @@ fn clean(args: &[String]) -> Result<(), String> {
     if matches!(scope.as_str(), "build" | "all") && root.join("target").is_symlink() {
         return Err("refusing cargo clean through a symlinked target directory".into());
     }
+    if execute && cfg!(windows) && matches!(scope.as_str(), "build" | "all") {
+        return Err("cannot remove a running xtask.exe on Windows; run cargo clean --locked directly".into());
+    }
     for path in resolved {
         if execute && path.exists() {
             fs::remove_dir_all(&path).map_err(|e| format!("remove {}: {e}", path.display()))?;
