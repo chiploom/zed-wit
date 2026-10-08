@@ -1206,7 +1206,10 @@ fn classify_workflow_run(
         || run["head_sha"].as_str() != Some(main_sha)
         || run["head_branch"].as_str() != Some("main")
         || run["event"].as_str() != Some("workflow_dispatch")
-        || run["path"].as_str() != Some(".github/workflows/release.yml")
+        || !matches!(
+            run["path"].as_str(),
+            Some(".github/workflows/release.yml" | ".github/workflows/release.yml@main")
+        )
         || run["display_title"].as_str() != Some(title.as_str())
     {
         return Err("exact CD run identity differs from confirmed dispatch".into());
@@ -2194,6 +2197,14 @@ mod tests {
         run["head_sha"] = "0000000000000000000000000000000000000000".into();
         assert!(classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).is_err());
         run["head_sha"] = sha.into();
+        run["path"] = ".github/workflows/release.yml@main".into();
+        assert_eq!(
+            classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).unwrap(),
+            WorkflowProgress::Succeeded,
+        );
+        run["path"] = ".github/workflows/another.yml@main".into();
+        assert!(classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).is_err());
+        run["path"] = ".github/workflows/release.yml@main".into();
         run["id"] = 20.into();
         assert!(classify_workflow_run(&run, 19, sha, Scope::Lsp, tag).is_err());
 
