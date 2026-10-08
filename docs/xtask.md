@@ -86,6 +86,67 @@ On Windows, running `cargo clean` from the active `xtask.exe` would attempt to r
 
 No command deletes personal Zed data or modifies release tags. For grammar requalification, see [upstream compatibility](upstream-compatibility.md) and issue #17. Changing a pin requires reviewing tree-sitter queries, generated metadata, WIT fixtures and Cargo.lock.
 
+## Version-aware release preparation and protected CD
+
+The opt-in `publish` frontend is separate from the existing local `release`
+command. It does **not** create protected tags, publish GitHub Releases, upload
+assets, attest releases, or submit Zed registry changes.
+
+```sh
+cargo xtask publish --scope lsp
+cargo xtask publish --scope extension --bump minor --dry-run
+cargo xtask publish --scope lsp --prepare --confirm
+cargo xtask publish --scope lsp --submit --confirm
+cargo xtask publish --scope lsp --resume --pr 123 --confirm --wait
+```
+
+A default call (or `--dry-run`) is read-only and prints the current and proposed
+version, tag, protected default-branch revision, affected files, preparation
+branch, and next step. It requires a clean local `main` that matches remote
+`origin/main`, GitHub CLI authentication and access to remote tag/release history.
+If any of these checks fails, it stops. Deleted immutable-release tag history
+cannot always be recovered via the API; the existing CD workflow remains the
+authoritative final gate and its protections must not be bypassed.
+
+`--prepare --confirm` creates a *local* release-preparation branch from the
+current protected main commit. It bumps the chosen scope's manifest(s), updates
+`Cargo.lock` via an offline Cargo workspace check, and adds release-note and
+changelog **TODO placeholders**. This stage never pushes a branch or creates a
+PR. A failed stage may leave local changes; inspect them explicitly. Edit the
+TODO content into substantive human-reviewed release notes and changelog entries,
+run tests and commit the limited release-preparation files yourself.
+
+`--submit --confirm` checks the dedicated branch, file allowlist, reviewed
+notes, locked Cargo metadata, local verification, remote tag history, fresh base
+and duplicate PR state. Only then does it push the branch and create a PR to
+`main`. It never merges. If GitHub accepts a push but PR creation fails, inspect
+the existing remote branch rather than retrying blindly.
+
+`--resume --pr N --confirm` must be invoked after that exact preparation PR
+merges to `main`. It checks that the PR's release-preparation commit is on the
+current protected default branch and checks the tag, release workflow, and
+existing workflow dispatch state. Only then does it request
+`.github/workflows/release.yml` with `operation=publish`, `scope`, and
+`tag` on `main`. No direct publishing is implemented in xtask. The response
+must provide a specific GitHub Actions run ID; ambiguous responses require
+manual inspection before any retry.
+
+`--wait` is valid only with confirmed resume. It watches the exact returned
+run, reports failure/cancellation, and calls a release *published* only when a
+successful run is accompanied by the matching non-draft immutable GitHub Release.
+Without `--wait`, the outcome is **requested/pending**, not published.
+Neither confirmed dispatch nor workflow success bypasses the `release`
+environment's human approval gate or the five-target LSP release contract.
+
+SemVer uses strict stable `X.Y.Z` components with checked arithmetic. Patch is
+default; minor resets patch, major resets minor/patch, including pre-1.0 versions
+(`0.1.2 --bump major` gives `1.0.0`). Independent LSP and extension streams
+remain separate. No automatic runtime-LSP pin changes occur.
+
+This command is being qualified on [PR #26](https://github.com/chiploom/zed-wit/pull/26).
+Treat remote publication as a high-risk operation and review exact scope,
+tag, PR and run URL before giving confirmation.
+
 ## Suggested local validation
 
 ```sh
