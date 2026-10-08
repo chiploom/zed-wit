@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Refactor xtask into a unified CLI registry and focused Rust modules for
+  build, validation, release preparation, maintenance and performance, with
+  regression checks for all 27 existing and new commands.
 - Add 18 Rust xtask developer commands for native and adapter builds, local
   release preparation, validation, Zed testing, environment diagnosis, safe
   cleanup, coverage, grammar-pin auditing, and WIT parsing benchmarks.
