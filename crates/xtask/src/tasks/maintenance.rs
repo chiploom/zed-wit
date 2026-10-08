@@ -144,7 +144,7 @@ pub(crate) fn clean(args: &[String]) -> Result<(), String> {
         .map(|p| safe_generated_path(&root, p))
         .collect::<Result<Vec<_>, _>>()?;
     if matches!(scope.as_str(), "build" | "all") {
-        validate_cargo_clean_target(&root, &util::cargo_target_dir())?;
+        validate_cargo_clean_target(&root, &util::cargo_target_dir()?)?;
     }
     if execute && cfg!(windows) && matches!(scope.as_str(), "build" | "all") {
         return Err(
