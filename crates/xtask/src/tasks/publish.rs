@@ -1314,7 +1314,6 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     let main_sha = confirm_remote_main(root)?;
     let version = manifest_version(root, scope)?;
     let tag = scope.tag(version);
-    let branch = format!("release-prep/{}-{tag}", scope.name());
     notes_reviewed(root, scope, version)?;
     crate::tasks::release_ops::release_check_inner(scope.name(), &tag)?;
     // A filename-only Cargo.lock change is not proof of consistency. Cargo
@@ -1328,6 +1327,8 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     let info: Value =
         serde_json::from_str(&gh(&["api", &format!("repos/{REPO}/pulls/{pr}")], root)?)
             .map_err(|e| format!("parse preparation PR: {e}"))?;
+    let (merge_sha, head_sha, pr_commits) =
+        verify_merged_preparation_pr(&info, scope, version)?;
 
     let reviewed_files = gh(
         &[
@@ -1348,8 +1349,6 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         ));
     }
     let reviewed_predecessor = reviewed_pr_file_versions(&reviewed_files, scope, version)?;
-    let (merge_sha, head_sha, pr_commits) = 
-        verify_merged_preparation_pr(&info, scope, version)?;
     git(&["merge-base", "--is-ancestor", &merge_sha, &main_sha], root)
         .map_err(|_| "merged preparation commit is not in current main".to_owned())?;
 
