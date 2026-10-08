@@ -520,8 +520,13 @@ fn validate_no_rewrite_of_pinned_url(config: &str, push_url: &str) -> Result<(),
     // 'git config --null --list' emits key\nvalue\0 records, including
     // global, included and command/environment-provided URL rewrite rules.
     for record in config.split('\0').filter(|value| !value.is_empty()) {
-        let (name, prefix) = record.split_once('\n')
-            .ok_or("Git returned a malformed config record")?;
+        let Some((name, prefix)) = record.split_once('\n') else {
+            if record.starts_with("url.") {
+                return Err("Git returned a malformed URL rewrite config record".into());
+            }
+            // Git also permits valueless unrelated configuration keys.
+            continue;
+        };
         if name.starts_with("url.")
             && (name.ends_with(".insteadof") || name.ends_with(".pushinsteadof"))
             && push_url.starts_with(prefix)
@@ -2596,7 +2601,8 @@ mod tests {
         assert!(validate_no_rewrite_of_pinned_url(rewrite, url).is_err());
         let rewrite_fetch = "url.file:///tmp/untrusted.git.insteadof\nhttps://github.com/chiploom/\0";
         assert!(validate_no_rewrite_of_pinned_url(rewrite_fetch, url).is_err());
-        assert!(validate_no_rewrite_of_pinned_url("malformed\0", url).is_err());
+        assert!(validate_no_rewrite_of_pinned_url("unrelated.flag\0", url).is_ok());
+        assert!(validate_no_rewrite_of_pinned_url("url.bad.pushinsteadof\0", url).is_err());
     }
 
     #[test]
