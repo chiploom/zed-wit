@@ -1669,7 +1669,7 @@ mod tests {
         assert!(validate_prior_cd_runs("", sha, Scope::Lsp, "v0.1.3", false).is_ok());
         assert!(validate_prior_cd_runs("", sha, Scope::Lsp, "v0.1.3", false).is_ok());
         let pending = format!(
-            "9\\t{sha}\\tworkflow_dispatch\\tqueued\\tunknown\\tCD / publish / lsp / v0.1.3"
+            "9\t{sha}\tworkflow_dispatch\tqueued\tunknown\tCD / publish / lsp / v0.1.3"
         );
         assert!(validate_prior_cd_runs(&pending, sha, Scope::Lsp, "v0.1.3", false).is_err());
         // An ambiguous or rejected dispatch cannot justify blind retry.
