@@ -231,9 +231,7 @@ struct Plan {
     main_sha: String,
 }
 
-fn changed_manifest_version_from_patch(patch: &str, candidate: Version)
-    -> Result<Version, String>
-{
+fn changed_manifest_version_from_patch(patch: &str, candidate: Version) -> Result<Version, String> {
     let mut removed = Vec::new();
     let mut added = Vec::new();
     for line in patch.lines() {
@@ -254,16 +252,22 @@ fn changed_manifest_version_from_patch(patch: &str, candidate: Version)
             return Err("release preparation changed unexpected manifest content".into());
         }
     }
-    if removed.len() != 1 || added.len() != 1
+    if removed.len() != 1
+        || added.len() != 1
         || added[0] != candidate
         || !valid_version_transition(removed[0], candidate)
     {
-        return Err("reviewed PR manifest patch does not contain exactly the intended version transition".into());
+        return Err(
+            "reviewed PR manifest patch does not contain exactly the intended version transition"
+                .into(),
+        );
     }
     Ok(removed[0])
 }
 fn reviewed_pr_file_versions(
-    records: &str, scope: Scope, candidate: Version,
+    records: &str,
+    scope: Scope,
+    candidate: Version,
 ) -> Result<Version, String> {
     let mut filenames = BTreeSet::new();
     let mut primary = None;
@@ -271,7 +275,8 @@ fn reviewed_pr_file_versions(
     for record in records.lines() {
         let row: Value = serde_json::from_str(record)
             .map_err(|_| "GitHub returned malformed PR file history".to_owned())?;
-        let name = row["filename"].as_str()
+        let name = row["filename"]
+            .as_str()
             .ok_or("GitHub PR file record omitted filename")?;
         if !filenames.insert(name.to_owned()) {
             return Err("GitHub returned duplicate PR file records".into());
@@ -280,7 +285,9 @@ fn reviewed_pr_file_versions(
             if row["status"].as_str() != Some("modified") {
                 return Err("release manifest in PR must modify a preexisting file".into());
             }
-            let patch = row["patch"].as_str().filter(|s| !s.is_empty())
+            let patch = row["patch"]
+                .as_str()
+                .filter(|s| !s.is_empty())
                 .ok_or("GitHub PR manifest patch is missing; cannot prove version transition")?;
             let predecessor = changed_manifest_version_from_patch(patch, candidate)?;
             if name == scope.manifest() {
@@ -977,7 +984,9 @@ enum PreparationPush {
     ExistingExactCommit,
 }
 fn classify_preparation_branch(
-    remote_refs: &str, branch: &str, local_sha: &str,
+    remote_refs: &str,
+    branch: &str,
+    local_sha: &str,
 ) -> Result<PreparationPush, String> {
     if !valid_sha(local_sha) {
         return Err("local release preparation commit SHA is invalid".into());
@@ -990,13 +999,13 @@ fn classify_preparation_branch(
         return Err("multiple remote preparation refs were returned".into());
     }
     let parts = refs[0].split_whitespace().collect::<Vec<_>>();
-    if parts.len() != 2 || parts[1] != format!("refs/heads/{branch}")
-        || !valid_sha(parts[0])
-    {
+    if parts.len() != 2 || parts[1] != format!("refs/heads/{branch}") || !valid_sha(parts[0]) {
         return Err("remote preparation branch lookup was ambiguous".into());
     }
     if parts[0] != local_sha {
-        return Err("remote preparation branch exists at a different commit; do not overwrite".into());
+        return Err(
+            "remote preparation branch exists at a different commit; do not overwrite".into(),
+        );
     }
     Ok(PreparationPush::ExistingExactCommit)
 }
@@ -1020,21 +1029,24 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
     if delta.is_empty() {
         return Err("release preparation branch has no changes".into());
     }
-    for (file, extension_file) in [
-        (scope.manifest(), false),
-        ("extension.toml", true),
-    ] {
+    for (file, extension_file) in [(scope.manifest(), false), ("extension.toml", true)] {
         if extension_file && scope != Scope::Extension {
             continue;
         }
-        let patch = git(&[
-            "diff", "--no-ext-diff", "--unified=0", &remote_sha, "HEAD",
-            "--", file,
-        ], root)?;
-        let patched_predecessor = changed_manifest_version_from_patch(&patch, version)?;
-        let actual_predecessor = git_manifest_version(
-            root, &remote_sha, scope, extension_file,
+        let patch = git(
+            &[
+                "diff",
+                "--no-ext-diff",
+                "--unified=0",
+                &remote_sha,
+                "HEAD",
+                "--",
+                file,
+            ],
+            root,
         )?;
+        let patched_predecessor = changed_manifest_version_from_patch(&patch, version)?;
+        let actual_predecessor = git_manifest_version(root, &remote_sha, scope, extension_file)?;
         if patched_predecessor != actual_predecessor {
             return Err(format!(
                 "release manifest version diff does not match remote main: {file}"
@@ -1094,7 +1106,9 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
             root,
         )?;
     } else {
-        println!("Remote preparation branch already matches validated local HEAD; resuming PR creation without a new push.");
+        println!(
+            "Remote preparation branch already matches validated local HEAD; resuming PR creation without a new push."
+        );
     }
     let title = format!("Prepare {} release {}", scope.title(), tag);
     let body = format!(
@@ -1141,7 +1155,9 @@ fn protected_dispatch_args(scope: Scope, tag: &str, main_sha: &str) -> Vec<Strin
     ]
 }
 fn verify_merged_preparation_pr(
-    info: &Value, scope: Scope, version: Version,
+    info: &Value,
+    scope: Scope,
+    version: Version,
 ) -> Result<(String, String, u64), String> {
     let branch = format!("release-prep/{}-{}", scope.name(), scope.tag(version));
     if info["merged"].as_bool() != Some(true)
@@ -1151,13 +1167,16 @@ fn verify_merged_preparation_pr(
     {
         return Err("release preparation PR is not merged on main for this exact tag".into());
     }
-    let merge_sha = info["merge_commit_sha"].as_str()
+    let merge_sha = info["merge_commit_sha"]
+        .as_str()
         .filter(|sha| valid_sha(sha))
         .ok_or("merged preparation PR omitted valid merge commit SHA")?;
-    let head_sha = info["head"]["sha"].as_str()
+    let head_sha = info["head"]["sha"]
+        .as_str()
         .filter(|sha| valid_sha(sha))
         .ok_or("release PR omitted valid reviewed head SHA")?;
-    let commits = info["commits"].as_u64()
+    let commits = info["commits"]
+        .as_u64()
         .filter(|count| (1..=250).contains(count))
         .ok_or("release PR omitted a valid commit count")?;
     Ok((merge_sha.to_owned(), head_sha.to_owned(), commits))
@@ -1364,8 +1383,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     let info: Value =
         serde_json::from_str(&gh(&["api", &format!("repos/{REPO}/pulls/{pr}")], root)?)
             .map_err(|e| format!("parse preparation PR: {e}"))?;
-    let (merge_sha, head_sha, pr_commits) =
-        verify_merged_preparation_pr(&info, scope, version)?;
+    let (merge_sha, head_sha, pr_commits) = verify_merged_preparation_pr(&info, scope, version)?;
 
     let reviewed_files = gh(
         &[
@@ -1377,7 +1395,8 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         ],
         root,
     )?;
-    let expected_file_count = info["changed_files"].as_u64()
+    let expected_file_count = info["changed_files"]
+        .as_u64()
         .ok_or("merged release PR omitted its changed file count")?;
     let downloaded_file_count = reviewed_files.lines().count() as u64;
     if expected_file_count != downloaded_file_count {
@@ -1386,11 +1405,20 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         ));
     }
     let reviewed_predecessor = reviewed_pr_file_versions(&reviewed_files, scope, version)?;
-    git(&["merge-base", "--is-ancestor", &merge_sha, &main_sha], root)
-        .map_err(|_| "merged preparation commit is not in current main".to_owned())?;
+    git(
+        &["merge-base", "--is-ancestor", &merge_sha, &main_sha],
+        root,
+    )
+    .map_err(|_| "merged preparation commit is not in current main".to_owned())?;
 
     verify_pr_version_transition(
-        root, scope, version, reviewed_predecessor, &merge_sha, &head_sha, pr_commits,
+        root,
+        scope,
+        version,
+        reviewed_predecessor,
+        &merge_sha,
+        &head_sha,
+        pr_commits,
     )?;
 
     let known = release_tag_history(root)?;
@@ -1464,8 +1492,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     // Never fall back to scanning the latest run after an ambiguous dispatch.
     let dispatch = protected_dispatch_args(scope, &tag, &main_sha);
     let dispatch_refs = dispatch.iter().map(String::as_str).collect::<Vec<_>>();
-    let response = gh(&dispatch_refs, root)
-    .map_err(|_| {
+    let response = gh(&dispatch_refs, root).map_err(|_| {
         "CD dispatch may have been accepted; check GitHub Actions before retrying".to_owned()
     })?;
     let (id, run_url) = parse_dispatch_identity(&response)?;
@@ -2040,7 +2067,10 @@ mod tests {
         let candidate = Version::parse("0.1.3").unwrap();
         let expected = Version::parse("0.1.2").unwrap();
         let old = "@@ -2,3 +2,3 @@\n-version = \"0.1.2\"\n+version = \"0.1.3\"\n";
-        assert_eq!(changed_manifest_version_from_patch(old, candidate).unwrap(), expected);
+        assert_eq!(
+            changed_manifest_version_from_patch(old, candidate).unwrap(),
+            expected
+        );
         for invalid in [
             "@@ -1,2 +1,2 @@\n-name = \"renamed\"\n+name = \"another\"\n",
             "@@ -1,2 +1,2 @@\n-version = \"0.1.3\"\n+version = \"0.1.3\"\n",
@@ -2051,26 +2081,44 @@ mod tests {
             assert!(changed_manifest_version_from_patch(invalid, candidate).is_err());
         }
         let required = [
-            ("crates/wit-language-server/Cargo.toml", "modified", Some(old)),
+            (
+                "crates/wit-language-server/Cargo.toml",
+                "modified",
+                Some(old),
+            ),
             ("Cargo.lock", "modified", None),
             ("CHANGELOG.md", "modified", None),
             ("docs/releases/lsp/v0.1.3.md", "added", None),
         ];
         let serialize = |items: &[(&str, &str, Option<&str>)]| {
-            items.iter().map(|(name, status, patch)| {
-                serde_json::json!({"filename": name, "status": status, "patch": patch}).to_string()
-            }).collect::<Vec<_>>().join("\n")
+            items
+                .iter()
+                .map(|(name, status, patch)| {
+                    serde_json::json!({"filename": name, "status": status, "patch": patch})
+                        .to_string()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
         };
-        assert_eq!(reviewed_pr_file_versions(&serialize(&required), Scope::Lsp, candidate).unwrap(), expected);
+        assert_eq!(
+            reviewed_pr_file_versions(&serialize(&required), Scope::Lsp, candidate).unwrap(),
+            expected
+        );
         let tampered = [
-            ("crates/wit-language-server/Cargo.toml", "modified", Some("@@ -1 +1 @@\n-version = \"0.1.3\"\n+version = \"0.1.3\"")),
-            ("Cargo.lock", "modified", None), ("CHANGELOG.md", "modified", None),
+            (
+                "crates/wit-language-server/Cargo.toml",
+                "modified",
+                Some("@@ -1 +1 @@\n-version = \"0.1.3\"\n+version = \"0.1.3\""),
+            ),
+            ("Cargo.lock", "modified", None),
+            ("CHANGELOG.md", "modified", None),
             ("docs/releases/lsp/v0.1.3.md", "added", None),
         ];
         assert!(reviewed_pr_file_versions(&serialize(&tampered), Scope::Lsp, candidate).is_err());
         let missing = [
             ("crates/wit-language-server/Cargo.toml", "modified", None),
-            ("Cargo.lock", "modified", None), ("CHANGELOG.md", "modified", None),
+            ("Cargo.lock", "modified", None),
+            ("CHANGELOG.md", "modified", None),
             ("docs/releases/lsp/v0.1.3.md", "added", None),
         ];
         assert!(reviewed_pr_file_versions(&serialize(&missing), Scope::Lsp, candidate).is_err());
@@ -2308,22 +2356,30 @@ mod tests {
     fn partial_submit_recovers_only_an_identical_remote_branch() {
         let sha = "0123456789abcdef0123456789abcdef01234567";
         let branch = "release-prep/lsp-v0.1.3";
-        assert_eq!(classify_preparation_branch("", branch, sha).unwrap(), PreparationPush::PushNew);
+        assert_eq!(
+            classify_preparation_branch("", branch, sha).unwrap(),
+            PreparationPush::PushNew
+        );
         let matching = format!("{sha}\trefs/heads/{branch}");
         assert_eq!(
             classify_preparation_branch(&matching, branch, sha).unwrap(),
             PreparationPush::ExistingExactCommit
         );
-        assert!(classify_preparation_branch(
-            &format!("ffffffffffffffffffffffffffffffffffffffff\trefs/heads/{branch}"),
-            branch, sha
-        ).is_err());
-        assert!(classify_preparation_branch(
-            &format!("{matching}\n{matching}"), branch, sha
-        ).is_err());
-        assert!(classify_preparation_branch(
-            &format!("{sha}\trefs/heads/another-branch"), branch, sha
-        ).is_err());
+        assert!(
+            classify_preparation_branch(
+                &format!("ffffffffffffffffffffffffffffffffffffffff\trefs/heads/{branch}"),
+                branch,
+                sha
+            )
+            .is_err()
+        );
+        assert!(
+            classify_preparation_branch(&format!("{matching}\n{matching}"), branch, sha).is_err()
+        );
+        assert!(
+            classify_preparation_branch(&format!("{sha}\trefs/heads/another-branch"), branch, sha)
+                .is_err()
+        );
         assert!(classify_preparation_branch("broken", branch, sha).is_err());
     }
 
@@ -2342,7 +2398,9 @@ mod tests {
             "changed_files": 4,
         });
         assert_eq!(
-            verify_merged_preparation_pr(&pr, Scope::Lsp, version).unwrap().2,
+            verify_merged_preparation_pr(&pr, Scope::Lsp, version)
+                .unwrap()
+                .2,
             2
         );
         pr["merged"] = false.into();
@@ -2364,8 +2422,14 @@ mod tests {
         let args = protected_dispatch_args(Scope::Lsp, "v0.1.3", sha);
         assert_eq!(args[0..3], ["api", "-X", "POST"]);
         assert!(args.iter().any(|arg| arg == "return_run_details=true"));
-        assert!(args.iter().any(|arg| arg == "X-GitHub-Api-Version: 2026-03-10"));
-        assert!(args.iter().any(|arg| arg == &format!("inputs[expected_sha]={sha}")));
+        assert!(
+            args.iter()
+                .any(|arg| arg == "X-GitHub-Api-Version: 2026-03-10")
+        );
+        assert!(
+            args.iter()
+                .any(|arg| arg == &format!("inputs[expected_sha]={sha}"))
+        );
         assert!(args.iter().any(|arg| arg == "inputs[operation]=publish"));
         assert!(args.iter().any(|arg| arg == "inputs[scope]=lsp"));
         assert!(args.iter().any(|arg| arg == "inputs[tag]=v0.1.3"));
