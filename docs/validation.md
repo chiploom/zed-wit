@@ -28,9 +28,14 @@ The recorded validation covered:
 - `cargo xtask test-zed` for native server startup/restart and semantic fixtures;
 - `cargo xtask test-zed-hosted` for first download, verified cache reuse,
   corrupt-binary recovery, and missing-checksum recovery using the published
-  `v0.1.2` native server;
+  `v0.1.2` native server; the released macOS ARM64 binary has SHA-256
+  `6b4f46128fca48e089b5ab70534ea3aa2a1ce4488ba07520587712d6088c0c5f`;
 - `cargo xtask test-zed-gui --allow-input-injection true` for real-Zed
   snippet insertion/tab stops and outline navigation.
+
+The hosted and GUI commands record their results respectively in
+`target/zed-hosted/profile/zed-hosted-report.json` and
+`target/zed-gui/zed-gui-report.json` in the local qualification workspace.
 
 These results were reported from the local validation environment in PR #21,
 not independently reproduced by this documentation update. The subsequent
