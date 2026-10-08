@@ -78,6 +78,16 @@ a separately qualified, published LSP and its own review.
    expected release content/commit is on current `main`; compare again against
    remote tags, releases, protection settings, and configured release workflow.
    Refuse an outdated or ambiguous candidate.
+The protected CD workflow receives an optional `expected_sha` from the frontend
+and rejects any invocation whose resolved `GITHUB_SHA` differs. This closes the
+time-of-check/time-of-dispatch race when `main` advances during remote checks;
+manual dispatches that omit the optional input retain their existing contract.
+The workflow run name includes its operation, scope and tag so the frontend can
+distinguish completed validation dry runs from completed publication attempts
+without guessing from the most recent run. Unlabeled historical runs remain
+ambiguous and require manual review. Neither change relaxes the protected
+`release` environment, release-gate tests, or native artifact checks.
+
 5. **Dispatch on explicit confirmation:** Invoke **only**
    `.github/workflows/release.yml` with
    `operation=publish`, `scope=<lsp|extension>` and the exact candidate
