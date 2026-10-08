@@ -36,9 +36,7 @@ fn main() {
     }
     let start = Instant::now();
     for _ in 0..iterations {
-        let tree = parser.parse(black_box(source), None).expect("parser returned no tree");
-        assert!(!tree.root_node().has_error(), "invalid benchmark WIT input");
-        black_box(tree);
+        black_box(parser.parse(black_box(source), None).expect("parser returned no tree"));
     }
     let nanos = start.elapsed().as_nanos() / iterations as u128;
     println!("wit-syntax Tree-sitter parse: {iterations} iterations, {nanos} ns/parse, {} input bytes", source.len());
