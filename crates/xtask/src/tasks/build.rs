@@ -76,6 +76,31 @@ fn ensure_development_target(
     Ok(())
 }
 
+fn development_binary_from_cargo_messages(messages: &str) -> Result<std::path::PathBuf, String> {
+    let mut binaries = std::collections::BTreeSet::new();
+    for line in messages.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("reason").and_then(|v| v.as_str()) != Some("compiler-artifact")
+            || value.pointer("/target/name").and_then(|v| v.as_str())
+                != Some("wit-language-server")
+        {
+            continue;
+        }
+        if let Some(path) = value.get("executable").and_then(|v| v.as_str()) {
+            binaries.insert(std::path::PathBuf::from(path));
+        }
+    }
+    if binaries.len() != 1 {
+        return Err(format!(
+            "expected one native language server executable in Cargo build messages, found {}",
+            binaries.len()
+        ));
+    }
+    Ok(binaries.into_iter().next().expect("exactly one binary"))
+}
+
 pub(crate) fn dev(args: &[String]) -> Result<(), String> {
     no_args(args, "dev")?;
     ensure_development_target(&util::repo_root(), &util::cargo_target_dir())?;
@@ -85,12 +110,42 @@ pub(crate) fn dev(args: &[String]) -> Result<(), String> {
             "example Zed settings no longer point to the local release language server".into(),
         );
     }
-    build(&[
-        "--kind".into(),
-        "server".into(),
-        "--release".into(),
-        "true".into(),
-    ])?;
+    // Cargo's build.target configuration can implicitly select a target
+    // triple and move the binary to target/<triple>/release. Read the actual
+    // compiler artifact path; an old default-path executable is not proof.
+    let output = std::process::Command::new("cargo")
+        .args([
+            "build",
+            "-p",
+            "wit-language-server",
+            "--release",
+            "--locked",
+            "--message-format=json-render-diagnostics",
+        ])
+        .current_dir(util::repo_root())
+        .output()
+        .map_err(|error| format!("run Cargo development build: {error}"))?;
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
+        return Err(format!("Cargo development build failed with {}", output.status));
+    }
+    let messages = String::from_utf8(output.stdout)
+        .map_err(|error| format!("Cargo development build output was not UTF-8: {error}"))?;
+    let actual = development_binary_from_cargo_messages(&messages)?;
+    let expected = util::repo_root().join("target").join("release").join(
+        if cfg!(windows) {
+            "wit-language-server.exe"
+        } else {
+            "wit-language-server"
+        },
+    );
+    if actual != expected {
+        return Err(format!(
+            "Cargo placed the development server at {}, but committed Zed settings require {}; remove the implicit build.target configuration or configure Zed manually",
+            actual.display(),
+            expected.display()
+        ));
+    }
     println!("Use .zed/settings.example.json as a template for untracked .zed/settings.json.");
     println!("No user or project settings were modified.");
     Ok(())
@@ -116,6 +171,24 @@ pub(crate) fn install_dev(args: &[String]) -> Result<(), String> {
 mod tests {
     use super::ensure_development_target;
     use std::path::Path;
+
+    #[test]
+    fn dev_tracks_the_real_cargo_executable_instead_of_a_stale_default_path() {
+        let artifact = serde_json::json!({
+            "reason": "compiler-artifact",
+            "target": {"name": "wit-language-server"},
+            "executable": "/tmp/alternate-target/aarch64-apple-darwin/release/wit-language-server"
+        });
+        let messages = format!("{}\n", artifact);
+        let actual = super::development_binary_from_cargo_messages(&messages).unwrap();
+        assert_eq!(
+            actual,
+            std::path::PathBuf::from(
+                "/tmp/alternate-target/aarch64-apple-darwin/release/wit-language-server"
+            )
+        );
+        assert!(super::development_binary_from_cargo_messages("").is_err());
+    }
 
     #[test]
     fn dev_rejects_a_build_path_different_from_committed_zed_settings() {
