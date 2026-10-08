@@ -231,6 +231,73 @@ struct Plan {
     main_sha: String,
 }
 
+fn changed_manifest_version_from_patch(patch: &str, candidate: Version)
+    -> Result<Version, String>
+{
+    let mut removed = Vec::new();
+    let mut added = Vec::new();
+    for line in patch.lines() {
+        let bucket = match line.as_bytes().first() {
+            Some(b'-') if !line.starts_with("---") => &mut removed,
+            Some(b'+') if !line.starts_with("+++") => &mut added,
+            _ => continue,
+        };
+        let content = line[1..].trim();
+        if let Some(version) = content.strip_prefix("version = ") {
+            let raw = version
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .ok_or("release manifest patch version must be quoted stable SemVer")?;
+            bucket.push(Version::parse(raw)?);
+        } else {
+            // Extra modifications to an allowed manifest require separate review.
+            return Err("release preparation changed unexpected manifest content".into());
+        }
+    }
+    if removed.len() != 1 || added.len() != 1
+        || added[0] != candidate
+        || !valid_version_transition(removed[0], candidate)
+    {
+        return Err("reviewed PR manifest patch does not contain exactly the intended version transition".into());
+    }
+    Ok(removed[0])
+}
+fn reviewed_pr_file_versions(
+    records: &str, scope: Scope, candidate: Version,
+) -> Result<Version, String> {
+    let mut filenames = BTreeSet::new();
+    let mut primary = None;
+    let mut extension_previous = None;
+    for record in records.lines() {
+        let row: Value = serde_json::from_str(record)
+            .map_err(|_| "GitHub returned malformed PR file history".to_owned())?;
+        let name = row["filename"].as_str()
+            .ok_or("GitHub PR file record omitted filename")?;
+        if !filenames.insert(name.to_owned()) {
+            return Err("GitHub returned duplicate PR file records".into());
+        }
+        if name == scope.manifest() || (scope == Scope::Extension && name == "extension.toml") {
+            if row["status"].as_str() != Some("modified") {
+                return Err("release manifest in PR must modify a preexisting file".into());
+            }
+            let patch = row["patch"].as_str().filter(|s| !s.is_empty())
+                .ok_or("GitHub PR manifest patch is missing; cannot prove version transition")?;
+            let predecessor = changed_manifest_version_from_patch(patch, candidate)?;
+            if name == scope.manifest() {
+                primary = Some(predecessor);
+            } else {
+                extension_previous = Some(predecessor);
+            }
+        }
+    }
+    let names = filenames.into_iter().collect::<Vec<_>>().join("\n");
+    validate_changed_files(&names, scope, candidate)?;
+    let previous = primary.ok_or("reviewed PR lacked a versioned manifest patch")?;
+    if scope == Scope::Extension && extension_previous != Some(previous) {
+        return Err("reviewed extension manifests have different predecessor versions".into());
+    }
+    Ok(previous)
+}
 fn version_in_manifest(
     source: &str,
     scope: Scope,
@@ -333,6 +400,7 @@ fn verify_pr_version_transition(
     root: &Path,
     scope: Scope,
     candidate: Version,
+    reviewed_predecessor: Version,
     merge_sha: &str,
     pr_head_sha: &str,
     pr_commits: u64,
@@ -351,6 +419,9 @@ fn verify_pr_version_transition(
     // first parent; a rebase merge introduces N sequential PR commits.
     let previous =
         historical_predecessor_version(root, scope, merge_sha, pr_commits, false, candidate)?;
+    if previous != reviewed_predecessor {
+        return Err("merged history predecessor does not match the actual PR version diff".into());
+    }
     ensure_release_transition(previous, reviewed_head, merged, current)?;
     if scope == Scope::Extension {
         let checked_head = version_in_manifest(
@@ -1189,20 +1260,17 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     {
         return Err("release preparation PR is not merged on main for this exact tag".into());
     }
-    let changed = gh(
+    let reviewed_files = gh(
         &[
             "api",
             "--paginate",
             "--jq",
-            ".[].filename",
+            ".[] | {filename: .filename, status: .status, patch: .patch} | @json",
             &format!("repos/{REPO}/pulls/{pr}/files?per_page=100"),
         ],
         root,
     )?;
-    validate_changed_files(&changed, scope, version)?;
-    if changed.trim().is_empty() {
-        return Err("merged release-preparation PR has no reported files".into());
-    }
+    let reviewed_predecessor = reviewed_pr_file_versions(&reviewed_files, scope, version)?;
     let merge_sha = info["merge_commit_sha"]
         .as_str()
         .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
@@ -1216,7 +1284,9 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     let pr_commits = info["commits"]
         .as_u64()
         .ok_or("release PR is missing commit count")?;
-    verify_pr_version_transition(root, scope, version, merge_sha, head_sha, pr_commits)?;
+    verify_pr_version_transition(
+        root, scope, version, reviewed_predecessor, merge_sha, head_sha, pr_commits,
+    )?;
 
     let known = release_tag_history(root)?;
     let mut matching_draft = false;
@@ -1878,6 +1948,47 @@ mod tests {
         git(&["switch", "-q", "-c", "fixture-feature"], &root).unwrap();
         assert_eq!(git(&["rev-parse", "HEAD"], &root).unwrap(), main_sha);
         assert!(ensure_main_branch(&root).is_err());
+    }
+
+    #[test]
+    fn reviewed_pr_patch_must_contain_only_exact_scoped_version_transition() {
+        let candidate = Version::parse("0.1.3").unwrap();
+        let expected = Version::parse("0.1.2").unwrap();
+        let old = "@@ -2,3 +2,3 @@\n-version = \"0.1.2\"\n+version = \"0.1.3\"\n";
+        assert_eq!(changed_manifest_version_from_patch(old, candidate).unwrap(), expected);
+        for invalid in [
+            "@@ -1,2 +1,2 @@\n-name = \"renamed\"\n+name = \"another\"\n",
+            "@@ -1,2 +1,2 @@\n-version = \"0.1.3\"\n+version = \"0.1.3\"\n",
+            "@@ -1,2 +1,2 @@\n-version = \"0.1.2\"\n+version = \"0.1.4\"\n",
+            "@@ -1,2 +1,2 @@\n-version = \"0.1.2\"\n+version = \"0.1.3\"\n-dependencies = \"x\"\n+dependencies = \"y\"\n",
+            "",
+        ] {
+            assert!(changed_manifest_version_from_patch(invalid, candidate).is_err());
+        }
+        let required = [
+            ("crates/wit-language-server/Cargo.toml", "modified", Some(old)),
+            ("Cargo.lock", "modified", None),
+            ("CHANGELOG.md", "modified", None),
+            ("docs/releases/lsp/v0.1.3.md", "added", None),
+        ];
+        let serialize = |items: &[(&str, &str, Option<&str>)]| {
+            items.iter().map(|(name, status, patch)| {
+                serde_json::json!({"filename": name, "status": status, "patch": patch}).to_string()
+            }).collect::<Vec<_>>().join("\n")
+        };
+        assert_eq!(reviewed_pr_file_versions(&serialize(&required), Scope::Lsp, candidate).unwrap(), expected);
+        let tampered = [
+            ("crates/wit-language-server/Cargo.toml", "modified", Some("@@ -1 +1 @@\n-version = \"0.1.3\"\n+version = \"0.1.3\"")),
+            ("Cargo.lock", "modified", None), ("CHANGELOG.md", "modified", None),
+            ("docs/releases/lsp/v0.1.3.md", "added", None),
+        ];
+        assert!(reviewed_pr_file_versions(&serialize(&tampered), Scope::Lsp, candidate).is_err());
+        let missing = [
+            ("crates/wit-language-server/Cargo.toml", "modified", None),
+            ("Cargo.lock", "modified", None), ("CHANGELOG.md", "modified", None),
+            ("docs/releases/lsp/v0.1.3.md", "added", None),
+        ];
+        assert!(reviewed_pr_file_versions(&serialize(&missing), Scope::Lsp, candidate).is_err());
     }
 
     #[test]
