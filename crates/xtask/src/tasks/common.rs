@@ -227,6 +227,9 @@ mod tests {
         assert!(copy_new_file(&destination, &dir.0.join("copy")).is_err());
     }
 
+    // Windows can deny renaming an open file, so the deterministic swap test
+    // runs on Unix; ordinary copy failures remain tested on all platforms.
+    #[cfg(unix)]
     #[test]
     fn copy_failure_does_not_unlink_a_replacement_destination() {
         let dir = TestDir::new();
