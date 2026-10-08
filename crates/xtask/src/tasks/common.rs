@@ -206,6 +206,8 @@ mod tests {
         fs::write(&destination, b"preserved").unwrap();
         assert!(copy_new_file(&source, &destination).is_err());
         assert_eq!(fs::read(&destination).unwrap(), b"preserved");
+        assert!(copy_new_file(&source, &dir.0.join("./source")).is_err());
+        assert_eq!(fs::read(&source).unwrap(), b"original");
 
         fs::remove_file(&destination).unwrap();
         fs::hard_link(&source, &destination).unwrap();
