@@ -201,7 +201,10 @@ fn copy_new_file(source: &Path, destination: &Path) -> Result<(), String> {
 
 fn release_build(args: &[String]) -> Result<(), String> {
     let mut options = opts(args, &["target", "output"])?;
-    let target = options.remove("target").map(Ok).unwrap_or_else(host_target)?;
+    let target = match options.remove("target") {
+        Some(target) => target,
+        None => host_target()?,
+    };
     dependency_policy::ensure_target(&target)?;
     let output = options.remove("output").map(|value| util::root_relative(value.into()));
     finish(options)?;
@@ -317,6 +320,7 @@ fn test_all(args: &[String]) -> Result<(), String> {
     cargo(&["test", "--doc", "--workspace", "--exclude", "xtask", "--locked"])?;
     build(&["--kind".into(), "extension".into()])?;
     if with_zed {
+        dev(&[])?;
         crate::zed_smoke::run(
             "zed",
             &util::repo_root().join("target/zed-smoke/profile"),
@@ -569,8 +573,10 @@ fn coverage(args: &[String]) -> Result<(), String> {
         return Err("cargo-llvm-cov is required; install with cargo install cargo-llvm-cov --locked".into());
     }
     let dir = util::repo_root().join("target/coverage");
-    if util::repo_root().join("target").is_symlink() || dir.is_symlink() {
-        return Err("refusing coverage output through a symlinked build directory".into());
+    if util::repo_root().join("target").is_symlink() || dir.is_symlink()
+        || util::repo_root().join(&value).is_symlink()
+    {
+        return Err("refusing coverage output through a symlinked build directory or file".into());
     }
     fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     cargo(&["llvm-cov", "--workspace", "--exclude", "xtask", "--locked", "--lcov", "--output-path", &value])
@@ -630,7 +636,7 @@ mod tests {
         let mut options = BTreeMap::from([("execute".into(), "maybe".into())]);
         assert!(bool_option(&mut options, "execute", false).is_err());
         let mut options = BTreeMap::from([("execute".into(), "true".into())]);
-        assert_eq!(bool_option(&mut options, "execute", false).unwrap(), true);
+        assert!(bool_option(&mut options, "execute", false).unwrap());
     }
     #[test]
     fn generated_cleanup_paths_are_allowlisted() {
