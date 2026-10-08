@@ -516,6 +516,21 @@ fn validate_push_destinations(listing: &str) -> Result<String, String> {
     }
     Ok(destinations[0].to_owned())
 }
+fn validate_no_rewrite_of_pinned_url(config: &str, push_url: &str) -> Result<(), String> {
+    // 'git config --null --list' emits key\nvalue\0 records, including
+    // global, included and command/environment-provided URL rewrite rules.
+    for record in config.split('\0').filter(|value| !value.is_empty()) {
+        let (name, prefix) = record.split_once('\n')
+            .ok_or("Git returned a malformed config record")?;
+        if name.starts_with("url.")
+            && (name.ends_with(".insteadof") || name.ends_with(".pushinsteadof"))
+            && push_url.starts_with(prefix)
+        {
+            return Err("a configured Git URL rewrite applies to the pinned push URL; refusing alternate destination".into());
+        }
+    }
+    Ok(())
+}
 fn canonical_push_destination(root: &Path) -> Result<String, String> {
     let urls = command("git", &["remote", "get-url", "--push", "--all", "origin"], root)?;
     let push_url = validate_push_destinations(&urls)?;
@@ -525,6 +540,11 @@ fn canonical_push_destination(root: &Path) -> Result<String, String> {
     if expanded != push_url {
         return Err("canonical push URL is rewritten again; refusing ambiguous transport".into());
     }
+    // Git's --get-url with a bare URL does not apply pushInsteadOf. A direct
+    // 'git push <URL>' DOES, even when remote.origin.pushurl made the remote
+    // query appear canonical. Inspect applicable config rules separately.
+    let config = command("git", &["config", "--null", "--list", "--includes"], root)?;
+    validate_no_rewrite_of_pinned_url(&config, &push_url)?;
     Ok(push_url)
 }
 fn check_remote(root: &Path) -> Result<String, String> {
@@ -2568,6 +2588,18 @@ mod tests {
     }
 
     #[test]
+    fn direct_pinned_push_url_must_reject_additional_push_rewrite() {
+        let url = "https://github.com/chiploom/zed-wit.git";
+        let unrelated = "url.https://example.org/.pushinsteadof\nhttps://example.org/\0";
+        assert!(validate_no_rewrite_of_pinned_url(unrelated, url).is_ok());
+        let rewrite = "url.file:///tmp/untrusted.git.pushinsteadof\nhttps://github.com/chiploom/zed-wit.git\0";
+        assert!(validate_no_rewrite_of_pinned_url(rewrite, url).is_err());
+        let rewrite_fetch = "url.file:///tmp/untrusted.git.insteadof\nhttps://github.com/chiploom/\0";
+        assert!(validate_no_rewrite_of_pinned_url(rewrite_fetch, url).is_err());
+        assert!(validate_no_rewrite_of_pinned_url("malformed\0", url).is_err());
+    }
+
+    #[test]
     fn disposable_git_config_exposes_all_effective_push_url_redirects() {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -2621,6 +2653,20 @@ mod tests {
         ).unwrap();
         // Git ignores pushInsteadOf when an explicit remote pushurl exists.
         // Remove it to exercise the actual push-only rewriting contract.
+        // Even with explicit canonical pushurl, a raw 'git push URL' would
+        // apply this rule. The pinned-URL rewrite preflight must reject it.
+        git(
+            &["config", "--local",
+              "url.file:///tmp/zed-wit-untrusted.git.pushInsteadOf",
+              "https://github.com/chiploom/zed-wit.git"],
+            &root,
+        ).unwrap();
+        assert!(canonical_push_destination(&root).is_err());
+        git(
+            &["config", "--local", "--unset-all",
+              "url.file:///tmp/zed-wit-untrusted.git.pushInsteadOf"],
+            &root,
+        ).unwrap();
         git(
             &["remote", "set-url", "--delete", "--push", "origin",
               "https://github.com/chiploom/zed-wit.git"],
