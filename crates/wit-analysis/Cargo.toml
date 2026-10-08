@@ -6,8 +6,8 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-wit-parser = "=0.260.0"
-tree-sitter = "=0.26.11"
+wit-parser = "=0.261.0"
+tree-sitter = "=0.26.13"
 topiary-core = "=0.7.3"
 wit-syntax = { path = "../wit-syntax" }
 thiserror = "2"
