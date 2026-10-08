@@ -305,11 +305,7 @@ fn reviewed_pr_file_versions(
     }
     Ok(previous)
 }
-fn version_in_manifest(
-    source: &str,
-    scope: Scope,
-    extension_file: bool,
-) -> Result<Version, String> {
+fn version_in_manifest(source: &str, extension_file: bool) -> Result<Version, String> {
     let doc: toml::Value = toml::from_str(source)
         .map_err(|_| "release provenance manifest is not valid TOML".to_owned())?;
     let value = if extension_file {
@@ -382,7 +378,7 @@ fn git_manifest_version(
         scope.manifest()
     };
     let content = git(&["show", &format!("{sha}:{name}")], root)?;
-    version_in_manifest(&content, scope, extension_file)
+    version_in_manifest(&content, extension_file)
 }
 fn historical_predecessor_version(
     root: &Path,
@@ -418,7 +414,6 @@ fn verify_pr_version_transition(
     let current = manifest_version(root, scope)?;
     let reviewed_head = version_in_manifest(
         &remote_file_at(root, pr_head_sha, scope.manifest())?,
-        scope,
         false,
     )?;
     let merged = git_manifest_version(root, merge_sha, scope, false)?;
@@ -433,7 +428,6 @@ fn verify_pr_version_transition(
     if scope == Scope::Extension {
         let checked_head = version_in_manifest(
             &remote_file_at(root, pr_head_sha, "extension.toml")?,
-            scope,
             true,
         )?;
         let merged_extension = git_manifest_version(root, merge_sha, scope, true)?;
@@ -441,7 +435,6 @@ fn verify_pr_version_transition(
             historical_predecessor_version(root, scope, merge_sha, pr_commits, true, candidate)?;
         let current_extension = version_in_manifest(
             &util::read_nonempty(&root.join("extension.toml"))?,
-            scope,
             true,
         )?;
         ensure_release_transition(
@@ -1874,6 +1867,8 @@ mod tests {
                 "user.name=Fixture",
                 "-c",
                 "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgSign=false",
                 "commit",
                 "--allow-empty",
                 "-qm",
@@ -1883,7 +1878,14 @@ mod tests {
         )
         .unwrap();
         let commit = git(&["rev-parse", "HEAD"], &root).unwrap();
-        git(&["tag", "v0.1.3"], &root).unwrap();
+        // Prevent any globally configured tag signing from opening pinentry
+        // or contacting an external signing service during this fixture.
+        command(
+            "git",
+            &["-c", "tag.gpgSign=false", "tag", "v0.1.3"],
+            &root,
+        )
+        .unwrap();
         command(
             "git",
             &[
@@ -1891,6 +1893,8 @@ mod tests {
                 "user.name=Fixture",
                 "-c",
                 "user.email=fixture@example.invalid",
+                "-c",
+                "tag.gpgSign=false",
                 "tag",
                 "-a",
                 "v0.1.4",
