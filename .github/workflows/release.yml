@@ -461,6 +461,62 @@ jobs:
             exit 1
           fi
 
+      - name: Require active release tag rules
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Only GitHub's active tag rulesets count. Include inherited rules.
+          summaries=$(gh api --paginate --jq '.[] | @json' \
+            "repos/$GH_REPO/rulesets?targets=tag&includes_parents=true&per_page=100")
+          details='[]'
+          while IFS= read -r summary; do
+            [ -n "$summary" ] || continue
+            if ! jq -e '.id | type == "number" and . >= 0 and floor == .' \
+              <<<"$summary" >/dev/null; then
+              echo "::error::Malformed release tag ruleset listing"
+              exit 1
+            fi
+            id=$(jq -r '.id' <<<"$summary")
+            if [[ ! "$id" =~ ^[0-9]+$ ]]; then
+              echo "::error::Invalid release tag ruleset ID"
+              exit 1
+            fi
+            rule=$(gh api "repos/$GH_REPO/rulesets/$id?includes_parents=true")
+            if ! jq -e --argjson id "$id" '.id == $id' <<<"$rule" >/dev/null; then
+              echo "::error::Mismatched release tag ruleset"
+              exit 1
+            fi
+            details=$(jq -c --argjson rule "$rule" '. + [$rule]' <<<"$details")
+          done <<<"$summaries"
+
+          if ! jq -e '
+            [
+              .[]
+              | select(
+                  .target == "tag"
+                  and .enforcement == "active"
+                  and (.conditions.ref_name.include | type) == "array"
+                  and any(.conditions.ref_name.include[]; . == "refs/tags/v*" or . == "~ALL")
+                  and .conditions.ref_name.exclude == []
+                  and (.rules | type) == "array"
+                )
+            ] as $matching
+            | (
+                all($matching[];
+                  ([.rules[].type] | index("creation")) == null)
+                and (
+                  [$matching[] | select(.bypass_actors == []) | .rules[].type] as $types
+                  | all(["update", "deletion", "non_fast_forward"][];
+                    . as $required | ($types | index($required)) != null)
+                )
+              )
+          ' <<<"$details" >/dev/null; then
+            echo "::error::Release tags require active unbypassed v* update/deletion/non-fast-forward protection with creation allowed"
+            exit 1
+          fi
+
       - name: Require immutable releases using Administration-read credential
         env:
           GH_TOKEN: ${{ secrets.RELEASE_POLICY_READ_TOKEN }}
