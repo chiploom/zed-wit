@@ -111,6 +111,24 @@ Remote read/write boundaries must be explicit so a failed preparation, timeout,
 partial edit, stale default branch, retried dispatch, or duplicate PR cannot
 silently advance to publication.
 
+## Canonical GitHub CLI API host and authentication
+
+The release CLI binds its GitHub operations to the same **GitHub.com** host as
+its validated Git origin, including read-only checks and remote writes. All
+`gh api` requests specify `--hostname github.com`; `gh repo view`,
+`gh pr list` and `gh pr create` explicitly target
+`github.com/chiploom/zed-wit`; `gh auth status` checks only `github.com`.
+The wrapper rejects mismatching `GH_HOST` and `GH_REPO`, a noncanonical
+per-host `api_host`, or a custom `http_unix_socket` before proceeding. It
+retains the user's regular `GH_TOKEN`/`GITHUB_TOKEN` or stored GitHub.com
+credentials and does not expose token data on authentication failures.
+
+This is intentional fail-closed behavior: a user configured for GitHub
+Enterprise must explicitly select their GitHub.com context rather than risk
+sending a release request to an identically named Enterprise repository.
+Disposable mock-GitHub-CLI tests exercise unpinned versus explicitly pinned
+host routing and host-configuration conflicts without network or release writes.
+
 ## Race-resistant remote submission and dispatch
 
 Release-preparation submission checks `remote.origin.pushurl` and expanded Git
