@@ -533,26 +533,22 @@ fn pinned_gh_args(args: &[&str]) -> Result<Vec<String>, String> {
         return Err("caller may not override pinned GitHub CLI hostname".into());
     }
     match args {
-        ["api", rest @ ..] => Ok(
-            ["api", "--hostname", GITHUB_HOST]
+        ["api", rest @ ..] => Ok(["api", "--hostname", GITHUB_HOST]
+            .into_iter()
+            .chain(rest.iter().copied())
+            .map(str::to_owned)
+            .collect()),
+        ["auth", "status"] => Ok(["auth", "status", "--hostname", GITHUB_HOST]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect()),
+        ["repo", "view", repository, rest @ ..] if *repository == REPO => {
+            Ok(["repo", "view", HOSTED_REPO]
                 .into_iter()
                 .chain(rest.iter().copied())
                 .map(str::to_owned)
-                .collect(),
-        ),
-        ["auth", "status"] => Ok(
-            ["auth", "status", "--hostname", GITHUB_HOST]
-                .iter()
-                .map(|s| (*s).to_owned())
-                .collect(),
-        ),
-        ["repo", "view", repository, rest @ ..] if *repository == REPO => Ok(
-            ["repo", "view", HOSTED_REPO]
-                .into_iter()
-                .chain(rest.iter().copied())
-                .map(str::to_owned)
-                .collect(),
-        ),
+                .collect())
+        }
         ["pr", subcommand @ ("list" | "create"), rest @ ..] => {
             let mut output = vec!["pr".to_owned(), (*subcommand).to_owned()];
             let mut saw_repo = false;
@@ -583,8 +579,9 @@ fn gh(args: &[&str], root: &Path) -> Result<String, String> {
         std::env::var("GH_HOST").ok().as_deref(),
         std::env::var("GH_REPO").ok().as_deref(),
     )?;
-    let config = command("gh", &["config", "list", "--host", GITHUB_HOST], root)
-        .map_err(|_| "cannot inspect GitHub CLI host configuration; release operation blocked".to_owned())?;
+    let config = command("gh", &["config", "list", "--host", GITHUB_HOST], root).map_err(|_| {
+        "cannot inspect GitHub CLI host configuration; release operation blocked".to_owned()
+    })?;
     validate_gh_host_config(&config)?;
     let pinned = pinned_gh_args(args)?;
     let refs = pinned.iter().map(String::as_str).collect::<Vec<_>>();
@@ -2146,7 +2143,12 @@ mod tests {
     fn github_cli_release_operations_pin_github_dot_com() {
         assert_eq!(
             pinned_gh_args(&["api", "repos/chiploom/zed-wit/releases"]).unwrap(),
-            ["api", "--hostname", "github.com", "repos/chiploom/zed-wit/releases"]
+            [
+                "api",
+                "--hostname",
+                "github.com",
+                "repos/chiploom/zed-wit/releases"
+            ]
         );
         assert_eq!(
             pinned_gh_args(&["repo", "view", REPO, "--json", "nameWithOwner"]).unwrap(),
@@ -2165,7 +2167,12 @@ mod tests {
         for request in [
             vec!["pr", "create", "-R", "enterprise.internal/chiploom/zed-wit"],
             vec!["pr", "create", "--head", "release-prep/lsp-v0.1.3"],
-            vec!["api", "--hostname", "enterprise.internal", "repos/chiploom/zed-wit"],
+            vec![
+                "api",
+                "--hostname",
+                "enterprise.internal",
+                "repos/chiploom/zed-wit",
+            ],
             vec!["repo", "view", "enterprise.internal/chiploom/zed-wit"],
             vec!["auth", "status", "--hostname", "enterprise.internal"],
         ] {
@@ -2178,7 +2185,12 @@ mod tests {
         assert!(validate_gh_host_environment(None, None).is_ok());
         assert!(validate_gh_host_environment(Some("github.com"), Some(REPO)).is_ok());
         assert!(validate_gh_host_environment(Some("github.com"), Some(HOSTED_REPO)).is_ok());
-        for host in ["ghe.example.org", "github.enterprise.local", "github.com:8443", ""] {
+        for host in [
+            "ghe.example.org",
+            "github.enterprise.local",
+            "github.com:8443",
+            "",
+        ] {
             assert!(validate_gh_host_environment(Some(host), None).is_err());
         }
         for repo in ["ghe.example.org/chiploom/zed-wit", "someone/zed-wit", ""] {
@@ -2200,7 +2212,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = loop {
             let candidate = std::env::temp_dir().join(format!(
-                "zed-wit-gh-host-{}-{}", std::process::id(),
+                "zed-wit-gh-host-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed),
             ));
             match fs::create_dir(&candidate) {
@@ -2211,7 +2224,9 @@ mod tests {
         };
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
-            fn drop(&mut self) { fs::remove_dir_all(&self.0).expect("remove mocked gh repo"); }
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove mocked gh repo");
+            }
         }
         let _cleanup = Cleanup(root.clone());
         git(&["init", "-q", "-b", "main"], &root).unwrap();
@@ -2227,11 +2242,14 @@ mod tests {
                 .env("GH_HOST", "ghe.example.org")
                 .env("GH_REPO", "ghe.example.org/other/repo")
                 .env("GH_TOKEN", "should-never-appear")
-                .output().unwrap()
+                .output()
+                .unwrap()
         };
         let original = call_mock(&["api", "repos/chiploom/zed-wit/releases"]);
-        assert_eq!(String::from_utf8_lossy(&original.stdout).trim(),
-            "host=ghe.example.org repo=ghe.example.org/other/repo");
+        assert_eq!(
+            String::from_utf8_lossy(&original.stdout).trim(),
+            "host=ghe.example.org repo=ghe.example.org/other/repo"
+        );
         let pinned = pinned_gh_args(&["api", "repos/chiploom/zed-wit/releases"]).unwrap();
         let pinned_refs = pinned.iter().map(String::as_str).collect::<Vec<_>>();
         let output = call_mock(&pinned_refs);
@@ -2239,7 +2257,15 @@ mod tests {
         let result = String::from_utf8(output.stdout).unwrap();
         assert!(result.contains("host=github.com"));
         assert!(!result.contains("should-never-appear"));
-        let pr = pinned_gh_args(&["pr", "create", "-R", REPO, "--head", "release-prep/lsp-v0.1.3"]).unwrap();
+        let pr = pinned_gh_args(&[
+            "pr",
+            "create",
+            "-R",
+            REPO,
+            "--head",
+            "release-prep/lsp-v0.1.3",
+        ])
+        .unwrap();
         let pr_refs = pr.iter().map(String::as_str).collect::<Vec<_>>();
         let output = call_mock(&pr_refs);
         assert!(output.status.success());
