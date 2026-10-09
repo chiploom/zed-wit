@@ -107,6 +107,17 @@ retains the version, is rejected. The globally serialized `cd-release`
 workflow is checked for active runs across **all** source SHAs and scopes,
 not just the selected candidate, to prevent displacement of pending runs.
 
+For publishing, all six required checks must be **strict**, with source
+integration ID `15368` (GitHub Actions) in the effective main-branch rules.
+Zero required reviewers remain allowed. The `release` workflow also
+requires confirmed immutable-release enforcement via an environment-scoped
+Administration-read-only `RELEASE_POLICY_READ_TOKEN`; the standard
+`GITHUB_TOKEN` cannot authenticate that API. Any missing/disabled policy
+fails before release-related writes, and the published release must report
+`immutable=true`. See [publishing](publishing.md) for operator setup.
+The current live immutable-release setting was not accessible through the
+connected GitHub app and must be checked by an authorized operator.
+
 ## Version-aware release preparation and protected CD
 
 The opt-in `publish` frontend is separate from the existing local `release`
