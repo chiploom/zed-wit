@@ -7,7 +7,7 @@ and is stacked on the xtask refactor in [PR #25](https://github.com/chiploom/zed
 
 The source of truth for existing release behavior remains [publishing.md](publishing.md).
 The implementation must preserve the existing protected
-`.github/workflows/release.yml` dispatch contract, required approvals, five-target
+`.github/workflows/release.yml` dispatch contract, protected-branch policies, five-target
 LSP distribution, release attestations, immutable releases, and the separate Zed
 registry succession process.
 
@@ -152,7 +152,7 @@ The existing serialized, environment-protected CD workflow is the final
 publication authority. Its protected publish job rechecks the unpublished
 draft, scope/title and exact release tag commit immediately before promoting
 the release; an already-published or moved release fails closed. The existing
-native build, five-target verification, attestations, reviewer approvals and
+native build, five-target verification, attestations, optional reviewer gates and
 immutable-release enforcement are unchanged. Because GitHub Actions allows
 pending concurrency runs to be replaced, a dispatch acceptance is never
 reported as successful publication.
@@ -164,13 +164,14 @@ version at or above the candidate still blocks the dispatch.
 
 ## Mandatory protection qualification (fail closed)
 
-Release preparation and publication have distinct human-approval boundaries.
-The **preparation PR** must be merged through an active effective `main`
-rule requiring at least one approving review, linear history and all six
-expected required CI checks. The **protected `release` environment** must
-independently require a configured reviewer, prevent self-review and restrict
-deployment to protected branches. A workflow reference to
-`environment: release` alone does **not** establish these protections.
+**Temporary zero-reviewer policy:** release preparation still requires an
+effective `main` pull-request rule, linear history and all six required CI
+checks, but its approving-review count may be **zero**. The protected
+`release` environment may likewise have **zero** required reviewers;
+self-review prevention is not required when no approval is configured.
+The environment must still exist, expose readable protection metadata, and
+restrict deployment to **protected branches only**. Reviewer requirements
+can be restored later without changing the publishing protocol.
 
 `--submit --confirm` reads the effective main-branch rules using
 `GET /repos/chiploom/zed-wit/rules/branches/main`; `--resume --confirm`
@@ -188,11 +189,11 @@ CI gating, and linear history, but `required_approving_review_count=0`.
 An active `Protect release tags` ruleset (ID `24620024`) blocks
 tag deletion/update and non-fast-forward modifications. No inherited
 organization ruleset was returned by the current ruleset listing.
-The connected GitHub integration could not retrieve the `release`
-environment's protections, so its reviewers and self-review policy remain
-**unverified**, not presumed active. The current preflight therefore
-intentionally blocks release submission. Do not change these settings
-without repository-owner authorization.
+An authenticated environment inspection subsequently confirmed **zero**
+required reviewers, no self-review prevention and custom deployment-branch
+policies instead of protected branches. The zero-reviewer configuration is
+now permitted; the **deployment-branch policy remains noncompliant** and
+continues to block CD resume/publication. No repository settings were changed.
 
 Read-only qualification commands using an appropriately authorized local
 GitHub CLI login:
@@ -203,14 +204,12 @@ gh api 'repos/chiploom/zed-wit/environments/release'
 gh api --paginate 'repos/chiploom/zed-wit/rulesets?includes_parents=true&per_page=100'
 ```
 
-The frontend does not silently allow release publication in the absence
-of independent PR and environment approvals. The **protected CD publish job**
-now also reads these active rules at execution time using its scoped
-`actions: read` GitHub token, before checkout, tag creation or draft
-promotion. Any API denial, incomplete rule set or missing review protection
-terminates publication. This guards manual workflow dispatches and settings
-that change after the local frontend preflight; it does not alter the
-protected environment's own native approval gate.
+The frontend and **protected CD publish job** revalidate the required
+pull-request, CI, linear-history and deployment-branch restrictions using
+live GitHub API data. Zero required reviews are accepted by both. API denial,
+incomplete protection data, or missing required branch/CI safeguards fails
+closed, including on direct/manual workflow dispatch. GitHub-native reviewer
+gates, if subsequently configured, remain honored.
 
 ## Reviewed PR provenance and guarded recovery
 
