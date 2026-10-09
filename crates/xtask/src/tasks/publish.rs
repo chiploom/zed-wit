@@ -496,8 +496,96 @@ fn manifest_version(root: &Path, scope: Scope) -> Result<Version, String> {
 fn command(program: &str, args: &[&str], root: &Path) -> Result<String, String> {
     util::command_output(program, args, root)
 }
+const GITHUB_HOST: &str = "github.com";
+const HOSTED_REPO: &str = "github.com/chiploom/zed-wit";
+
+fn validate_gh_host_environment(host: Option<&str>, repo: Option<&str>) -> Result<(), String> {
+    if host.is_some_and(|value| value != GITHUB_HOST) {
+        return Err("GH_HOST conflicts with the canonical github.com release destination".into());
+    }
+    if repo.is_some_and(|value| value != REPO && value != HOSTED_REPO) {
+        return Err("GH_REPO conflicts with the canonical github.com release repository".into());
+    }
+    Ok(())
+}
+fn validate_gh_host_config(config: &str) -> Result<(), String> {
+    // 'gh config list --host github.com' returns key=value records.
+    // api_host and http_unix_socket can redirect requests despite --hostname.
+    for row in config.lines() {
+        let Some((name, value)) = row.split_once('=') else {
+            return Err("GitHub CLI returned malformed host configuration".into());
+        };
+        let (name, value) = (name.trim(), value.trim());
+        match name {
+            "api_host" if !value.is_empty() && value != "api.github.com" => {
+                return Err("GitHub CLI api_host points outside api.github.com".into());
+            }
+            "http_unix_socket" if !value.is_empty() => {
+                return Err("GitHub CLI has a custom HTTP socket; release API destination cannot be verified".into());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+fn pinned_gh_args(args: &[&str]) -> Result<Vec<String>, String> {
+    match args {
+        ["api", rest @ ..] => Ok(
+            ["api", "--hostname", GITHUB_HOST]
+                .into_iter()
+                .chain(rest.iter().copied())
+                .map(str::to_owned)
+                .collect(),
+        ),
+        ["auth", "status"] => Ok(
+            ["auth", "status", "--hostname", GITHUB_HOST]
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
+        ),
+        ["repo", "view", repository, rest @ ..] if *repository == REPO => Ok(
+            ["repo", "view", HOSTED_REPO]
+                .into_iter()
+                .chain(rest.iter().copied())
+                .map(str::to_owned)
+                .collect(),
+        ),
+        ["pr", subcommand @ ("list" | "create"), rest @ ..] => {
+            let mut output = vec!["pr".to_owned(), (*subcommand).to_owned()];
+            let mut saw_repo = false;
+            let mut iter = rest.iter().copied();
+            while let Some(arg) = iter.next() {
+                if arg == "-R" || arg == "--repo" {
+                    let repo = iter.next().ok_or("GitHub PR command omitted repository")?;
+                    if saw_repo || (repo != REPO && repo != HOSTED_REPO) {
+                        return Err("GitHub PR command has an ambiguous repository".into());
+                    }
+                    output.push(arg.to_owned());
+                    output.push(HOSTED_REPO.to_owned());
+                    saw_repo = true;
+                } else {
+                    output.push(arg.to_owned());
+                }
+            }
+            if !saw_repo {
+                return Err("GitHub PR command must select its canonical repository".into());
+            }
+            Ok(output)
+        }
+        _ => Err("unexpected GitHub CLI operation; refusing unpinned release API request".into()),
+    }
+}
 fn gh(args: &[&str], root: &Path) -> Result<String, String> {
-    command("gh", args, root).map_err(|_| {
+    validate_gh_host_environment(
+        std::env::var("GH_HOST").ok().as_deref(),
+        std::env::var("GH_REPO").ok().as_deref(),
+    )?;
+    let config = command("gh", &["config", "list", "--host", GITHUB_HOST], root)
+        .map_err(|_| "cannot inspect GitHub CLI host configuration; release operation blocked".to_owned())?;
+    validate_gh_host_config(&config)?;
+    let pinned = pinned_gh_args(args)?;
+    let refs = pinned.iter().map(String::as_str).collect::<Vec<_>>();
+    command("gh", &refs, root).map_err(|_| {
         format!(
             "GitHub CLI request failed for {}; verify gh auth, permissions and connectivity",
             REPO
