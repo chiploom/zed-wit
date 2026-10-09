@@ -841,7 +841,10 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
                 if rule["parameters"]["strict_required_status_checks_policy"].as_bool()
                     != Some(true)
                 {
-                    return Err("an effective main required-check rule does not enforce strict checks".into());
+                    return Err(
+                        "an effective main required-check rule does not enforce strict checks"
+                            .into(),
+                    );
                 }
                 let checks = rule["parameters"]["required_status_checks"]
                     .as_array()
@@ -2982,19 +2985,32 @@ mod tests {
             }})
         };
         let encode = |rules: &[Value]| {
-            rules.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")
+            rules
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
         };
-        let base = vec![pr.clone(), linear.clone(), status(&checks, Value::Bool(true))];
+        let base = vec![
+            pr.clone(),
+            linear.clone(),
+            status(&checks, Value::Bool(true)),
+        ];
         assert!(validate_protected_main_rules(&encode(&base)).is_ok());
         // Each layered rule must enforce strictness, while their trusted
         // contexts may be distributed across multiple applicable rulesets.
         let layered = vec![
-            pr.clone(), linear.clone(),
+            pr.clone(),
+            linear.clone(),
             status(&checks[..3], Value::Bool(true)),
             status(&checks[3..], Value::Bool(true)),
         ];
         assert!(validate_protected_main_rules(&encode(&layered)).is_ok());
-        for invalid in [Value::Bool(false), Value::Null, Value::String("true".into())] {
+        for invalid in [
+            Value::Bool(false),
+            Value::Null,
+            Value::String("true".into()),
+        ] {
             let mut rules = layered.clone();
             rules[3] = status(&checks[3..], invalid);
             assert!(validate_protected_main_rules(&encode(&rules)).is_err());
@@ -3010,7 +3026,11 @@ mod tests {
         ] {
             let mut wrong = checks.clone();
             wrong[0]["integration_id"] = invalid;
-            let rules = vec![pr.clone(), linear.clone(), status(&wrong, Value::Bool(true))];
+            let rules = vec![
+                pr.clone(),
+                linear.clone(),
+                status(&wrong, Value::Bool(true)),
+            ];
             assert!(validate_protected_main_rules(&encode(&rules)).is_err());
         }
         let mut conflicting = layered.clone();
@@ -3018,7 +3038,8 @@ mod tests {
         changed[0]["integration_id"] = Value::from(99999);
         conflicting.push(status(&changed, Value::Bool(true)));
         assert!(validate_protected_main_rules(&encode(&conflicting)).is_err());
-        let unrelated = serde_json::json!({"context":"optional-custom-check","integration_id":99999});
+        let unrelated =
+            serde_json::json!({"context":"optional-custom-check","integration_id":99999});
         let mut extended = checks.clone();
         extended.push(unrelated);
         let rules = vec![pr, linear, status(&extended, Value::Bool(true))];
@@ -3034,7 +3055,9 @@ mod tests {
                 && input["enforced_by_owner"].as_bool().is_some()
         };
         assert!(is_enabled(&enabled));
-        assert!(is_enabled(&serde_json::json!({"enabled":true,"enforced_by_owner":true})));
+        assert!(is_enabled(
+            &serde_json::json!({"enabled":true,"enforced_by_owner":true})
+        ));
         for invalid in [
             serde_json::json!({"enabled":false,"enforced_by_owner":false}),
             serde_json::json!({"enabled":"true","enforced_by_owner":false}),
