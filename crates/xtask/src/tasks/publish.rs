@@ -884,8 +884,8 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
 fn validate_protected_release_tag_rulesets(records: &str) -> Result<(), String> {
     let mut protected_by = BTreeSet::new();
     for row in records.lines() {
-        let ruleset: Value = serde_json::from_str(row)
-            .map_err(|_| "malformed release tag ruleset details")?;
+        let ruleset: Value =
+            serde_json::from_str(row).map_err(|_| "malformed release tag ruleset details")?;
         if ruleset["target"].as_str() != Some("tag")
             || ruleset["enforcement"].as_str() != Some("active")
         {
@@ -894,9 +894,9 @@ fn validate_protected_release_tag_rulesets(records: &str) -> Result<(), String> 
         let includes = ruleset["conditions"]["ref_name"]["include"].as_array();
         let excludes = ruleset["conditions"]["ref_name"]["exclude"].as_array();
         if !includes.is_some_and(|items| {
-            items.iter().any(|pattern| {
-                matches!(pattern.as_str(), Some("refs/tags/v*" | "~ALL"))
-            })
+            items
+                .iter()
+                .any(|pattern| matches!(pattern.as_str(), Some("refs/tags/v*" | "~ALL")))
         }) || !excludes.is_some_and(Vec::is_empty)
         {
             continue;
@@ -904,7 +904,10 @@ fn validate_protected_release_tag_rulesets(records: &str) -> Result<(), String> 
         let rules = ruleset["rules"]
             .as_array()
             .ok_or("applicable release tag ruleset has malformed rules")?;
-        if rules.iter().any(|rule| rule["type"].as_str() == Some("creation")) {
+        if rules
+            .iter()
+            .any(|rule| rule["type"].as_str() == Some("creation"))
+        {
             return Err("release tag rules must permit protected CD to create new tags".into());
         }
         if !ruleset["bypass_actors"]
@@ -952,8 +955,8 @@ fn check_release_tag_protection_preflight(root: &Path) -> Result<(), String> {
     let mut ids = BTreeSet::new();
     let mut details = String::new();
     for summary in summaries.lines() {
-        let record: Value = serde_json::from_str(summary)
-            .map_err(|_| "malformed release tag ruleset listing")?;
+        let record: Value =
+            serde_json::from_str(summary).map_err(|_| "malformed release tag ruleset listing")?;
         let id = record["id"]
             .as_u64()
             .ok_or("release tag ruleset listing omitted a numeric ID")?;
@@ -3162,7 +3165,11 @@ mod tests {
             ]
         });
         let records = |rulesets: &[Value]| {
-            rulesets.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")
+            rulesets
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
         };
         assert!(validate_protected_release_tag_rulesets(&records(&[protected.clone()])).is_ok());
         assert!(validate_protected_release_tag_rulesets("").is_err());
@@ -3187,16 +3194,23 @@ mod tests {
         malformed["rules"] = Value::Null;
         assert!(validate_protected_release_tag_rulesets(&records(&[malformed])).is_err());
         let mut creation = protected.clone();
-        creation["rules"].as_array_mut().unwrap().push(json!({"type": "creation"}));
+        creation["rules"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type": "creation"}));
         assert!(validate_protected_release_tag_rulesets(&records(&[creation])).is_err());
 
         let mut deletion_only = protected.clone();
         deletion_only["rules"] = json!([{"type": "deletion"}]);
-        assert!(validate_protected_release_tag_rulesets(&records(&[deletion_only.clone()])).is_err());
+        assert!(
+            validate_protected_release_tag_rulesets(&records(&[deletion_only.clone()])).is_err()
+        );
         let mut remaining = protected.clone();
         remaining["id"] = json!(12);
         remaining["rules"] = json!([{"type": "update"}, {"type": "non_fast_forward"}]);
-        assert!(validate_protected_release_tag_rulesets(&records(&[deletion_only, remaining])).is_ok());
+        assert!(
+            validate_protected_release_tag_rulesets(&records(&[deletion_only, remaining])).is_ok()
+        );
         let mut all_tags = protected.clone();
         all_tags["conditions"]["ref_name"]["include"] = json!(["~ALL"]);
         assert!(validate_protected_release_tag_rulesets(&records(&[all_tags])).is_ok());
