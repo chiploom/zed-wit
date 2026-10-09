@@ -947,8 +947,8 @@ fn validate_fetched_release_tag_rulesets(
     let mut ids = BTreeSet::new();
     let mut details = String::new();
     for summary in summaries.lines() {
-        let record: Value = serde_json::from_str(summary)
-            .map_err(|_| "malformed release tag ruleset listing")?;
+        let record: Value =
+            serde_json::from_str(summary).map_err(|_| "malformed release tag ruleset listing")?;
         let id = record["id"]
             .as_u64()
             .ok_or("release tag ruleset listing omitted a numeric ID")?;
@@ -3248,36 +3248,62 @@ mod tests {
                 {"type": "deletion"},
                 {"type": "non_fast_forward"}
             ]
-        }).to_string();
+        })
+        .to_string();
         let listing = json!({"id": 37}).to_string();
-        assert!(validate_fetched_release_tag_rulesets(&listing, |id| {
-            assert_eq!(id, 37);
-            Ok(policy.clone())
-        }).is_ok());
-        assert!(validate_fetched_release_tag_rulesets("", |_| {
-            panic!("empty listing should never fetch details")
-        }).is_err());
-        assert!(validate_fetched_release_tag_rulesets("{malformed", |_| {
-            panic!("malformed listing should never fetch details")
-        }).is_err());
-        assert!(validate_fetched_release_tag_rulesets("{\"id\":\"37\"}", |_| {
-            panic!("non-numeric ID should never fetch details")
-        }).is_err());
-        assert!(validate_fetched_release_tag_rulesets(&format!("{listing}\n{listing}"), |_| {
-            Ok(policy.clone())
-        }).is_err());
-        assert!(validate_fetched_release_tag_rulesets(&listing, |_| {
-            Err("synthetic GitHub API failure".into())
-        }).is_err());
-        assert!(validate_fetched_release_tag_rulesets(&listing, |_| {
-            Ok("{bad details".into())
-        }).is_err());
-        assert!(validate_fetched_release_tag_rulesets(&listing, |_| {
-            Ok(policy.replace("\"id\":37", "\"id\":38"))
-        }).is_err());
-        assert!(validate_fetched_release_tag_rulesets(&listing, |_| {
-            Ok(policy.replace("\"enforcement\":\"active\"", "\"enforcement\":\"disabled\""))
-        }).is_err());
+        assert!(
+            validate_fetched_release_tag_rulesets(&listing, |id| {
+                assert_eq!(id, 37);
+                Ok(policy.clone())
+            })
+            .is_ok()
+        );
+        assert!(
+            validate_fetched_release_tag_rulesets("", |_| {
+                panic!("empty listing should never fetch details")
+            })
+            .is_err()
+        );
+        assert!(
+            validate_fetched_release_tag_rulesets("{malformed", |_| {
+                panic!("malformed listing should never fetch details")
+            })
+            .is_err()
+        );
+        assert!(
+            validate_fetched_release_tag_rulesets("{\"id\":\"37\"}", |_| {
+                panic!("non-numeric ID should never fetch details")
+            })
+            .is_err()
+        );
+        assert!(
+            validate_fetched_release_tag_rulesets(&format!("{listing}\n{listing}"), |_| {
+                Ok(policy.clone())
+            })
+            .is_err()
+        );
+        assert!(
+            validate_fetched_release_tag_rulesets(&listing, |_| {
+                Err("synthetic GitHub API failure".into())
+            })
+            .is_err()
+        );
+        assert!(
+            validate_fetched_release_tag_rulesets(&listing, |_| { Ok("{bad details".into()) })
+                .is_err()
+        );
+        assert!(
+            validate_fetched_release_tag_rulesets(&listing, |_| {
+                Ok(policy.replace("\"id\":37", "\"id\":38"))
+            })
+            .is_err()
+        );
+        assert!(
+            validate_fetched_release_tag_rulesets(&listing, |_| {
+                Ok(policy.replace("\"enforcement\":\"active\"", "\"enforcement\":\"disabled\""))
+            })
+            .is_err()
+        );
     }
 
     #[test]
