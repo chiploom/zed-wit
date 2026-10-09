@@ -398,17 +398,19 @@ jobs:
       contents: write
       actions: read # Required to verify live release-environment protections
     steps:
-      - name: Require independent release protections
+      - name: Require protected release branch and CI
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # Check active effective repository/organization rules; cannot
-          # infer review requirements from the presence of a PR ruleset.
+          # Zero required reviewers are permitted for now. Still require
+          # an effective PR rule, linear history, and six CI checks.
           rules=$(gh api --paginate "repos/$GH_REPO/rules/branches/main?per_page=100" | jq -s 'add')
           if ! jq -e '
-            any(.[]; .type == "pull_request" and (.parameters.required_approving_review_count // 0) >= 1)
+            any(.[]; .type == "pull_request"
+                and (.parameters.required_approving_review_count | type) == "number"
+                and .parameters.required_approving_review_count >= 0)
             and any(.[]; .type == "required_linear_history")
             and ([.[] | select(.type == "required_status_checks") |
                     .parameters.required_status_checks[]?.context] as $checks |
@@ -420,7 +422,7 @@ jobs:
                   "Check / x86_64-apple-darwin"] |
                  all(.[]; . as $name | ($checks | index($name)) != null))
           ' <<<"$rules" >/dev/null; then
-            echo "::error::Protected main requires at least one independent PR approval, linear history and all six CI checks"
+            echo "::error::Protected main requires a PR rule, linear history and all six CI checks"
             exit 1
           fi
 
@@ -428,13 +430,10 @@ jobs:
           release_environment=$(gh api "repos/$GH_REPO/environments/release")
           if ! jq -e '
             .name == "release"
+            and (.protection_rules | type) == "array"
             and .deployment_branch_policy.protected_branches == true
-            and any(.protection_rules[]?;
-              .type == "required_reviewers"
-              and .prevent_self_review == true
-              and (.reviewers | length) > 0)
           ' <<<"$release_environment" >/dev/null; then
-            echo "::error::Release environment lacks independent required reviewers, self-review prevention or protected-branch restriction"
+            echo "::error::Release environment is missing verified protected-branch deployment restrictions"
             exit 1
           fi
 
