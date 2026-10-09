@@ -86,19 +86,20 @@ On Windows, running `cargo clean` from the active `xtask.exe` would attempt to r
 
 No command deletes personal Zed data or modifies release tags. For grammar requalification, see [upstream compatibility](upstream-compatibility.md) and issue #17. Changing a pin requires reviewing tree-sitter queries, generated metadata, WIT fixtures and Cargo.lock.
 
-The issue #24 command also verifies **live GitHub protection rules** before
-remote writes. Submission requires at least one enforced approving review
-for preparation PRs, all required CI checks and linear history. Resume
-additionally requires the `release` environment to have required reviewers,
-prevent self-review and permit deployment only from protected branches.
-Unreadable or missing protection states block the operation. Protected CD
-also repeats the checks before release-related writes, so direct manual
-workflow dispatch cannot silently bypass the policy. At the
-2026-10-09 audit, `main` required **zero** approvals and an authenticated
-GitHub environment read confirmed `release` had **zero** required reviewers,
-no self-review prevention and custom (not protected-branches-only) deployment
-policies. An authorized administrator must change and requalify these
-settings before using confirmed publication.
+The issue #24 command verifies **live GitHub protection rules** before
+remote writes. **For now, zero required reviewers are permitted** for both
+release-preparation PRs and CD publication. Submission still requires a PR
+rule, six required CI checks and linear history. Resume additionally
+requires the `release` environment to restrict deployment to protected
+branches. Protected CD repeats these checks before release-related writes.
+Unreadable or missing rules still fail closed.
+
+At the 2026-10-09 audit, `main` required zero approving reviews and
+`release` had no required reviewers. Those settings now satisfy the
+temporary policy, but the environment's **custom deployment-branch policy**
+still does not satisfy the protected-branches-only requirement. An
+authorized administrator must review that separate setting before
+publication.
 
 Resume further requires the current `main` SHA to be **identical** to the
 reviewed preparation PR's merged commit. Any later commit, even one that
