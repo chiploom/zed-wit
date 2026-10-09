@@ -765,8 +765,18 @@ jobs:
           test "$(jq -r '.name' <<<"$release_json")" = "$RELEASE_TITLE"
           jq -r '.body' <<<"$release_json" | grep -Fq "$scope_marker"
 
-          published_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
-          if [ "$(jq -r '.immutable' <<<"$published_json")" != "true" ]; then
+          # Publication and the immutable flag may become visible to REST
+          # in separate observations. Retry reads only; never promote twice.
+          immutable_verified=false
+          for _ in {1..10}; do
+            published_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+            if [ "$(jq -r '.immutable' <<<"$published_json")" = "true" ]; then
+              immutable_verified=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$immutable_verified" != "true" ]; then
             echo "::error::Published GitHub Release lacks immutable=true; manual investigation required"
             exit 1
           fi
