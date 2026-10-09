@@ -144,6 +144,50 @@ remote tags/releases. Only the exact verified draft under safe recovery may
 be excluded from the candidate collision check; any different same-scope
 version at or above the candidate still blocks the dispatch.
 
+## Mandatory protection qualification (fail closed)
+
+Release preparation and publication have distinct human-approval boundaries.
+The **preparation PR** must be merged through an active effective `main`
+rule requiring at least one approving review, linear history and all six
+expected required CI checks. The **protected `release` environment** must
+independently require a configured reviewer, prevent self-review and restrict
+deployment to protected branches. A workflow reference to
+`environment: release` alone does **not** establish these protections.
+
+`--submit --confirm` reads the effective main-branch rules using
+`GET /repos/chiploom/zed-wit/rules/branches/main`; `--resume --confirm`
+rechecks them and reads
+`GET /repos/chiploom/zed-wit/environments/release`. GitHub applies
+repository-level and organization-level active rules to the branch-rules
+response. If the user's GitHub token cannot read either endpoint, the
+response is malformed, or a required protection is absent, the command
+refuses its remote write. Operator inspection is necessary to fix permissions
+or protection settings. This does not create or modify a ruleset/environment.
+
+**Verified repository state (2026-10-09):** the active repository ruleset
+`Protect main` (ID `24619696`) requires a pull request, strict six-check
+CI gating, and linear history, but `required_approving_review_count=0`.
+An active `Protect release tags` ruleset (ID `24620024`) blocks
+tag deletion/update and non-fast-forward modifications. No inherited
+organization ruleset was returned by the current ruleset listing.
+The connected GitHub integration could not retrieve the `release`
+environment's protections, so its reviewers and self-review policy remain
+**unverified**, not presumed active. The current preflight therefore
+intentionally blocks release submission. Do not change these settings
+without repository-owner authorization.
+
+Read-only qualification commands using an appropriately authorized local
+GitHub CLI login:
+
+```sh
+gh api --paginate 'repos/chiploom/zed-wit/rules/branches/main?per_page=100'
+gh api 'repos/chiploom/zed-wit/environments/release'
+gh api --paginate 'repos/chiploom/zed-wit/rulesets?includes_parents=true&per_page=100'
+```
+
+The frontend does not silently allow release publication in the absence
+of independent PR and environment approvals.
+
 ## Reviewed PR provenance and guarded recovery
 
 Before dispatching a publication, `--resume` fetches the merged preparation
