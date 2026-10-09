@@ -77,6 +77,28 @@ a newline, a `<asset>.provenance.json` build record, and an
 dependency closure and pinned Rust standard library. Build provenance JSON is not
 itself a cryptographic attestation.
 
+## Immutable-release enforcement (protected CD)
+
+Before creating or resuming any GitHub Release, the protected `release`
+job requires GitHub's Administration-read immutable-release status endpoint
+to confirm `enabled=true`; it repeats this check immediately before
+promoting the draft, and afterward requires `immutable=true` on the
+published GitHub Release. A denial, 404, malformed or disabled response
+blocks publication rather than assuming tag rules alone are sufficient.
+
+Because `GITHUB_TOKEN` has no configurable Administration-read scope,
+an authorized administrator must provision the environment-scoped
+`RELEASE_POLICY_READ_TOKEN` secret with a narrowly scoped fine-grained token
+or GitHub App token granting **repository Administration: read only**.
+It is used solely for policy GETs and must never be logged. Missing or
+expired credentials fail closed. The currently enabled status has **not**
+been verified through the connected GitHub app.
+
+The active `main` ruleset already uses strict CI checks bound to GitHub
+Actions integration ID `15368`, and the frontend and CD now require
+that exact trusted publisher for each of the six release CI contexts even
+when checks appear across multiple applicable rulesets.
+
 ## Release authorization requirements
 
 **Temporary policy: zero required reviewers are permitted** for both
