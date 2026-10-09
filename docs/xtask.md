@@ -86,6 +86,22 @@ On Windows, running `cargo clean` from the active `xtask.exe` would attempt to r
 
 No command deletes personal Zed data or modifies release tags. For grammar requalification, see [upstream compatibility](upstream-compatibility.md) and issue #17. Changing a pin requires reviewing tree-sitter queries, generated metadata, WIT fixtures and Cargo.lock.
 
+The issue #24 command also verifies **live GitHub protection rules** before
+remote writes. Submission requires at least one enforced approving review
+for preparation PRs, all required CI checks and linear history. Resume
+additionally requires the `release` environment to have required reviewers,
+prevent self-review and permit deployment only from protected branches.
+Unreadable or missing protection states block the operation. At the
+2026-10-09 audit, `main` required **zero** approvals and release environment
+reviewers could not be inspected with the connected app. An authorized
+operator must qualify/fix these settings before using confirmed publication.
+
+Resume further requires the current `main` SHA to be **identical** to the
+reviewed preparation PR's merged commit. Any later commit, even one that
+retains the version, is rejected. The globally serialized `cd-release`
+workflow is checked for active runs across **all** source SHAs and scopes,
+not just the selected candidate, to prevent displacement of pending runs.
+
 ## Version-aware release preparation and protected CD
 
 The opt-in `publish` frontend is separate from the existing local `release`
