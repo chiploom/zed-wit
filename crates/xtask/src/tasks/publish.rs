@@ -713,6 +713,104 @@ fn validate_resume_candidate(
     other_tags.remove(&exact);
     validate_candidate(scope, candidate, &other_tags)
 }
+fn validate_protected_main_rules(records: &str) -> Result<(), String> {
+    let mut requires_pr_review = false;
+    let mut linear_history = false;
+    let mut required_checks = BTreeSet::new();
+    let mut seen = 0_usize;
+    for line in records.lines() {
+        let rule: Value = serde_json::from_str(line)
+            .map_err(|_| "effective main rules have a malformed JSON record")?;
+        let kind = rule["type"].as_str()
+            .ok_or("effective main rule has no type")?;
+        seen += 1;
+        match kind {
+            "pull_request" => {
+                let approvals = rule["parameters"]["required_approving_review_count"]
+                    .as_u64().ok_or("main PR rule omitted approval count")?;
+                if approvals > 0 { requires_pr_review = true; }
+            }
+            "required_linear_history" => linear_history = true,
+            "required_status_checks" => {
+                let checks = rule["parameters"]["required_status_checks"]
+                    .as_array().ok_or("main status-check rule omitted checks")?;
+                for check in checks {
+                    let context = check["context"].as_str()
+                        .filter(|value| !value.is_empty())
+                        .ok_or("main required status check lacks context")?;
+                    required_checks.insert(context.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    if seen == 0 || !requires_pr_review || !linear_history {
+        return Err("effective main rules must enforce a PR, at least one independent approval, and linear history".into());
+    }
+    for expected in [
+        "quality",
+        "Tests / aarch64-apple-darwin",
+        "Tests / x86_64-unknown-linux-gnu",
+        "Tests / x86_64-pc-windows-msvc",
+        "Check / aarch64-unknown-linux-gnu",
+        "Check / x86_64-apple-darwin",
+    ] {
+        if !required_checks.contains(expected) {
+            return Err(format!("main rules are missing required release CI check: {expected}"));
+        }
+    }
+    Ok(())
+}
+fn validate_release_environment_protection(env: &Value) -> Result<(), String> {
+    if env["name"].as_str() != Some("release") {
+        return Err("GitHub returned an unexpected release environment".into());
+    }
+    let rules = env["protection_rules"].as_array()
+        .ok_or("release environment protection rules are unavailable")?;
+    let approved = rules.iter().any(|rule| {
+        rule["type"].as_str() == Some("required_reviewers")
+            && rule["prevent_self_review"].as_bool() == Some(true)
+            && rule["reviewers"].as_array().is_some_and(|reviewers| {
+                !reviewers.is_empty()
+                    && reviewers.iter().all(|reviewer| {
+                        matches!(reviewer["type"].as_str(), Some("User" | "Team"))
+                            && reviewer["reviewer"]["id"].as_u64().is_some_and(|id| id > 0)
+                    })
+            })
+    });
+    if !approved {
+        return Err(
+            "release environment must require independent approval and prevent self-review"
+                .into(),
+        );
+    }
+    if env["deployment_branch_policy"]["protected_branches"].as_bool() != Some(true) {
+        return Err("release environment must restrict deployment to protected branches".into());
+    }
+    Ok(())
+}
+fn check_release_protection_preflight(root: &Path, check_environment: bool)
+    -> Result<(), String>
+{
+    // GitHub returns the effective active branch rules across both repository
+    // and organization rulesets. Do not infer approval gates from workflow
+    // syntax or from the presence of environment: release alone.
+    let rules = gh(&[
+        "api", "--paginate", "--jq", ".[] | @json",
+        &format!("repos/{REPO}/rules/branches/main?per_page=100"),
+    ], root).map_err(|_| "unable to read effective main protection rules; stop before publishing".to_owned())?;
+    validate_protected_main_rules(&rules)?;
+    if check_environment {
+        // Environment reads are permissions-dependent. A denied/malformed
+        // response must block dispatch rather than assume approval is active.
+        let value: Value = serde_json::from_str(&gh(&[
+            "api", &format!("repos/{REPO}/environments/release")
+        ], root).map_err(|_| "cannot verify release environment protection; request an authorized operator qualification".to_owned())?)
+            .map_err(|_| "malformed release environment protection response")?;
+        validate_release_environment_protection(&value)?;
+    }
+    Ok(())
+}
 fn ensure_main_branch(root: &Path) -> Result<(), String> {
     if current_branch(root)? != "main" {
         return Err(
@@ -1101,6 +1199,7 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
         return Err(format!("expected release-preparation branch {branch}"));
     }
     let remote_sha = check_remote(root)?;
+    check_release_protection_preflight(root, false)?;
     // The remote main revision must be known and be an ancestor. Do not
     // silently rebase a candidate whose reviewed contents might change.
     git(&["merge-base", "--is-ancestor", &remote_sha, "HEAD"], root).map_err(|_| {
@@ -1551,6 +1650,7 @@ fn verify_published_release(release: &Value, tag: &str) -> Result<(), String> {
 
 fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> {
     check_release_preconditions(root)?;
+    check_release_protection_preflight(root, true)?;
     let main_sha = confirm_remote_main(root)?;
     let version = manifest_version(root, scope)?;
     let tag = scope.tag(version);
@@ -2552,6 +2652,63 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn required_release_protections_are_fail_closed_in_mocked_api_responses() {
+        let status = [
+            "quality", "Tests / aarch64-apple-darwin",
+            "Tests / x86_64-unknown-linux-gnu",
+            "Tests / x86_64-pc-windows-msvc",
+            "Check / aarch64-unknown-linux-gnu",
+            "Check / x86_64-apple-darwin",
+        ].iter().map(|name| serde_json::json!({"context": name}))
+            .collect::<Vec<_>>();
+        let make_rules = |approvals: u64| [
+            serde_json::json!({"type":"pull_request",
+                "parameters":{"required_approving_review_count":approvals}}),
+            serde_json::json!({"type":"required_linear_history"}),
+            serde_json::json!({"type":"required_status_checks",
+                "parameters":{"required_status_checks":status}}),
+        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+        assert!(validate_protected_main_rules(&make_rules(1)).is_ok());
+        assert!(validate_protected_main_rules(&make_rules(0)).is_err());
+        assert!(validate_protected_main_rules("").is_err());
+        assert!(validate_protected_main_rules("not-json").is_err());
+        let missing = serde_json::json!({"type":"required_status_checks",
+            "parameters":{"required_status_checks":[{"context":"quality"}]}});
+        let insufficient = format!(
+            "{}\n{}\n{}",
+            serde_json::json!({"type":"pull_request",
+                "parameters":{"required_approving_review_count":1}}),
+            serde_json::json!({"type":"required_linear_history"}),
+            missing,
+        );
+        assert!(validate_protected_main_rules(&insufficient).is_err());
+        let protected = serde_json::json!({
+            "name":"release",
+            "protection_rules":[{
+                "type":"required_reviewers", "prevent_self_review":true,
+                "reviewers":[{"type":"User","reviewer":{"id":12}}]
+            }],
+            "deployment_branch_policy":{
+                "protected_branches":true, "custom_branch_policies":false
+            }
+        });
+        assert!(validate_release_environment_protection(&protected).is_ok());
+        let mut unprotected = protected.clone();
+        unprotected["protection_rules"][0]["prevent_self_review"] = false.into();
+        assert!(validate_release_environment_protection(&unprotected).is_err());
+        unprotected = protected.clone();
+        unprotected["protection_rules"][0]["reviewers"] = serde_json::json!([]);
+        assert!(validate_release_environment_protection(&unprotected).is_err());
+        unprotected = protected.clone();
+        unprotected["protection_rules"][0]["type"] = "wait_timer".into();
+        assert!(validate_release_environment_protection(&unprotected).is_err());
+        unprotected = protected.clone();
+        unprotected["deployment_branch_policy"]["protected_branches"] = false.into();
+        assert!(validate_release_environment_protection(&unprotected).is_err());
+        assert!(validate_release_environment_protection(&serde_json::json!({})).is_err());
     }
 
     #[test]
