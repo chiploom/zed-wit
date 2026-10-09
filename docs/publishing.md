@@ -84,8 +84,8 @@ independently approved release-preparation PR and an independently approved
 protected release deployment. The effective `main` rules must require
 at least one approving review, linear history and all six required CI checks.
 The `release` environment must have required reviewers, prevention of
-self-review, and protected-branch deployment restriction. The new frontend
-fails closed if those settings cannot be fetched or verified; neither an
+self-review, and protected-branch deployment restriction. The new frontend and the protected CD publish job both
+fail closed if those settings cannot be fetched or verified; neither an
 `environment:` reference nor a green CI run substitutes for reviewer
 enforcement.
 
