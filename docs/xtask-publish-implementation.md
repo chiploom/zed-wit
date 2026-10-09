@@ -186,7 +186,13 @@ gh api --paginate 'repos/chiploom/zed-wit/rulesets?includes_parents=true&per_pag
 ```
 
 The frontend does not silently allow release publication in the absence
-of independent PR and environment approvals.
+of independent PR and environment approvals. The **protected CD publish job**
+now also reads these active rules at execution time using its scoped
+`actions: read` GitHub token, before checkout, tag creation or draft
+promotion. Any API denial, incomplete rule set or missing review protection
+terminates publication. This guards manual workflow dispatches and settings
+that change after the local frontend preflight; it does not alter the
+protected environment's own native approval gate.
 
 ## Reviewed PR provenance and guarded recovery
 
