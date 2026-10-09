@@ -162,6 +162,54 @@ remote tags/releases. Only the exact verified draft under safe recovery may
 be excluded from the candidate collision check; any different same-scope
 version at or above the candidate still blocks the dispatch.
 
+## Strict trusted CI and immutable-release credential
+
+The effective active `main` rule set (including applicable layered rules)
+must require all six release CI contexts with
+`strict_required_status_checks_policy=true` and
+`integration_id=15368` (**GitHub Actions**) for each context. A missing or
+mismatching source, malformed status rule, non-strict rule, or contradictory
+layered rule fails closed. A zero approving-review count remains permitted.
+The Rust frontend and protected CD enforce the same criteria; neither
+hardcodes a repository-specific ruleset ID.
+
+**Immutable releases must be enabled before any tag, draft or asset write.**
+The GitHub endpoint
+`GET /repos/chiploom/zed-wit/immutable-releases` requires repository
+**Administration: read** and returns `{"enabled":true,"enforced_by_owner":false}`
+when enabled; a 404 or denied response cannot serve as proof. The standard
+Actions `GITHUB_TOKEN` cannot be granted Administration:read through
+`permissions:`. The protected `release` job therefore reads an
+**environment-scoped secret** named `RELEASE_POLICY_READ_TOKEN`, containing
+a fine-grained GitHub token or App installation token restricted to this
+repository and **Administration: read** (not write). An authorized operator
+must create/rotate this secret separately. Missing, expired or underprivileged
+credentials block CD without falling back to the publication token; the
+workflow does not log the credential.
+
+CD verifies `enabled=true` before creating a tag or draft and again
+immediately before promoting the draft. After publication it verifies that
+the release REST response contains `immutable=true`, alongside existing
+tag, asset and provenance checks. This check is additive; the existing tag
+rulesets, digest/attestation and protected environment are unchanged.
+An immutable release can still allow edits to its title/notes, so these
+guards specifically protect the release tag and attached assets.
+
+To qualify current settings **without modifying them**, an authorized
+repository administrator can run:
+
+```sh
+gh api --hostname github.com -H 'X-GitHub-Api-Version: 2026-03-10' \
+  repos/chiploom/zed-wit/immutable-releases \
+  --jq '{enabled, enforced_by_owner}'
+```
+
+An HTTP 404 means immutability is not enabled, according to GitHub's REST
+contract; HTTP 403, missing credentials or malformed JSON require separate
+operator investigation. The connected GitHub app cannot query this
+Administration-read endpoint, so its current live state is **not verified**
+by this audit. Do not enable immutability or install credentials automatically.
+
 ## Mandatory protection qualification (fail closed)
 
 **Temporary zero-reviewer policy:** release preparation still requires an
