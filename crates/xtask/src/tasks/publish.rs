@@ -721,21 +721,27 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
     for line in records.lines() {
         let rule: Value = serde_json::from_str(line)
             .map_err(|_| "effective main rules have a malformed JSON record")?;
-        let kind = rule["type"].as_str()
+        let kind = rule["type"]
+            .as_str()
             .ok_or("effective main rule has no type")?;
         seen += 1;
         match kind {
             "pull_request" => {
                 let approvals = rule["parameters"]["required_approving_review_count"]
-                    .as_u64().ok_or("main PR rule omitted approval count")?;
-                if approvals > 0 { requires_pr_review = true; }
+                    .as_u64()
+                    .ok_or("main PR rule omitted approval count")?;
+                if approvals > 0 {
+                    requires_pr_review = true;
+                }
             }
             "required_linear_history" => linear_history = true,
             "required_status_checks" => {
                 let checks = rule["parameters"]["required_status_checks"]
-                    .as_array().ok_or("main status-check rule omitted checks")?;
+                    .as_array()
+                    .ok_or("main status-check rule omitted checks")?;
                 for check in checks {
-                    let context = check["context"].as_str()
+                    let context = check["context"]
+                        .as_str()
                         .filter(|value| !value.is_empty())
                         .ok_or("main required status check lacks context")?;
                     required_checks.insert(context.to_owned());
@@ -756,7 +762,9 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
         "Check / x86_64-apple-darwin",
     ] {
         if !required_checks.contains(expected) {
-            return Err(format!("main rules are missing required release CI check: {expected}"));
+            return Err(format!(
+                "main rules are missing required release CI check: {expected}"
+            ));
         }
     }
     Ok(())
@@ -765,7 +773,8 @@ fn validate_release_environment_protection(env: &Value) -> Result<(), String> {
     if env["name"].as_str() != Some("release") {
         return Err("GitHub returned an unexpected release environment".into());
     }
-    let rules = env["protection_rules"].as_array()
+    let rules = env["protection_rules"]
+        .as_array()
         .ok_or("release environment protection rules are unavailable")?;
     let approved = rules.iter().any(|rule| {
         rule["type"].as_str() == Some("required_reviewers")
@@ -780,8 +789,7 @@ fn validate_release_environment_protection(env: &Value) -> Result<(), String> {
     });
     if !approved {
         return Err(
-            "release environment must require independent approval and prevent self-review"
-                .into(),
+            "release environment must require independent approval and prevent self-review".into(),
         );
     }
     if env["deployment_branch_policy"]["protected_branches"].as_bool() != Some(true) {
@@ -789,16 +797,23 @@ fn validate_release_environment_protection(env: &Value) -> Result<(), String> {
     }
     Ok(())
 }
-fn check_release_protection_preflight(root: &Path, check_environment: bool)
-    -> Result<(), String>
-{
+fn check_release_protection_preflight(root: &Path, check_environment: bool) -> Result<(), String> {
     // GitHub returns the effective active branch rules across both repository
     // and organization rulesets. Do not infer approval gates from workflow
     // syntax or from the presence of environment: release alone.
-    let rules = gh(&[
-        "api", "--paginate", "--jq", ".[] | @json",
-        &format!("repos/{REPO}/rules/branches/main?per_page=100"),
-    ], root).map_err(|_| "unable to read effective main protection rules; stop before publishing".to_owned())?;
+    let rules = gh(
+        &[
+            "api",
+            "--paginate",
+            "--jq",
+            ".[] | @json",
+            &format!("repos/{REPO}/rules/branches/main?per_page=100"),
+        ],
+        root,
+    )
+    .map_err(|_| {
+        "unable to read effective main protection rules; stop before publishing".to_owned()
+    })?;
     validate_protected_main_rules(&rules)?;
     if check_environment {
         // Environment reads are permissions-dependent. A denied/malformed
@@ -1540,9 +1555,11 @@ fn validate_prior_cd_runs(
                     "CD run {id} is active ({status}) on SHA {sha};                      do not displace a pending protected release"
                 ));
             }
-            _ => return Err(format!(
-                "CD run {id} has unrecognized status {status:?}; inspect Actions"
-            )),
+            _ => {
+                return Err(format!(
+                    "CD run {id} has unrecognized status {status:?}; inspect Actions"
+                ));
+            }
         }
         if sha != main_sha || event != "workflow_dispatch" {
             continue;
@@ -2071,7 +2088,8 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let dir = loop {
             let candidate = std::env::temp_dir().join(format!(
-                "zed-wit-release-source-{}-{}", std::process::id(),
+                "zed-wit-release-source-{}-{}",
+                std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed),
             ));
             match fs::create_dir(&candidate) {
@@ -2082,37 +2100,59 @@ mod tests {
         };
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
-            fn drop(&mut self) { fs::remove_dir_all(&self.0).expect("remove git fixture"); }
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).expect("remove git fixture");
+            }
         }
         let _cleanup = Cleanup(dir.clone());
         git(&["init", "-q", "-b", "main"], &dir).unwrap();
-        fs::write(dir.join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.2\"\n").unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\nversion = \"0.1.2\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("Cargo.lock"), "lock version one").unwrap();
         fs::write(dir.join("CHANGELOG.md"), "initial").unwrap();
         fs::write(dir.join("src.rs"), "fn stable() {}\n").unwrap();
         let commit = |message: &str| {
             git(&["add", "."], &dir).unwrap();
-            command("git", &[
-                "-c", "user.name=Fixture",
-                "-c", "user.email=fixture@example.invalid",
-                "-c", "commit.gpgSign=false",
-                "commit", "-qm", message
-            ], &dir).unwrap();
+            command(
+                "git",
+                &[
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "-c",
+                    "commit.gpgSign=false",
+                    "commit",
+                    "-qm",
+                    message,
+                ],
+                &dir,
+            )
+            .unwrap();
             git(&["rev-parse", "HEAD"], &dir).unwrap()
         };
         commit("initial");
         // Squash-style preparation result: exactly one reviewed new commit
         // on main containing the candidate release version and notes.
-        fs::write(dir.join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.3\"\n").unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\nversion = \"0.1.3\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("CHANGELOG.md"), "reviewed release notes").unwrap();
         let merged_pr_sha = commit("reviewed release preparation (squash)");
         assert!(require_exact_release_source(&merged_pr_sha, &merged_pr_sha).is_ok());
         for (name, path, contents) in [
             ("source", "src.rs", "fn changed_after_review() {}\n"),
             ("notes", "CHANGELOG.md", "modified release notes"),
-            ("dependencies", "Cargo.lock", "different resolved dependencies"),
+            (
+                "dependencies",
+                "Cargo.lock",
+                "different resolved dependencies",
+            ),
         ] {
             fs::write(dir.join(path), contents).unwrap();
             let advanced = commit(name);
@@ -2123,12 +2163,23 @@ mod tests {
         }
         // Even a no-content follow-up commit invalidates the reviewed
         // commit's identity until an explicit requalification path exists.
-        command("git", &[
-            "-c", "user.name=Fixture",
-            "-c", "user.email=fixture@example.invalid",
-            "-c", "commit.gpgSign=false",
-            "commit", "--allow-empty", "-qm", "unreviewed metadata"
-        ], &dir).unwrap();
+        command(
+            "git",
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgSign=false",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "unreviewed metadata",
+            ],
+            &dir,
+        )
+        .unwrap();
         let moved = git(&["rev-parse", "HEAD"], &dir).unwrap();
         assert!(require_exact_release_source(&moved, &merged_pr_sha).is_err());
     }
@@ -2676,7 +2727,10 @@ mod tests {
         assert!(publish_body.contains("required_approving_review_count"));
         assert!(publish_body.contains("prevent_self_review"));
         assert!(publish_body.contains("protected_branches"));
-        assert!(publish_body.contains("Require unchanged unpublished draft immediately before promotion"));
+        assert!(
+            publish_body
+                .contains("Require unchanged unpublished draft immediately before promotion")
+        );
         assert!(publish_body.contains("actions/download-artifact@"));
         assert!(publish_body.contains("Verify complete LSP asset set"));
     }
@@ -2684,20 +2738,29 @@ mod tests {
     #[test]
     fn required_release_protections_are_fail_closed_in_mocked_api_responses() {
         let status = [
-            "quality", "Tests / aarch64-apple-darwin",
+            "quality",
+            "Tests / aarch64-apple-darwin",
             "Tests / x86_64-unknown-linux-gnu",
             "Tests / x86_64-pc-windows-msvc",
             "Check / aarch64-unknown-linux-gnu",
             "Check / x86_64-apple-darwin",
-        ].iter().map(|name| serde_json::json!({"context": name}))
-            .collect::<Vec<_>>();
-        let make_rules = |approvals: u64| [
-            serde_json::json!({"type":"pull_request",
+        ]
+        .iter()
+        .map(|name| serde_json::json!({"context": name}))
+        .collect::<Vec<_>>();
+        let make_rules = |approvals: u64| {
+            [
+                serde_json::json!({"type":"pull_request",
                 "parameters":{"required_approving_review_count":approvals}}),
-            serde_json::json!({"type":"required_linear_history"}),
-            serde_json::json!({"type":"required_status_checks",
+                serde_json::json!({"type":"required_linear_history"}),
+                serde_json::json!({"type":"required_status_checks",
                 "parameters":{"required_status_checks":status}}),
-        ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+            ]
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+        };
         assert!(validate_protected_main_rules(&make_rules(1)).is_ok());
         assert!(validate_protected_main_rules(&make_rules(0)).is_err());
         assert!(validate_protected_main_rules("").is_err());
@@ -2767,9 +2830,16 @@ mod tests {
         let pending_elsewhere = format!(
             "13\t{other}\tworkflow_dispatch\twaiting\tunknown\tCD / publish / extension / v-extension-1.0.0"
         );
-        assert!(validate_prior_cd_runs(
-            &format!("{failed_mine}\n{pending_elsewhere}"), mine, Scope::Lsp, tag, true
-        ).is_err());
+        assert!(
+            validate_prior_cd_runs(
+                &format!("{failed_mine}\n{pending_elsewhere}"),
+                mine,
+                Scope::Lsp,
+                tag,
+                true
+            )
+            .is_err()
+        );
         let ambiguous = format!(
             "14\t{other}\tworkflow_dispatch\tnew_status\tunknown\tCD / publish / lsp / {tag}"
         );
