@@ -77,6 +77,33 @@ a newline, a `<asset>.provenance.json` build record, and an
 dependency closure and pinned Rust standard library. Build provenance JSON is not
 itself a cryptographic attestation.
 
+## Independent release authorization requirements
+
+This repository's issue #24 publication protocol requires **both** an
+independently approved release-preparation PR and an independently approved
+protected release deployment. The effective `main` rules must require
+at least one approving review, linear history and all six required CI checks.
+The `release` environment must have required reviewers, prevention of
+self-review, and protected-branch deployment restriction. The new frontend
+fails closed if those settings cannot be fetched or verified; neither an
+`environment:` reference nor a green CI run substitutes for reviewer
+enforcement.
+
+As inspected on 2026-10-09, the active `Protect main` ruleset currently
+requires **zero** approving reviews; the connected GitHub integration
+cannot retrieve `release` environment protection data. Therefore
+production submission and dispatch remain **blocked pending an
+authorized operator's configuration review**. No rules or environment
+settings were changed during the audit.
+
+The reviewed release-preparation PR also defines the **exact release source
+commit**: its GitHub-reported merged SHA (including normal squash merges)
+must equal the current protected `main` SHA at resume. Even an otherwise
+legitimate later change to code, Cargo.lock or release notes requires a
+new reviewed preparation for that source. A future independently approved
+requalification protocol may expand this rule; this implementation does
+not silently requalify newer source revisions.
+
 ## Version-aware preparation frontend
 
 The optional `cargo xtask publish --scope lsp|extension` command provides a
