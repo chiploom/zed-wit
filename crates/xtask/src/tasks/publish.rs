@@ -805,7 +805,7 @@ fn validate_resume_candidate(
     validate_candidate(scope, candidate, &other_tags)
 }
 fn validate_protected_main_rules(records: &str) -> Result<(), String> {
-    let mut requires_pr_review = false;
+    let mut requires_pr = false;
     let mut linear_history = false;
     let mut required_checks = BTreeSet::new();
     let mut seen = 0_usize;
@@ -818,12 +818,13 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
         seen += 1;
         match kind {
             "pull_request" => {
-                let approvals = rule["parameters"]["required_approving_review_count"]
+                // For now, independently approved PRs are optional. A PR
+                // ruleset and its explicit count must still exist; allowing
+                // zero reviews must never bypass the PR requirement.
+                rule["parameters"]["required_approving_review_count"]
                     .as_u64()
-                    .ok_or("main PR rule omitted approval count")?;
-                if approvals > 0 {
-                    requires_pr_review = true;
-                }
+                    .ok_or("main PR rule omitted a valid approval count")?;
+                requires_pr = true;
             }
             "required_linear_history" => linear_history = true,
             "required_status_checks" => {
@@ -841,8 +842,8 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
             _ => {}
         }
     }
-    if seen == 0 || !requires_pr_review || !linear_history {
-        return Err("effective main rules must enforce a PR, at least one independent approval, and linear history".into());
+    if seen == 0 || !requires_pr || !linear_history {
+        return Err("effective main rules must enforce a pull request and linear history".into());
     }
     for expected in [
         "quality",
@@ -864,25 +865,12 @@ fn validate_release_environment_protection(env: &Value) -> Result<(), String> {
     if env["name"].as_str() != Some("release") {
         return Err("GitHub returned an unexpected release environment".into());
     }
-    let rules = env["protection_rules"]
+    // An environment with zero required reviewers is explicitly allowed
+    // for now. Still require readable protection metadata and a protected
+    // deployment branch; do not silently accept a missing environment.
+    env["protection_rules"]
         .as_array()
         .ok_or("release environment protection rules are unavailable")?;
-    let approved = rules.iter().any(|rule| {
-        rule["type"].as_str() == Some("required_reviewers")
-            && rule["prevent_self_review"].as_bool() == Some(true)
-            && rule["reviewers"].as_array().is_some_and(|reviewers| {
-                !reviewers.is_empty()
-                    && reviewers.iter().all(|reviewer| {
-                        matches!(reviewer["type"].as_str(), Some("User" | "Team"))
-                            && reviewer["reviewer"]["id"].as_u64().is_some_and(|id| id > 0)
-                    })
-            })
-    });
-    if !approved {
-        return Err(
-            "release environment must require independent approval and prevent self-review".into(),
-        );
-    }
     if env["deployment_branch_policy"]["protected_branches"].as_bool() != Some(true) {
         return Err("release environment must restrict deployment to protected branches".into());
     }
@@ -2922,8 +2910,8 @@ mod tests {
         assert!(publish_body.contains("rules/branches/main?per_page=100"));
         assert!(publish_body.contains("environments/release"));
         assert!(publish_body.contains("required_approving_review_count"));
-        assert!(publish_body.contains("prevent_self_review"));
         assert!(publish_body.contains("protected_branches"));
+        assert!(!publish_body.contains("and .prevent_self_review == true"));
         assert!(
             publish_body
                 .contains("Require unchanged unpublished draft immediately before promotion")
@@ -2959,7 +2947,7 @@ mod tests {
             .join("\n")
         };
         assert!(validate_protected_main_rules(&make_rules(1)).is_ok());
-        assert!(validate_protected_main_rules(&make_rules(0)).is_err());
+        assert!(validate_protected_main_rules(&make_rules(0)).is_ok());
         assert!(validate_protected_main_rules("").is_err());
         assert!(validate_protected_main_rules("not-json").is_err());
         let missing = serde_json::json!({"type":"required_status_checks",
@@ -2985,12 +2973,20 @@ mod tests {
         assert!(validate_release_environment_protection(&protected).is_ok());
         let mut unprotected = protected.clone();
         unprotected["protection_rules"][0]["prevent_self_review"] = false.into();
-        assert!(validate_release_environment_protection(&unprotected).is_err());
+        assert!(validate_release_environment_protection(&unprotected).is_ok());
         unprotected = protected.clone();
         unprotected["protection_rules"][0]["reviewers"] = serde_json::json!([]);
-        assert!(validate_release_environment_protection(&unprotected).is_err());
+        assert!(validate_release_environment_protection(&unprotected).is_ok());
         unprotected = protected.clone();
         unprotected["protection_rules"][0]["type"] = "wait_timer".into();
+        assert!(validate_release_environment_protection(&unprotected).is_ok());
+        // A standard unreviewed release environment remains acceptable
+        // only when its deployment branch policy is protected-branches-only.
+        unprotected = protected.clone();
+        unprotected["protection_rules"] = serde_json::json!([]);
+        assert!(validate_release_environment_protection(&unprotected).is_ok());
+        unprotected = protected.clone();
+        unprotected["protection_rules"] = serde_json::Value::Null;
         assert!(validate_release_environment_protection(&unprotected).is_err());
         unprotected = protected.clone();
         unprotected["deployment_branch_policy"]["protected_branches"] = false.into();
