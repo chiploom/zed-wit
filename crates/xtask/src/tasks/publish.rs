@@ -2954,6 +2954,8 @@ mod tests {
         assert!(publish_body.contains("rules/branches/main?per_page=100"));
         assert!(publish_body.contains("environments/release"));
         assert!(publish_body.contains("required_approving_review_count"));
+        assert!(publish_body.contains("strict_required_status_checks_policy == true"));
+        assert!(publish_body.contains("$check.integration_id == 15368"));
         assert!(publish_body.contains("protected_branches"));
         assert!(!publish_body.contains("and .prevent_self_review == true"));
         assert!(
@@ -2962,6 +2964,114 @@ mod tests {
         );
         assert!(publish_body.contains("actions/download-artifact@"));
         assert!(publish_body.contains("Verify complete LSP asset set"));
+    }
+
+    #[test]
+    fn layered_strict_ci_rules_require_trusted_integration_for_all_six_contexts() {
+        let contexts = REQUIRED_RELEASE_CI_CONTEXTS;
+        let checks = contexts.iter().map(|context| {
+            serde_json::json!({"context":context,"integration_id":GITHUB_ACTIONS_INTEGRATION_ID})
+        }).collect::<Vec<_>>();
+        let pr = serde_json::json!({"type":"pull_request",
+            "parameters":{"required_approving_review_count":0}});
+        let linear = serde_json::json!({"type":"required_linear_history"});
+        let status = |subset: &[Value], strict: Value| {
+            serde_json::json!({"type":"required_status_checks","parameters":{
+                "strict_required_status_checks_policy":strict,
+                "required_status_checks":subset
+            }})
+        };
+        let encode = |rules: &[Value]| {
+            rules.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")
+        };
+        let base = vec![pr.clone(), linear.clone(), status(&checks, Value::Bool(true))];
+        assert!(validate_protected_main_rules(&encode(&base)).is_ok());
+        // Each layered rule must enforce strictness, while their trusted
+        // contexts may be distributed across multiple applicable rulesets.
+        let layered = vec![
+            pr.clone(), linear.clone(),
+            status(&checks[..3], Value::Bool(true)),
+            status(&checks[3..], Value::Bool(true)),
+        ];
+        assert!(validate_protected_main_rules(&encode(&layered)).is_ok());
+        for invalid in [Value::Bool(false), Value::Null, Value::String("true".into())] {
+            let mut rules = layered.clone();
+            rules[3] = status(&checks[3..], invalid);
+            assert!(validate_protected_main_rules(&encode(&rules)).is_err());
+        }
+        let mut missing = base.clone();
+        missing[2] = status(&checks[..5], Value::Bool(true));
+        assert!(validate_protected_main_rules(&encode(&missing)).is_err());
+        for invalid in [
+            Value::Null,
+            Value::from(42),
+            Value::from(0),
+            Value::from("15368"),
+        ] {
+            let mut wrong = checks.clone();
+            wrong[0]["integration_id"] = invalid;
+            let rules = vec![pr.clone(), linear.clone(), status(&wrong, Value::Bool(true))];
+            assert!(validate_protected_main_rules(&encode(&rules)).is_err());
+        }
+        let mut conflicting = layered.clone();
+        let mut changed = checks[3..].to_vec();
+        changed[0]["integration_id"] = Value::from(99999);
+        conflicting.push(status(&changed, Value::Bool(true)));
+        assert!(validate_protected_main_rules(&encode(&conflicting)).is_err());
+        let unrelated = serde_json::json!({"context":"optional-custom-check","integration_id":99999});
+        let mut extended = checks.clone();
+        extended.push(unrelated);
+        let rules = vec![pr, linear, status(&extended, Value::Bool(true))];
+        assert!(validate_protected_main_rules(&encode(&rules)).is_ok());
+        assert!(validate_protected_main_rules("{broken").is_err());
+    }
+
+    #[test]
+    fn immutable_release_policy_and_published_flag_are_fail_closed() {
+        let enabled = serde_json::json!({"enabled":true,"enforced_by_owner":false});
+        let is_enabled = |input: &Value| {
+            input["enabled"].as_bool() == Some(true)
+                && input["enforced_by_owner"].as_bool().is_some()
+        };
+        assert!(is_enabled(&enabled));
+        assert!(is_enabled(&serde_json::json!({"enabled":true,"enforced_by_owner":true})));
+        for invalid in [
+            serde_json::json!({"enabled":false,"enforced_by_owner":false}),
+            serde_json::json!({"enabled":"true","enforced_by_owner":false}),
+            serde_json::json!({"enabled":true}),
+            serde_json::json!({}),
+            serde_json::json!(null),
+        ] {
+            assert!(!is_enabled(&invalid));
+        }
+        assert!(serde_json::from_str::<Value>("not-json").is_err());
+        let published = serde_json::json!({"draft":false,"immutable":true});
+        assert_eq!(published["immutable"].as_bool(), Some(true));
+        for invalid in [
+            serde_json::json!({"immutable":false}),
+            serde_json::json!({"immutable":"true"}),
+            serde_json::json!({}),
+        ] {
+            assert_ne!(invalid["immutable"].as_bool(), Some(true));
+        }
+        let workflow = include_str!("../../../../.github/workflows/release.yml");
+        let first_immutable = workflow
+            .find("Require immutable releases using Administration-read credential")
+            .expect("CD must check immutability with a real credential");
+        let first_write = workflow.find("Create or resume draft release").unwrap();
+        let pre_promotion = workflow
+            .find("Recheck immutable-release enforcement before promotion")
+            .unwrap();
+        let promote = workflow.find("Publish draft release").unwrap();
+        assert!(first_immutable < first_write);
+        assert!(first_write < pre_promotion);
+        assert!(pre_promotion < promote);
+        assert!(workflow.contains("secrets.RELEASE_POLICY_READ_TOKEN"));
+        assert!(workflow.contains("repos/$GH_REPO/immutable-releases"));
+        assert!(workflow.contains(".enabled == true"));
+        assert!(workflow.contains("(.enforced_by_owner | type) == \"boolean\""));
+        assert!(workflow.contains(".immutable' <<<\"$published_json\""));
+        assert!(workflow.contains("Published GitHub Release lacks immutable=true"));
     }
 
     #[test]
