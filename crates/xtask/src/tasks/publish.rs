@@ -529,7 +529,7 @@ fn validate_gh_host_config(config: &str) -> Result<(), String> {
     Ok(())
 }
 fn pinned_gh_args(args: &[&str]) -> Result<Vec<String>, String> {
-    if args.iter().any(|arg| *arg == "--hostname") {
+    if args.contains(&"--hostname") {
         return Err("caller may not override pinned GitHub CLI hostname".into());
     }
     match args {
