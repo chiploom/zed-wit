@@ -2655,6 +2655,33 @@ mod tests {
     }
 
     #[test]
+    fn protected_cd_checks_live_review_policies_before_mutating_release_state() {
+        let workflow = include_str!("../../../../.github/workflows/release.yml");
+        let main_gate = workflow
+            .find("Require independent release protections")
+            .expect("protected CD must validate live GitHub protections");
+        let first_release_write = workflow
+            .find("Create or resume draft release")
+            .expect("existing protected release flow must be retained");
+        assert!(main_gate < first_release_write);
+        let publish_section = workflow
+            .find("  publish:\n    name: Publish GitHub release")
+            .expect("protected publication job");
+        assert!(publish_section < main_gate);
+        let publish_body = &workflow[publish_section..];
+        assert!(publish_body.contains("environment: release"));
+        assert!(publish_body.contains("actions: read"));
+        assert!(publish_body.contains("rules/branches/main?per_page=100"));
+        assert!(publish_body.contains("environments/release"));
+        assert!(publish_body.contains("required_approving_review_count"));
+        assert!(publish_body.contains("prevent_self_review"));
+        assert!(publish_body.contains("protected_branches"));
+        assert!(publish_body.contains("Require unchanged unpublished draft immediately before promotion"));
+        assert!(publish_body.contains("actions/download-artifact@"));
+        assert!(publish_body.contains("Verify complete LSP asset set"));
+    }
+
+    #[test]
     fn required_release_protections_are_fail_closed_in_mocked_api_responses() {
         let status = [
             "quality", "Tests / aarch64-apple-darwin",
