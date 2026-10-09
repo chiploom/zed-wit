@@ -2894,7 +2894,7 @@ mod tests {
     fn protected_cd_checks_live_review_policies_before_mutating_release_state() {
         let workflow = include_str!("../../../../.github/workflows/release.yml");
         let main_gate = workflow
-            .find("Require independent release protections")
+            .find("Require protected release branch and CI")
             .expect("protected CD must validate live GitHub protections");
         let first_release_write = workflow
             .find("Create or resume draft release")
