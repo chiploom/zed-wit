@@ -938,6 +938,34 @@ fn validate_protected_release_tag_rulesets(records: &str) -> Result<(), String> 
     }
 }
 
+// Exercise the same complete GitHub API listing/detail boundary using
+// deterministic mock responses in tests; production supplies the live fetch.
+fn validate_fetched_release_tag_rulesets(
+    summaries: &str,
+    mut fetch_detail: impl FnMut(u64) -> Result<String, String>,
+) -> Result<(), String> {
+    let mut ids = BTreeSet::new();
+    let mut details = String::new();
+    for summary in summaries.lines() {
+        let record: Value = serde_json::from_str(summary)
+            .map_err(|_| "malformed release tag ruleset listing")?;
+        let id = record["id"]
+            .as_u64()
+            .ok_or("release tag ruleset listing omitted a numeric ID")?;
+        if !ids.insert(id) || ids.len() > 500 {
+            return Err("duplicate or excessive release tag rulesets".into());
+        }
+        let detail: Value = serde_json::from_str(&fetch_detail(id)?)
+            .map_err(|_| "malformed release tag ruleset response")?;
+        if detail["id"].as_u64() != Some(id) {
+            return Err("GitHub returned mismatched release tag ruleset identity".into());
+        }
+        details.push_str(&detail.to_string());
+        details.push('\n');
+    }
+    validate_protected_release_tag_rulesets(&details)
+}
+
 fn check_release_tag_protection_preflight(root: &Path) -> Result<(), String> {
     // GitHub has no equivalent to the effective branch-rules endpoint for
     // tags. Inspect active repository and inherited tag rulesets instead.
@@ -952,32 +980,15 @@ fn check_release_tag_protection_preflight(root: &Path) -> Result<(), String> {
         root,
     )
     .map_err(|_| "cannot enumerate effective release tag rulesets")?;
-    let mut ids = BTreeSet::new();
-    let mut details = String::new();
-    for summary in summaries.lines() {
-        let record: Value =
-            serde_json::from_str(summary).map_err(|_| "malformed release tag ruleset listing")?;
-        let id = record["id"]
-            .as_u64()
-            .ok_or("release tag ruleset listing omitted a numeric ID")?;
-        if !ids.insert(id) || ids.len() > 500 {
-            return Err("duplicate or excessive release tag rulesets".into());
-        }
-        let detail: Value = serde_json::from_str(&gh(
+    validate_fetched_release_tag_rulesets(&summaries, |id| {
+        gh(
             &[
                 "api",
                 &format!("repos/{REPO}/rulesets/{id}?includes_parents=true"),
             ],
             root,
-        )?)
-        .map_err(|_| "malformed release tag ruleset response")?;
-        if detail["id"].as_u64() != Some(id) {
-            return Err("GitHub returned mismatched release tag ruleset identity".into());
-        }
-        details.push_str(&detail.to_string());
-        details.push('\n');
-    }
-    validate_protected_release_tag_rulesets(&details)
+        )
+    })
 }
 
 fn validate_release_environment_protection(env: &Value) -> Result<(), String> {
@@ -3220,6 +3231,53 @@ mod tests {
         let mut wrong_target = protected;
         wrong_target["target"] = json!("branch");
         assert!(validate_protected_release_tag_rulesets(&records(&[wrong_target])).is_err());
+    }
+
+    #[test]
+    fn mocked_release_tag_ruleset_api_requires_complete_consistent_data() {
+        let policy = json!({
+            "id": 37,
+            "target": "tag",
+            "enforcement": "active",
+            "bypass_actors": [],
+            "conditions": {"ref_name": {
+                "include": ["refs/tags/v*"], "exclude": []
+            }},
+            "rules": [
+                {"type": "update"},
+                {"type": "deletion"},
+                {"type": "non_fast_forward"}
+            ]
+        }).to_string();
+        let listing = json!({"id": 37}).to_string();
+        assert!(validate_fetched_release_tag_rulesets(&listing, |id| {
+            assert_eq!(id, 37);
+            Ok(policy.clone())
+        }).is_ok());
+        assert!(validate_fetched_release_tag_rulesets("", |_| {
+            panic!("empty listing should never fetch details")
+        }).is_err());
+        assert!(validate_fetched_release_tag_rulesets("{malformed", |_| {
+            panic!("malformed listing should never fetch details")
+        }).is_err());
+        assert!(validate_fetched_release_tag_rulesets("{\"id\":\"37\"}", |_| {
+            panic!("non-numeric ID should never fetch details")
+        }).is_err());
+        assert!(validate_fetched_release_tag_rulesets(&format!("{listing}\n{listing}"), |_| {
+            Ok(policy.clone())
+        }).is_err());
+        assert!(validate_fetched_release_tag_rulesets(&listing, |_| {
+            Err("synthetic GitHub API failure".into())
+        }).is_err());
+        assert!(validate_fetched_release_tag_rulesets(&listing, |_| {
+            Ok("{bad details".into())
+        }).is_err());
+        assert!(validate_fetched_release_tag_rulesets(&listing, |_| {
+            Ok(policy.replace("\"id\":37", "\"id\":38"))
+        }).is_err());
+        assert!(validate_fetched_release_tag_rulesets(&listing, |_| {
+            Ok(policy.replace("\"enforcement\":\"active\"", "\"enforcement\":\"disabled\""))
+        }).is_err());
     }
 
     #[test]
