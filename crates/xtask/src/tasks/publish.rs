@@ -1414,13 +1414,23 @@ fn validate_prior_cd_runs(
         if id == 0 || !ids.insert(id) {
             return Err("CD run history contains missing or duplicate run IDs".into());
         }
+        // The release workflow uses the global cd-release concurrency
+        // group. An active run for ANY source SHA or operation can be
+        // displaced by a new dispatch; check activity before filtering
+        // by candidate commit or publication intent.
+        match status {
+            "completed" => {}
+            "requested" | "queued" | "pending" | "waiting" | "in_progress" => {
+                return Err(format!(
+                    "CD run {id} is active ({status}) on SHA {sha};                      do not displace a pending protected release"
+                ));
+            }
+            _ => return Err(format!(
+                "CD run {id} has unrecognized status {status:?}; inspect Actions"
+            )),
+        }
         if sha != main_sha || event != "workflow_dispatch" {
             continue;
-        }
-        if status != "completed" {
-            return Err(format!(
-                "active or ambiguous CD dispatch {id} on validated main SHA"
-            ));
         }
         if title == candidate_validate {
             // A completed dry run does not reserve a release tag, regardless
@@ -2457,6 +2467,44 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn global_cd_activity_blocks_resume_even_on_different_commit_or_scope() {
+        let mine = "0123456789abcdef0123456789abcdef01234567";
+        let other = "fedcba9876543210fedcba9876543210fedcba98";
+        let tag = "v0.1.3";
+        for status in ["requested", "queued", "pending", "waiting", "in_progress"] {
+            for event in ["workflow_dispatch", "schedule"] {
+                let row = format!(
+                    "10\t{other}\t{event}\t{status}\tunknown\tCD / validate / extension / v-extension-9.0.0"
+                );
+                assert!(
+                    validate_prior_cd_runs(&row, mine, Scope::Lsp, tag, false).is_err(),
+                    "active {status} run on unrelated SHA/event must block"
+                );
+            }
+        }
+        for conclusion in ["success", "cancelled", "failure", "timed_out"] {
+            let row = format!(
+                "11\t{other}\tworkflow_dispatch\tcompleted\t{conclusion}\tCD / publish / lsp / v0.1.0"
+            );
+            assert!(validate_prior_cd_runs(&row, mine, Scope::Lsp, tag, false).is_ok());
+        }
+        let failed_mine = format!(
+            "12\t{mine}\tworkflow_dispatch\tcompleted\tfailure\tCD / publish / lsp / {tag}"
+        );
+        assert!(validate_prior_cd_runs(&failed_mine, mine, Scope::Lsp, tag, true).is_ok());
+        let pending_elsewhere = format!(
+            "13\t{other}\tworkflow_dispatch\twaiting\tunknown\tCD / publish / extension / v-extension-1.0.0"
+        );
+        assert!(validate_prior_cd_runs(
+            &format!("{failed_mine}\n{pending_elsewhere}"), mine, Scope::Lsp, tag, true
+        ).is_err());
+        let ambiguous = format!(
+            "14\t{other}\tworkflow_dispatch\tnew_status\tunknown\tCD / publish / lsp / {tag}"
+        );
+        assert!(validate_prior_cd_runs(&ambiguous, mine, Scope::Lsp, tag, false).is_err());
     }
 
     #[test]
