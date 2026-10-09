@@ -399,6 +399,22 @@ fn historical_predecessor_version(
     }
     Ok(immediate)
 }
+fn require_exact_release_source(main_sha: &str, merged_pr_sha: &str) -> Result<(), String> {
+    if !valid_sha(main_sha) || !valid_sha(merged_pr_sha) {
+        return Err("release source identity must consist of two valid Git SHAs".into());
+    }
+    // The reviewed preparation PR is the exact source of a release. A later
+    // commit may change code, dependencies or notes without changing SemVer.
+    // There is no separately approved requalification protocol yet; refuse
+    // silent inclusion of a newer main revision even if its version matches.
+    if main_sha != merged_pr_sha {
+        return Err(
+            "main advanced after the reviewed release-preparation PR merged;              publication requires a newly reviewed preparation for the current source"
+                .into(),
+        );
+    }
+    Ok(())
+}
 fn verify_pr_version_transition(
     root: &Path,
     scope: Scope,
@@ -1588,6 +1604,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         &head_sha,
         pr_commits,
     )?;
+    require_exact_release_source(&main_sha, &merge_sha)?;
 
     // Serialize this checkout's entire history-check -> dispatch transition.
     // A separate checkout can still issue a concurrent request; protected CD
@@ -1946,6 +1963,74 @@ mod tests {
         ] {
             assert!(!origin_is_expected(invalid));
         }
+    }
+
+    #[test]
+    fn disposable_git_rejects_unreviewed_source_after_squash_release() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = loop {
+            let candidate = std::env::temp_dir().join(format!(
+                "zed-wit-release-source-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("create disposable source history: {e}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { fs::remove_dir_all(&self.0).expect("remove git fixture"); }
+        }
+        let _cleanup = Cleanup(dir.clone());
+        git(&["init", "-q", "-b", "main"], &dir).unwrap();
+        fs::write(dir.join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\nversion = \"0.1.2\"\n").unwrap();
+        fs::write(dir.join("Cargo.lock"), "lock version one").unwrap();
+        fs::write(dir.join("CHANGELOG.md"), "initial").unwrap();
+        fs::write(dir.join("src.rs"), "fn stable() {}\n").unwrap();
+        let commit = |message: &str| {
+            git(&["add", "."], &dir).unwrap();
+            command("git", &[
+                "-c", "user.name=Fixture",
+                "-c", "user.email=fixture@example.invalid",
+                "-c", "commit.gpgSign=false",
+                "commit", "-qm", message
+            ], &dir).unwrap();
+            git(&["rev-parse", "HEAD"], &dir).unwrap()
+        };
+        commit("initial");
+        // Squash-style preparation result: exactly one reviewed new commit
+        // on main containing the candidate release version and notes.
+        fs::write(dir.join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\nversion = \"0.1.3\"\n").unwrap();
+        fs::write(dir.join("CHANGELOG.md"), "reviewed release notes").unwrap();
+        let merged_pr_sha = commit("reviewed release preparation (squash)");
+        assert!(require_exact_release_source(&merged_pr_sha, &merged_pr_sha).is_ok());
+        for (name, path, contents) in [
+            ("source", "src.rs", "fn changed_after_review() {}\n"),
+            ("notes", "CHANGELOG.md", "modified release notes"),
+            ("dependencies", "Cargo.lock", "different resolved dependencies"),
+        ] {
+            fs::write(dir.join(path), contents).unwrap();
+            let advanced = commit(name);
+            assert_ne!(merged_pr_sha, advanced);
+            assert!(require_exact_release_source(&advanced, &merged_pr_sha).is_err());
+            // Reset to approved source before the next separate scenario.
+            git(&["reset", "--hard", &merged_pr_sha], &dir).unwrap();
+        }
+        // Even a no-content follow-up commit invalidates the reviewed
+        // commit's identity until an explicit requalification path exists.
+        command("git", &[
+            "-c", "user.name=Fixture",
+            "-c", "user.email=fixture@example.invalid",
+            "-c", "commit.gpgSign=false",
+            "commit", "--allow-empty", "-qm", "unreviewed metadata"
+        ], &dir).unwrap();
+        let moved = git(&["rev-parse", "HEAD"], &dir).unwrap();
+        assert!(require_exact_release_source(&moved, &merged_pr_sha).is_err());
     }
 
     #[test]
