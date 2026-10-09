@@ -879,6 +879,104 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
     }
     Ok(())
 }
+// Check effective tag protection without depending on a repository-specific ID.
+// Recognized broad patterns cover both independent version streams.
+fn validate_protected_release_tag_rulesets(records: &str) -> Result<(), String> {
+    let mut protected_by = BTreeSet::new();
+    for row in records.lines() {
+        let ruleset: Value = serde_json::from_str(row)
+            .map_err(|_| "malformed release tag ruleset details")?;
+        if ruleset["target"].as_str() != Some("tag")
+            || ruleset["enforcement"].as_str() != Some("active")
+        {
+            continue;
+        }
+        let includes = ruleset["conditions"]["ref_name"]["include"].as_array();
+        let excludes = ruleset["conditions"]["ref_name"]["exclude"].as_array();
+        if !includes.is_some_and(|items| {
+            items.iter().any(|pattern| {
+                matches!(pattern.as_str(), Some("refs/tags/v*" | "~ALL"))
+            })
+        }) || !excludes.is_some_and(Vec::is_empty)
+        {
+            continue;
+        }
+        let rules = ruleset["rules"]
+            .as_array()
+            .ok_or("applicable release tag ruleset has malformed rules")?;
+        if rules.iter().any(|rule| rule["type"].as_str() == Some("creation")) {
+            return Err("release tag rules must permit protected CD to create new tags".into());
+        }
+        if !ruleset["bypass_actors"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+        {
+            continue;
+        }
+        for rule in rules {
+            protected_by.insert(
+                rule["type"]
+                    .as_str()
+                    .ok_or("release tag rule is missing its type")?
+                    .to_owned(),
+            );
+        }
+    }
+    if ["update", "deletion", "non_fast_forward"]
+        .into_iter()
+        .all(|kind| protected_by.contains(kind))
+    {
+        Ok(())
+    } else {
+        Err(
+            "active unbypassed v* tag rules must prevent updates, deletion and non-fast-forward changes"
+                .into(),
+        )
+    }
+}
+
+fn check_release_tag_protection_preflight(root: &Path) -> Result<(), String> {
+    // GitHub has no equivalent to the effective branch-rules endpoint for
+    // tags. Inspect active repository and inherited tag rulesets instead.
+    let summaries = gh(
+        &[
+            "api",
+            "--paginate",
+            "--jq",
+            ".[] | @json",
+            &format!("repos/{REPO}/rulesets?targets=tag&includes_parents=true&per_page=100"),
+        ],
+        root,
+    )
+    .map_err(|_| "cannot enumerate effective release tag rulesets")?;
+    let mut ids = BTreeSet::new();
+    let mut details = String::new();
+    for summary in summaries.lines() {
+        let record: Value = serde_json::from_str(summary)
+            .map_err(|_| "malformed release tag ruleset listing")?;
+        let id = record["id"]
+            .as_u64()
+            .ok_or("release tag ruleset listing omitted a numeric ID")?;
+        if !ids.insert(id) || ids.len() > 500 {
+            return Err("duplicate or excessive release tag rulesets".into());
+        }
+        let detail: Value = serde_json::from_str(&gh(
+            &[
+                "api",
+                &format!("repos/{REPO}/rulesets/{id}?includes_parents=true"),
+            ],
+            root,
+        )?)
+        .map_err(|_| "malformed release tag ruleset response")?;
+        if detail["id"].as_u64() != Some(id) {
+            return Err("GitHub returned mismatched release tag ruleset identity".into());
+        }
+        details.push_str(&detail.to_string());
+        details.push('\n');
+    }
+    validate_protected_release_tag_rulesets(&details)
+}
+
 fn validate_release_environment_protection(env: &Value) -> Result<(), String> {
     if env["name"].as_str() != Some("release") {
         return Err("GitHub returned an unexpected release environment".into());
@@ -912,6 +1010,7 @@ fn check_release_protection_preflight(root: &Path, check_environment: bool) -> R
         "unable to read effective main protection rules; stop before publishing".to_owned()
     })?;
     validate_protected_main_rules(&rules)?;
+    check_release_tag_protection_preflight(root)?;
     if check_environment {
         // Environment reads are permissions-dependent. A denied/malformed
         // response must block dispatch rather than assume approval is active.
@@ -3045,6 +3144,65 @@ mod tests {
         let rules = vec![pr, linear, status(&extended, Value::Bool(true))];
         assert!(validate_protected_main_rules(&encode(&rules)).is_ok());
         assert!(validate_protected_main_rules("{broken").is_err());
+    }
+
+    #[test]
+    fn release_tag_rulesets_require_full_unbypassed_active_protection() {
+        let protected = json!({
+            "id": 11,
+            "target": "tag",
+            "enforcement": "active",
+            "bypass_actors": [],
+            "conditions": {"ref_name": {
+                "include": ["refs/tags/v*"], "exclude": []
+            }},
+            "rules": [
+                {"type": "update"}, {"type": "deletion"},
+                {"type": "non_fast_forward"}
+            ]
+        });
+        let records = |rulesets: &[Value]| {
+            rulesets.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")
+        };
+        assert!(validate_protected_release_tag_rulesets(&records(&[protected.clone()])).is_ok());
+        assert!(validate_protected_release_tag_rulesets("").is_err());
+        assert!(validate_protected_release_tag_rulesets("{bad json").is_err());
+        for enforcement in ["disabled", "evaluate"] {
+            let mut invalid = protected.clone();
+            invalid["enforcement"] = json!(enforcement);
+            assert!(validate_protected_release_tag_rulesets(&records(&[invalid])).is_err());
+        }
+        let mut bypassed = protected.clone();
+        bypassed["bypass_actors"] = json!([{
+            "actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"
+        }]);
+        assert!(validate_protected_release_tag_rulesets(&records(&[bypassed])).is_err());
+        let mut excluded = protected.clone();
+        excluded["conditions"]["ref_name"]["exclude"] = json!(["refs/tags/v-extension-*"]);
+        assert!(validate_protected_release_tag_rulesets(&records(&[excluded])).is_err());
+        let mut narrow = protected.clone();
+        narrow["conditions"]["ref_name"]["include"] = json!(["refs/tags/v1*"]);
+        assert!(validate_protected_release_tag_rulesets(&records(&[narrow])).is_err());
+        let mut malformed = protected.clone();
+        malformed["rules"] = Value::Null;
+        assert!(validate_protected_release_tag_rulesets(&records(&[malformed])).is_err());
+        let mut creation = protected.clone();
+        creation["rules"].as_array_mut().unwrap().push(json!({"type": "creation"}));
+        assert!(validate_protected_release_tag_rulesets(&records(&[creation])).is_err());
+
+        let mut deletion_only = protected.clone();
+        deletion_only["rules"] = json!([{"type": "deletion"}]);
+        assert!(validate_protected_release_tag_rulesets(&records(&[deletion_only.clone()])).is_err());
+        let mut remaining = protected.clone();
+        remaining["id"] = json!(12);
+        remaining["rules"] = json!([{"type": "update"}, {"type": "non_fast_forward"}]);
+        assert!(validate_protected_release_tag_rulesets(&records(&[deletion_only, remaining])).is_ok());
+        let mut all_tags = protected.clone();
+        all_tags["conditions"]["ref_name"]["include"] = json!(["~ALL"]);
+        assert!(validate_protected_release_tag_rulesets(&records(&[all_tags])).is_ok());
+        let mut wrong_target = protected;
+        wrong_target["target"] = json!("branch");
+        assert!(validate_protected_release_tag_rulesets(&records(&[wrong_target])).is_err());
     }
 
     #[test]
