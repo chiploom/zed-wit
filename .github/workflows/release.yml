@@ -396,7 +396,48 @@ jobs:
     environment: release
     permissions:
       contents: write
+      actions: read # Required to verify live release-environment protections
     steps:
+      - name: Require independent release protections
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Check active effective repository/organization rules; cannot
+          # infer review requirements from the presence of a PR ruleset.
+          rules=$(gh api --paginate "repos/$GH_REPO/rules/branches/main?per_page=100" | jq -s 'add')
+          if ! jq -e '
+            any(.[]; .type == "pull_request" and (.parameters.required_approving_review_count // 0) >= 1)
+            and any(.[]; .type == "required_linear_history")
+            and ([.[] | select(.type == "required_status_checks") |
+                    .parameters.required_status_checks[]?.context] as $checks |
+                 ["quality",
+                  "Tests / aarch64-apple-darwin",
+                  "Tests / x86_64-unknown-linux-gnu",
+                  "Tests / x86_64-pc-windows-msvc",
+                  "Check / aarch64-unknown-linux-gnu",
+                  "Check / x86_64-apple-darwin"] |
+                 all(.[]; . as $name | ($checks | index($name)) != null))
+          ' <<<"$rules" >/dev/null; then
+            echo "::error::Protected main requires at least one independent PR approval, linear history and all six CI checks"
+            exit 1
+          fi
+
+          # This API needs Actions:read; lack of access is a hard failure.
+          release_environment=$(gh api "repos/$GH_REPO/environments/release")
+          if ! jq -e '
+            .name == "release"
+            and .deployment_branch_policy.protected_branches == true
+            and any(.protection_rules[]?;
+              .type == "required_reviewers"
+              and .prevent_self_review == true
+              and (.reviewers | length) > 0)
+          ' <<<"$release_environment" >/dev/null; then
+            echo "::error::Release environment lacks independent required reviewers, self-review prevention or protected-branch restriction"
+            exit 1
+          fi
+
       - name: Checkout release control metadata
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
