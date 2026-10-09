@@ -3171,7 +3171,10 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        assert!(validate_protected_release_tag_rulesets(&records(std::slice::from_ref(&protected))).is_ok());
+        assert!(
+            validate_protected_release_tag_rulesets(&records(std::slice::from_ref(&protected)))
+                .is_ok()
+        );
         assert!(validate_protected_release_tag_rulesets("").is_err());
         assert!(validate_protected_release_tag_rulesets("{bad json").is_err());
         for enforcement in ["disabled", "evaluate"] {
