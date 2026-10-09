@@ -801,11 +801,24 @@ fn validate_resume_candidate(
     other_tags.remove(&exact);
     validate_candidate(scope, candidate, &other_tags)
 }
+// GitHub Actions is the trusted publisher of all six required CI contexts.
+// Integration ID is stable app identity, NOT a repository-specific ruleset ID.
+const GITHUB_ACTIONS_INTEGRATION_ID: u64 = 15368;
+const REQUIRED_RELEASE_CI_CONTEXTS: [&str; 6] = [
+    "quality",
+    "Tests / aarch64-apple-darwin",
+    "Tests / x86_64-unknown-linux-gnu",
+    "Tests / x86_64-pc-windows-msvc",
+    "Check / aarch64-unknown-linux-gnu",
+    "Check / x86_64-apple-darwin",
+];
+
 fn validate_protected_main_rules(records: &str) -> Result<(), String> {
     let mut requires_pr = false;
     let mut linear_history = false;
     let mut required_checks = BTreeSet::new();
     let mut seen = 0_usize;
+    let mut has_status_rule = false;
     for line in records.lines() {
         let rule: Value = serde_json::from_str(line)
             .map_err(|_| "effective main rules have a malformed JSON record")?;
@@ -815,9 +828,8 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
         seen += 1;
         match kind {
             "pull_request" => {
-                // For now, independently approved PRs are optional. A PR
-                // ruleset and its explicit count must still exist; allowing
-                // zero reviews must never bypass the PR requirement.
+                // The temporary policy permits zero reviews but still
+                // requires a real PR rule with an explicit valid count.
                 rule["parameters"]["required_approving_review_count"]
                     .as_u64()
                     .ok_or("main PR rule omitted a valid approval count")?;
@@ -825,6 +837,12 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
             }
             "required_linear_history" => linear_history = true,
             "required_status_checks" => {
+                has_status_rule = true;
+                if rule["parameters"]["strict_required_status_checks_policy"].as_bool()
+                    != Some(true)
+                {
+                    return Err("an effective main required-check rule does not enforce strict checks".into());
+                }
                 let checks = rule["parameters"]["required_status_checks"]
                     .as_array()
                     .ok_or("main status-check rule omitted checks")?;
@@ -833,23 +851,23 @@ fn validate_protected_main_rules(records: &str) -> Result<(), String> {
                         .as_str()
                         .filter(|value| !value.is_empty())
                         .ok_or("main required status check lacks context")?;
-                    required_checks.insert(context.to_owned());
+                    if REQUIRED_RELEASE_CI_CONTEXTS.contains(&context) {
+                        if check["integration_id"].as_u64() != Some(GITHUB_ACTIONS_INTEGRATION_ID) {
+                            return Err(format!(
+                                "required release CI context {context} is not bound to trusted GitHub Actions integration"
+                            ));
+                        }
+                        required_checks.insert(context.to_owned());
+                    }
                 }
             }
             _ => {}
         }
     }
-    if seen == 0 || !requires_pr || !linear_history {
-        return Err("effective main rules must enforce a pull request and linear history".into());
+    if seen == 0 || !requires_pr || !linear_history || !has_status_rule {
+        return Err("effective main rules must enforce a pull request, linear history and trusted strict CI".into());
     }
-    for expected in [
-        "quality",
-        "Tests / aarch64-apple-darwin",
-        "Tests / x86_64-unknown-linux-gnu",
-        "Tests / x86_64-pc-windows-msvc",
-        "Check / aarch64-unknown-linux-gnu",
-        "Check / x86_64-apple-darwin",
-    ] {
+    for expected in REQUIRED_RELEASE_CI_CONTEXTS {
         if !required_checks.contains(expected) {
             return Err(format!(
                 "main rules are missing required release CI check: {expected}"
@@ -2957,7 +2975,7 @@ mod tests {
             "Check / x86_64-apple-darwin",
         ]
         .iter()
-        .map(|name| serde_json::json!({"context": name}))
+        .map(|name| serde_json::json!({"context": name, "integration_id": GITHUB_ACTIONS_INTEGRATION_ID}))
         .collect::<Vec<_>>();
         let make_rules = |approvals: u64| {
             [
@@ -2965,7 +2983,7 @@ mod tests {
                 "parameters":{"required_approving_review_count":approvals}}),
                 serde_json::json!({"type":"required_linear_history"}),
                 serde_json::json!({"type":"required_status_checks",
-                "parameters":{"required_status_checks":status}}),
+                "parameters":{"strict_required_status_checks_policy":true,"required_status_checks":status}}),
             ]
             .iter()
             .map(Value::to_string)
@@ -2977,7 +2995,7 @@ mod tests {
         assert!(validate_protected_main_rules("").is_err());
         assert!(validate_protected_main_rules("not-json").is_err());
         let missing = serde_json::json!({"type":"required_status_checks",
-            "parameters":{"required_status_checks":[{"context":"quality"}]}});
+            "parameters":{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"quality","integration_id":GITHUB_ACTIONS_INTEGRATION_ID}]}});
         let insufficient = format!(
             "{}\n{}\n{}",
             serde_json::json!({"type":"pull_request",
