@@ -99,6 +99,16 @@ Actions integration ID `15368`, and the frontend and CD now require
 that exact trusted publisher for each of the six release CI contexts even
 when checks appear across multiple applicable rulesets.
 
+The version-aware submit/resume preflight and protected CD also require active
+repository or inherited **tag rulesets** covering both release streams via
+`refs/tags/v*` (or `~ALL`), with no excluded release tags or bypass actors.
+Effective rules must prohibit updates, deletions and non-fast-forward changes.
+A matching `creation` restriction is rejected because protected CD must be able
+to create the next release tag. These requirements can be satisfied by layered
+rulesets and are checked by effective policy, not a hardcoded ruleset ID.
+Other patterns may be secure, but the automated check conservatively rejects
+patterns whose complete coverage cannot be established.
+
 ## Release authorization requirements
 
 **Temporary policy: zero required reviewers are permitted** for both
