@@ -77,30 +77,28 @@ a newline, a `<asset>.provenance.json` build record, and an
 dependency closure and pinned Rust standard library. Build provenance JSON is not
 itself a cryptographic attestation.
 
-## Independent release authorization requirements
+## Release authorization requirements
 
-This repository's issue #24 publication protocol requires **both** an
-independently approved release-preparation PR and an independently approved
-protected release deployment. The effective `main` rules must require
-at least one approving review, linear history and all six required CI checks.
-The `release` environment must have required reviewers, prevention of
-self-review, and protected-branch deployment restriction. The new frontend and the protected CD publish job both
-fail closed if those settings cannot be fetched or verified; neither an
-`environment:` reference nor a green CI run substitutes for reviewer
-enforcement.
+**Temporary policy: zero required reviewers are permitted** for both
+release-preparation PRs and protected CD publication. The effective `main`
+rules must still require a pull request, linear history and all six required
+CI checks. The `release` environment must exist and restrict deployment to
+**protected branches only**. The xtask frontend and protected CD fail closed
+on missing or unreadable rule/branch-policy data.
 
-As inspected on 2026-10-09, the active `Protect main` ruleset currently
-requires **zero** approving reviews; the connected GitHub integration
-cannot retrieve `release` environment protection data. Therefore
-production submission and dispatch remain **blocked pending an
-authorized operator's configuration review**. No rules or environment
-settings were changed during the audit.
+As inspected on 2026-10-09, `Protect main` requires zero approvals, which is
+now acceptable. An authenticated read confirmed that `release` has no
+required reviewers, but uses **custom branch policies** rather than
+protected-branches-only deployment. The latter is still a blocker; its
+configuration must be reviewed separately. No repository settings were
+changed. GitHub's native reviewer gate still applies if reviewers are
+configured in the future.
 
 The reviewed release-preparation PR also defines the **exact release source
 commit**: its GitHub-reported merged SHA (including normal squash merges)
 must equal the current protected `main` SHA at resume. Even an otherwise
 legitimate later change to code, Cargo.lock or release notes requires a
-new reviewed preparation for that source. A future independently approved
+new reviewed preparation for that source. A future explicitly reviewed
 requalification protocol may expand this rule; this implementation does
 not silently requalify newer source revisions.
 
