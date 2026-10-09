@@ -91,7 +91,9 @@ remote writes. Submission requires at least one enforced approving review
 for preparation PRs, all required CI checks and linear history. Resume
 additionally requires the `release` environment to have required reviewers,
 prevent self-review and permit deployment only from protected branches.
-Unreadable or missing protection states block the operation. At the
+Unreadable or missing protection states block the operation. Protected CD
+also repeats the checks before release-related writes, so direct manual
+workflow dispatch cannot silently bypass the policy. At the
 2026-10-09 audit, `main` required **zero** approvals and release environment
 reviewers could not be inspected with the connected app. An authorized
 operator must qualify/fix these settings before using confirmed publication.
