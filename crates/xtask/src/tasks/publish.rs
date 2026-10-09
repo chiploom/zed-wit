@@ -529,6 +529,9 @@ fn validate_gh_host_config(config: &str) -> Result<(), String> {
     Ok(())
 }
 fn pinned_gh_args(args: &[&str]) -> Result<Vec<String>, String> {
+    if args.iter().any(|arg| *arg == "--hostname") {
+        return Err("caller may not override pinned GitHub CLI hostname".into());
+    }
     match args {
         ["api", rest @ ..] => Ok(
             ["api", "--hostname", GITHUB_HOST]
@@ -2149,6 +2152,112 @@ mod tests {
         assert!(edited.starts_with("id = \"wit\"\nversion = \"0.1.3\""));
         assert!(edited.contains("[grammars.wit]\nversion = \"other\""));
         assert!(replace_manifest_version(input, next, old, Some("[package]")).is_err());
+    }
+
+    #[test]
+    fn github_cli_release_operations_pin_github_dot_com() {
+        assert_eq!(
+            pinned_gh_args(&["api", "repos/chiploom/zed-wit/releases"]).unwrap(),
+            ["api", "--hostname", "github.com", "repos/chiploom/zed-wit/releases"]
+        );
+        assert_eq!(
+            pinned_gh_args(&["repo", "view", REPO, "--json", "nameWithOwner"]).unwrap(),
+            ["repo", "view", HOSTED_REPO, "--json", "nameWithOwner"]
+        );
+        assert_eq!(
+            pinned_gh_args(&["auth", "status"]).unwrap(),
+            ["auth", "status", "--hostname", "github.com"]
+        );
+        for operation in ["list", "create"] {
+            assert_eq!(
+                pinned_gh_args(&["pr", operation, "-R", REPO, "--head", "branch"]).unwrap(),
+                ["pr", operation, "-R", HOSTED_REPO, "--head", "branch"]
+            );
+        }
+        for request in [
+            vec!["pr", "create", "-R", "enterprise.internal/chiploom/zed-wit"],
+            vec!["pr", "create", "--head", "release-prep/lsp-v0.1.3"],
+            vec!["api", "--hostname", "enterprise.internal", "repos/chiploom/zed-wit"],
+            vec!["repo", "view", "enterprise.internal/chiploom/zed-wit"],
+            vec!["auth", "status", "--hostname", "enterprise.internal"],
+        ] {
+            assert!(pinned_gh_args(&request).is_err());
+        }
+    }
+
+    #[test]
+    fn github_cli_host_environment_and_api_transport_must_agree() {
+        assert!(validate_gh_host_environment(None, None).is_ok());
+        assert!(validate_gh_host_environment(Some("github.com"), Some(REPO)).is_ok());
+        assert!(validate_gh_host_environment(Some("github.com"), Some(HOSTED_REPO)).is_ok());
+        for host in ["ghe.example.org", "github.enterprise.local", "github.com:8443", ""] {
+            assert!(validate_gh_host_environment(Some(host), None).is_err());
+        }
+        for repo in ["ghe.example.org/chiploom/zed-wit", "someone/zed-wit", ""] {
+            assert!(validate_gh_host_environment(None, Some(repo)).is_err());
+        }
+        assert!(validate_gh_host_config("").is_ok());
+        assert!(validate_gh_host_config("git_protocol=ssh\neditor=zed\n").is_ok());
+        assert!(validate_gh_host_config("api_host=api.github.com\n").is_ok());
+        assert!(validate_gh_host_config("api_host=ghe.example.org\n").is_err());
+        assert!(validate_gh_host_config("http_unix_socket=/tmp/forward.sock\n").is_err());
+        assert!(validate_gh_host_config("malformed\n").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn disposable_mock_gh_resolves_pinned_host_even_with_enterprise_environment() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = loop {
+            let candidate = std::env::temp_dir().join(format!(
+                "zed-wit-gh-host-{}-{}", std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("create mocked gh repo: {error}"),
+            }
+        };
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { fs::remove_dir_all(&self.0).expect("remove mocked gh repo"); }
+        }
+        let _cleanup = Cleanup(root.clone());
+        git(&["init", "-q", "-b", "main"], &root).unwrap();
+        let mock = root.join("gh");
+        fs::write(&mock, "#!/bin/sh\nhost=\"${GH_HOST:-github.com}\"\nrepo=\"${GH_REPO:-none}\"\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    --hostname) shift; host=\"$1\" ;;\n    -R|--repo) shift; repo=\"$1\" ;;\n  esac\n  shift\ndone\nprintf 'host=%s repo=%s\\n' \"$host\" \"$repo\"\n").unwrap();
+        let mut permissions = fs::metadata(&mock).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&mock, permissions).unwrap();
+        let call_mock = |args: &[&str]| {
+            std::process::Command::new(&mock)
+                .args(args)
+                .current_dir(&root)
+                .env("GH_HOST", "ghe.example.org")
+                .env("GH_REPO", "ghe.example.org/other/repo")
+                .env("GH_TOKEN", "should-never-appear")
+                .output().unwrap()
+        };
+        let original = call_mock(&["api", "repos/chiploom/zed-wit/releases"]);
+        assert_eq!(String::from_utf8_lossy(&original.stdout).trim(),
+            "host=ghe.example.org repo=ghe.example.org/other/repo");
+        let pinned = pinned_gh_args(&["api", "repos/chiploom/zed-wit/releases"]).unwrap();
+        let pinned_refs = pinned.iter().map(String::as_str).collect::<Vec<_>>();
+        let output = call_mock(&pinned_refs);
+        assert!(output.status.success());
+        let result = String::from_utf8(output.stdout).unwrap();
+        assert!(result.contains("host=github.com"));
+        assert!(!result.contains("should-never-appear"));
+        let pr = pinned_gh_args(&["pr", "create", "-R", REPO, "--head", "release-prep/lsp-v0.1.3"]).unwrap();
+        let pr_refs = pr.iter().map(String::as_str).collect::<Vec<_>>();
+        let output = call_mock(&pr_refs);
+        assert!(output.status.success());
+        let result = String::from_utf8(output.stdout).unwrap();
+        assert!(result.contains("repo=github.com/chiploom/zed-wit"));
+        assert!(!result.contains("should-never-appear"));
     }
 
     #[test]
