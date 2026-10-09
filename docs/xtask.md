@@ -94,9 +94,11 @@ prevent self-review and permit deployment only from protected branches.
 Unreadable or missing protection states block the operation. Protected CD
 also repeats the checks before release-related writes, so direct manual
 workflow dispatch cannot silently bypass the policy. At the
-2026-10-09 audit, `main` required **zero** approvals and release environment
-reviewers could not be inspected with the connected app. An authorized
-operator must qualify/fix these settings before using confirmed publication.
+2026-10-09 audit, `main` required **zero** approvals and an authenticated
+GitHub environment read confirmed `release` had **zero** required reviewers,
+no self-review prevention and custom (not protected-branches-only) deployment
+policies. An authorized administrator must change and requalify these
+settings before using confirmed publication.
 
 Resume further requires the current `main` SHA to be **identical** to the
 reviewed preparation PR's merged commit. Any later commit, even one that
