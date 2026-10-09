@@ -3,6 +3,7 @@ pub(crate) mod build;
 pub(crate) mod common;
 pub(crate) mod maintenance;
 pub(crate) mod performance;
+pub(crate) mod publish;
 pub(crate) mod release_ops;
 pub(crate) mod validation;
 
@@ -39,7 +40,7 @@ mod tests {
             "changelog-check",
             "update-grammar",
         ];
-        assert_eq!(crate::cli::COMMAND_HELP.len(), 27);
+        assert_eq!(crate::cli::COMMAND_HELP.len(), 28);
         for cmd in APPROVED {
             assert!(
                 crate::cli::COMMAND_HELP

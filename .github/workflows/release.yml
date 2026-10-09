@@ -1,4 +1,5 @@
 name: CD
+run-name: CD / ${{ inputs.operation }} / ${{ inputs.scope }} / ${{ inputs.tag }}
 
 on:
   workflow_dispatch:
@@ -23,6 +24,10 @@ on:
         options:
           - validate
           - publish
+      expected_sha:
+        description: Optional exact main commit to require for version-aware xtask dispatch
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -56,6 +61,22 @@ jobs:
           if [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
             echo "::error::CD must be dispatched from $DEFAULT_BRANCH"
             exit 1
+          fi
+
+      - name: Require expected release commit when provided
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$EXPECTED_SHA" ]; then
+            if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Expected release SHA must be 40 lowercase hex characters"
+              exit 1
+            fi
+            if [ "$GITHUB_SHA" != "$EXPECTED_SHA" ]; then
+              echo "::error::Default branch advanced after release planning; do not publish a different revision"
+              exit 1
+            fi
           fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -375,7 +396,154 @@ jobs:
     environment: release
     permissions:
       contents: write
+      actions: read # Required to verify live release-environment protections
     steps:
+      - name: Require protected release branch and CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Zero required reviewers are permitted for now. Still require
+          # an effective PR rule, linear history, and six CI checks.
+          rules=$(gh api --paginate "repos/$GH_REPO/rules/branches/main?per_page=100" | jq -s 'add')
+          if ! jq -e '
+            . as $rules
+            | ["quality",
+               "Tests / aarch64-apple-darwin",
+               "Tests / x86_64-unknown-linux-gnu",
+               "Tests / x86_64-pc-windows-msvc",
+               "Check / aarch64-unknown-linux-gnu",
+               "Check / x86_64-apple-darwin"] as $expected
+            | (
+                all($rules[]; (.type | type) == "string")
+                and any($rules[];
+                  .type == "pull_request"
+                  and (.parameters.required_approving_review_count | type) == "number"
+                  and .parameters.required_approving_review_count >= 0)
+                and any($rules[]; .type == "required_linear_history")
+                and (
+                  [$rules[] | select(.type == "required_status_checks")] as $status_rules
+                  | ($status_rules | length) > 0
+                  and all($status_rules[];
+                    .parameters.strict_required_status_checks_policy == true
+                    and (.parameters.required_status_checks | type) == "array"
+                    and all(.parameters.required_status_checks[];
+                      . as $check
+                      | ($check.context | type) == "string"
+                        and ($check.context | length) > 0
+                        and (
+                          ($expected | index($check.context)) == null
+                          or $check.integration_id == 15368
+                        )
+                    )
+                  )
+                  and (
+                    [$status_rules[].parameters.required_status_checks[].context] as $found
+                    | all($expected[];
+                      . as $context | ($found | index($context)) != null)
+                  )
+                )
+              )
+          ' <<<"$rules" >/dev/null; then
+            echo "::error::Protected main requires a PR, linear history, strict CI and GitHub Actions integration ID 15368 for all six checks"
+            exit 1
+          fi
+
+          # This API needs Actions:read; lack of access is a hard failure.
+          release_environment=$(gh api "repos/$GH_REPO/environments/release")
+          if ! jq -e '
+            .name == "release"
+            and (.protection_rules | type) == "array"
+            and .deployment_branch_policy.protected_branches == true
+          ' <<<"$release_environment" >/dev/null; then
+            echo "::error::Release environment is missing verified protected-branch deployment restrictions"
+            exit 1
+          fi
+
+      - name: Require active release tag rules
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Only GitHub's active tag rulesets count. Include inherited rules.
+          summaries=$(gh api --paginate --jq '.[] | @json' \
+            "repos/$GH_REPO/rulesets?targets=tag&includes_parents=true&per_page=100")
+          details='[]'
+          while IFS= read -r summary; do
+            [ -n "$summary" ] || continue
+            if ! jq -e '.id | type == "number" and . >= 0 and floor == .' \
+              <<<"$summary" >/dev/null; then
+              echo "::error::Malformed release tag ruleset listing"
+              exit 1
+            fi
+            id=$(jq -r '.id' <<<"$summary")
+            if [[ ! "$id" =~ ^[0-9]+$ ]]; then
+              echo "::error::Invalid release tag ruleset ID"
+              exit 1
+            fi
+            rule=$(gh api "repos/$GH_REPO/rulesets/$id?includes_parents=true")
+            if ! jq -e --argjson id "$id" '.id == $id' <<<"$rule" >/dev/null; then
+              echo "::error::Mismatched release tag ruleset"
+              exit 1
+            fi
+            details=$(jq -c --argjson rule "$rule" '. + [$rule]' <<<"$details")
+          done <<<"$summaries"
+
+          if ! jq -e '
+            [
+              .[]
+              | select(
+                  .target == "tag"
+                  and .enforcement == "active"
+                  and (.conditions.ref_name.include | type) == "array"
+                  and any(.conditions.ref_name.include[]; . == "refs/tags/v*" or . == "~ALL")
+                  and .conditions.ref_name.exclude == []
+                  and (.rules | type) == "array"
+                )
+            ] as $matching
+            | (
+                all($matching[];
+                  ([.rules[].type] | index("creation")) == null)
+                and (
+                  [$matching[] | select(.bypass_actors == []) | .rules[].type] as $types
+                  | all(["update", "deletion", "non_fast_forward"][];
+                    . as $required | ($types | index($required)) != null)
+                )
+              )
+          ' <<<"$details" >/dev/null; then
+            echo "::error::Release tags require active unbypassed v* update/deletion/non-fast-forward protection with creation allowed"
+            exit 1
+          fi
+
+      - name: Require immutable releases using Administration-read credential
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_POLICY_READ_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN cannot be granted Administration:read via the
+          # workflow permissions block. An authorized operator must configure
+          # an environment-scoped, read-only release-policy credential.
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::Missing release environment secret RELEASE_POLICY_READ_TOKEN (Administration:read); refusing release writes"
+            exit 1
+          fi
+          if ! immutable_policy=$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GH_REPO/immutable-releases" 2>/dev/null); then
+            echo "::error::Cannot verify immutable-release enforcement with Administration:read; refusing release writes"
+            exit 1
+          fi
+          if ! jq -e '
+            .enabled == true
+            and (.enforced_by_owner | type) == "boolean"
+          ' <<<"$immutable_policy" >/dev/null; then
+            echo "::error::Immutable releases are disabled or GitHub returned an ambiguous policy"
+            exit 1
+          fi
+
       - name: Checkout release control metadata
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -565,6 +733,62 @@ jobs:
               ;;
           esac
 
+      - name: Require unchanged unpublished draft immediately before promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          RELEASE_TITLE: ${{ needs.validate.outputs.title }}
+        run: |
+          set -euo pipefail
+          # Executed within the existing serialized, protected release job.
+          # A competing dispatch must not promote an already published release.
+          release_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+          if [ "$(jq -r '.draft' <<<"$release_json")" != "true" ] ||
+             [ "$(jq -r '.tag_name' <<<"$release_json")" != "$RELEASE_TAG" ] ||
+             [ "$(jq -r '.name' <<<"$release_json")" != "$RELEASE_TITLE" ]; then
+            echo "::error::Release changed or was already published; refusing another promotion"
+            exit 1
+          fi
+          tag_json=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG")
+          tag_type=$(jq -r '.object.type' <<<"$tag_json")
+          tag_sha=$(jq -r '.object.sha' <<<"$tag_json")
+          if [ "$tag_type" = "tag" ]; then
+            tag_sha=$(gh api "repos/$GH_REPO/git/tags/$tag_sha" --jq '.object.sha')
+          elif [ "$tag_type" != "commit" ]; then
+            echo "::error::Release tag points to an unexpected Git object"
+            exit 1
+          fi
+          if [ "$tag_sha" != "$RELEASE_SHA" ]; then
+            echo "::error::Release tag moved after candidate validation"
+            exit 1
+          fi
+
+      - name: Recheck immutable-release enforcement before promotion
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_POLICY_READ_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::Missing release-policy credential before draft promotion"
+            exit 1
+          fi
+          if ! immutable_policy=$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/$GH_REPO/immutable-releases" 2>/dev/null); then
+            echo "::error::Cannot reverify immutable-release enforcement; refusing promotion"
+            exit 1
+          fi
+          if ! jq -e '
+            .enabled == true
+            and (.enforced_by_owner | type) == "boolean"
+          ' <<<"$immutable_policy" >/dev/null; then
+            echo "::error::Immutable release settings changed before promotion"
+            exit 1
+          fi
+
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -597,7 +821,21 @@ jobs:
           test "$(jq -r '.name' <<<"$release_json")" = "$RELEASE_TITLE"
           jq -r '.body' <<<"$release_json" | grep -Fq "$scope_marker"
 
-          published_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+          # Publication and the immutable flag may become visible to REST
+          # in separate observations. Retry reads only; never promote twice.
+          immutable_verified=false
+          for _ in {1..10}; do
+            published_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+            if [ "$(jq -r '.immutable' <<<"$published_json")" = "true" ]; then
+              immutable_verified=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$immutable_verified" != "true" ]; then
+            echo "::error::Published GitHub Release lacks immutable=true; manual investigation required"
+            exit 1
+          fi
           case "$RELEASE_SCOPE" in
             extension) test "$(jq '.assets | length' <<<"$published_json")" -eq 0 ;;
             lsp) test "$(jq '.assets | length' <<<"$published_json")" -eq 23 ;;

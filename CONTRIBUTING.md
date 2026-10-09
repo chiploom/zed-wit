@@ -13,7 +13,7 @@ Repository automation is implemented in the Rust `xtask` crate; Python is not
 used or permitted in this repository. `rust-toolchain.toml` pins Rust 1.99.0,
 rustfmt, clippy and the `wasm32-wasip2` target. Commit `Cargo.lock`.
 
-See the [xtask command reference](docs/xtask.md) for development, release-preparation, tests, diagnostics and maintenance.
+See the [xtask command reference](docs/xtask.md) for development, release-preparation, tests, diagnostics and maintenance. For version-aware publishing, follow the staged, confirm-only [publish guide](docs/xtask-publish-implementation.md); there is no direct local tag or release creation.
 
 Run from the repository root:
 
