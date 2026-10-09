@@ -408,21 +408,45 @@ jobs:
           # an effective PR rule, linear history, and six CI checks.
           rules=$(gh api --paginate "repos/$GH_REPO/rules/branches/main?per_page=100" | jq -s 'add')
           if ! jq -e '
-            any(.[]; .type == "pull_request"
-                and (.parameters.required_approving_review_count | type) == "number"
-                and .parameters.required_approving_review_count >= 0)
-            and any(.[]; .type == "required_linear_history")
-            and ([.[] | select(.type == "required_status_checks") |
-                    .parameters.required_status_checks[]?.context] as $checks |
-                 ["quality",
-                  "Tests / aarch64-apple-darwin",
-                  "Tests / x86_64-unknown-linux-gnu",
-                  "Tests / x86_64-pc-windows-msvc",
-                  "Check / aarch64-unknown-linux-gnu",
-                  "Check / x86_64-apple-darwin"] |
-                 all(.[]; . as $name | ($checks | index($name)) != null))
+            . as $rules
+            | ["quality",
+               "Tests / aarch64-apple-darwin",
+               "Tests / x86_64-unknown-linux-gnu",
+               "Tests / x86_64-pc-windows-msvc",
+               "Check / aarch64-unknown-linux-gnu",
+               "Check / x86_64-apple-darwin"] as $expected
+            | (
+                all($rules[]; (.type | type) == "string")
+                and any($rules[];
+                  .type == "pull_request"
+                  and (.parameters.required_approving_review_count | type) == "number"
+                  and .parameters.required_approving_review_count >= 0)
+                and any($rules[]; .type == "required_linear_history")
+                and (
+                  [$rules[] | select(.type == "required_status_checks")] as $status_rules
+                  | ($status_rules | length) > 0
+                  and all($status_rules[];
+                    .parameters.strict_required_status_checks_policy == true
+                    and (.parameters.required_status_checks | type) == "array"
+                    and all(.parameters.required_status_checks[];
+                      . as $check
+                      | ($check.context | type) == "string"
+                        and ($check.context | length) > 0
+                        and (
+                          ($expected | index($check.context)) == null
+                          or $check.integration_id == 15368
+                        )
+                    )
+                  )
+                  and (
+                    [$status_rules[].parameters.required_status_checks[].context] as $found
+                    | all($expected[];
+                      . as $context | ($found | index($context)) != null)
+                  )
+                )
+              )
           ' <<<"$rules" >/dev/null; then
-            echo "::error::Protected main requires a PR rule, linear history and all six CI checks"
+            echo "::error::Protected main requires a PR, linear history, strict CI and GitHub Actions integration ID 15368 for all six checks"
             exit 1
           fi
 
