@@ -410,24 +410,34 @@ fn verify_reviewed_merge_tree(
     if !valid_sha(merge_sha) || !(1..=250).contains(&pr_commits) {
         return Err("merged release tree lacks valid commit provenance".into());
     }
-    // A squash or normal merge changes the version against the first parent.
-    // A rebase merge can spread the change over the PR's N rebased commits.
+    // GitHub can create a squash or merge commit even for a multi-commit PR;
+    // a rebase merge instead applies N commits consecutively. Do not infer
+    // that layout from the version in the immediate parent alone.
     let first_parent = git(&["rev-parse", &format!("{merge_sha}^")], root)?;
-    let immediately_before = git_manifest_version(root, &first_parent, scope, false)?;
-    let predecessor = if valid_version_transition(immediately_before, candidate) {
-        first_parent
-    } else if pr_commits > 1 {
-        git(&["rev-parse", &format!("{merge_sha}~{pr_commits}")], root)?
-    } else {
-        first_parent
-    };
-    let changed = git(
-        &["diff", "--no-ext-diff", "--name-only", &predecessor, merge_sha, "--"],
-        root,
-    )?;
-    // The actual merged source, not just GitHub's reviewed PR-file listing,
-    // must contain exactly the expected release-only paths.
-    validate_changed_files(&changed, scope, candidate)?;
+    let mut predecessors = vec![first_parent];
+    if pr_commits > 1 {
+        let rebase_parent = git(&["rev-parse", &format!("{merge_sha}~{pr_commits}")], root)?;
+        if !predecessors.contains(&rebase_parent) {
+            predecessors.push(rebase_parent);
+        }
+    }
+    // The actual merged diff must be release-only for at least one supported
+    // merge layout. All approved file blobs must match the PR head below,
+    // regardless of which layout produced the merge commit.
+    let mut valid_merged_delta = false;
+    for predecessor in predecessors {
+        let changed = git(
+            &["diff", "--no-ext-diff", "--name-only", &predecessor, merge_sha, "--"],
+            root,
+        )?;
+        if validate_changed_files(&changed, scope, candidate).is_ok() {
+            valid_merged_delta = true;
+            break;
+        }
+    }
+    if !valid_merged_delta {
+        return Err("merged release tree contains unreviewed paths or misses release files".into());
+    }
 
     let notes = format!("docs/releases/{}/v{}.md", scope.name(), candidate.value());
     for path in [scope.manifest(), "Cargo.lock", "CHANGELOG.md", notes.as_str()] {
