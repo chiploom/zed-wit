@@ -4165,7 +4165,10 @@ mod tests {
                 if path.ends_with("/actions/workflows/release.yml") {
                     return Ok(json!({"state": "active"}).to_string());
                 }
-                if args.iter().any(|arg| arg.contains("return_run_details=true")) {
+                if args
+                    .iter()
+                    .any(|arg| arg.contains("return_run_details=true"))
+                {
                     return Ok(json!({
                         "workflow_run_id": 1234,
                         "html_url": "https://github.com/chiploom/zed-wit/actions/runs/1234"
@@ -4227,7 +4230,10 @@ mod tests {
                 if path.ends_with("/actions/workflows/release.yml") {
                     return Ok(json!({"state": "active"}).to_string());
                 }
-                if args.iter().any(|arg| arg.contains("return_run_details=true")) {
+                if args
+                    .iter()
+                    .any(|arg| arg.contains("return_run_details=true"))
+                {
                     return Ok(json!({
                         "workflow_run_id": 1234,
                         "html_url": "https://github.com/chiploom/zed-wit/actions/runs/1234"
@@ -4274,14 +4280,18 @@ mod tests {
             "conclusion": "success"
         });
         run["id"] = json!(1235);
-        assert!(classify_workflow_run(&run, 1234, sha, Scope::Extension, tag)
-            .unwrap_err()
-            .contains("run ID"));
+        assert!(
+            classify_workflow_run(&run, 1234, sha, Scope::Extension, tag)
+                .unwrap_err()
+                .contains("run ID")
+        );
         run["id"] = json!(1234);
         run["head_sha"] = json!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        assert!(classify_workflow_run(&run, 1234, sha, Scope::Extension, tag)
-            .unwrap_err()
-            .contains("commit"));
+        assert!(
+            classify_workflow_run(&run, 1234, sha, Scope::Extension, tag)
+                .unwrap_err()
+                .contains("commit")
+        );
     }
 
     #[test]
