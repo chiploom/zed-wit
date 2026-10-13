@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### v-extension-0.5.1 (extension)
+
+- Prepare Chiploom's first published Zed WIT extension release, succeeding the original implementation with the previous maintainer's permission.
+- Supersede the unpublished `v-extension-0.5.0` release candidate after its protected CD workflow stopped during tag-protection validation, before creating a tag or GitHub Release.
+- Introduce modern WIT syntax highlighting, editor configuration, snippets, outlines, and Vim text objects using the pinned Bytecode Alliance Tree-sitter grammar.
+- Integrate a native WIT language server providing parser-backed diagnostics, scope-aware completion, hover, definition navigation, references, and safe unresolved-type quick fixes.
+- Add multi-file WIT package analysis with unsaved-buffer support and local dependency resolution.
+- Provide Topiary-based document formatting with comment preservation and idempotence checks.
+- Automatically download and verify the published WIT Language Server `v0.1.2`, with executable caching and recovery from corrupted or incomplete downloads.
+- Support native language-server distribution on macOS ARM64/x86_64, Linux GNU ARM64/x86_64, and Windows x86_64.
+- Maintain independent extension and native LSP version streams, with the extension runtime pinned to `v0.1.2`.
+- Correct protected CD tag-ruleset validation to handle permission-dependent redaction of bypass-actor metadata while requiring an independently audited ruleset revision.
+- Preserve fail-closed release behavior for changed rulesets, missing protections, and explicitly configured bypass actors.
+- Add bounded reconciliation for temporarily incomplete GitHub Actions metadata following a confirmed release dispatch, without relaxing workflow identity checks.
+- Expand release-policy and workflow-state regression coverage, including protection changes, malformed identity responses, and retry exhaustion.
+- Document the maintainer transition and acknowledge Valentine for the original extension.
+
 ### v-extension-0.5.0 (extension)
 
 - Prepare the first Chiploom-maintained WIT extension release, succeeding the original Zed registry implementation with the original author's permission.

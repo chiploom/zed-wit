@@ -1,6 +1,4 @@
-[package]
-name = "zed-wit"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT OR Apache-2.0"
@@ -14,7 +12,13 @@ runtime-lsp-version = "0.1.2"
 crate-type = ["cdylib", "rlib"]
 
 [workspace]
-members = ["crates/wit-syntax", "crates/wit-analysis", "crates/wit-language-server", "crates/xtask", "crates/zed-gui-input"]
+members = [
+  "crates/wit-syntax",
+  "crates/wit-analysis",
+  "crates/wit-language-server",
+  "crates/xtask",
+  "crates/zed-gui-input",
+]
 default-members = ["."]
 resolver = "3"
 
