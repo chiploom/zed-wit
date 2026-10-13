@@ -425,18 +425,31 @@ fn verified_reviewed_git_blob(tree: &Value, head_sha: &str, path: &str) -> Resul
         || tree["sha"].as_str() != Some(head_sha)
         || tree["truncated"].as_bool() != Some(false)
     {
-        return Err("reviewed PR Git tree is incomplete or does not match the reviewed commit".into());
+        return Err(
+            "reviewed PR Git tree is incomplete or does not match the reviewed commit".into(),
+        );
     }
-    let entries = tree["tree"].as_array().ok_or("reviewed PR Git tree omitted its entries")?;
-    let mut matches = entries.iter().filter(|entry| entry["path"].as_str() == Some(path));
-    let item = matches.next().ok_or_else(|| format!("reviewed PR Git tree omitted expected file: {path}"))?;
+    let entries = tree["tree"]
+        .as_array()
+        .ok_or("reviewed PR Git tree omitted its entries")?;
+    let mut matches = entries
+        .iter()
+        .filter(|entry| entry["path"].as_str() == Some(path));
+    let item = matches
+        .next()
+        .ok_or_else(|| format!("reviewed PR Git tree omitted expected file: {path}"))?;
     if matches.next().is_some()
         || item["mode"].as_str() != Some("100644")
         || item["type"].as_str() != Some("blob")
     {
-        return Err(format!("reviewed release file has unsafe or ambiguous Git mode: {path}"));
+        return Err(format!(
+            "reviewed release file has unsafe or ambiguous Git mode: {path}"
+        ));
     }
-    item["sha"].as_str().filter(|sha| valid_sha(sha)).map(str::to_owned)
+    item["sha"]
+        .as_str()
+        .filter(|sha| valid_sha(sha))
+        .map(str::to_owned)
         .ok_or_else(|| format!("reviewed PR Git tree has an invalid blob SHA: {path}"))
 }
 
@@ -2131,7 +2144,10 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     // The Git Trees API preserves blob modes, unlike the Contents API,
     // which may transparently dereference symbolic links.
     let reviewed_tree: Value = serde_json::from_str(&gh(
-        &["api", &format!("repos/{REPO}/git/trees/{head_sha}?recursive=1")],
+        &[
+            "api",
+            &format!("repos/{REPO}/git/trees/{head_sha}?recursive=1"),
+        ],
         root,
     )?)
     .map_err(|_| "cannot read the reviewed PR's immutable Git tree")?;
