@@ -70,8 +70,12 @@ fail() {
 }
 mutate_asset() {
   local name=$1 expression=$2
-  jq --arg name "$name" "(.assets[] | select(.name == \$name)) | $expression" "$MOCK_RELEASE" >"$tmp/next.json"
+  jq --arg name "$name" "(.assets[] | select(.name == \$name)) |= ($expression)" "$MOCK_RELEASE" >"$tmp/next.json"
   mv "$tmp/next.json" "$MOCK_RELEASE"
+  jq -e --arg name "$name" '
+    (.id == 42) and (.assets | type == "array")
+    and ([.assets[] | select(.name == $name)] | length == 1)
+  ' "$MOCK_RELEASE" >/dev/null
   jq '[.assets]' "$MOCK_RELEASE" >"$MOCK_PAGES"
 }
 
