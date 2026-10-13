@@ -70,6 +70,20 @@ pub(crate) fn test_extension(args: &[String]) -> Result<(), String> {
     build(&["--kind".into(), "extension".into()])
 }
 
+pub(crate) fn test_publish(args: &[String]) -> Result<(), String> {
+    no_args(args, "test-publish")?;
+    // All scenarios create disposable Git/Cargo repositories and use mock
+    // GitHub responses; no production credentials or release writes.
+    test(&[
+        "--package".into(),
+        "xtask".into(),
+        "--filter".into(),
+        "lifecycle_tests::".into(),
+        "--runner".into(),
+        "cargo".into(),
+    ])
+}
+
 pub(crate) fn test_all(args: &[String]) -> Result<(), String> {
     let mut options = opts(args, &["with-zed"])?;
     let with_zed = bool_option(&mut options, "with-zed", false)?;
