@@ -240,6 +240,45 @@ mod tests {
     }
 
     #[test]
+    fn protected_cd_orders_asset_digest_checks_around_promotion() {
+        let root = util::repo_root();
+        let workflow = fs::read_to_string(root.join(".github/workflows/release.yml")).unwrap();
+        let steps = [
+            "Capture exact local release asset digests",
+            "Create or resume draft release",
+            "Upload LSP release assets",
+            "Verify draft asset scope",
+            "Verify uploaded draft asset digests and state",
+            "Require unchanged unpublished draft immediately before promotion",
+            "Recheck immutable-release enforcement before promotion",
+            "Reverify exact draft asset digests immediately before promotion",
+            "Publish draft release",
+            "Verify published release",
+            "Verify immutable published asset digests",
+        ];
+        let mut positions = Vec::new();
+        for name in steps {
+            let marker = format!("      - name: {name}\\n");
+            let offset = workflow.find(&marker).expect("missing required release integrity step");
+            assert_eq!(workflow.match_indices(&marker).count(), 1);
+            positions.push(offset);
+        }
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        let verifier = "bash release-source/scripts/release-asset-integrity.sh";
+        for index in [0, 4, 7, 10] {
+            let start = positions[index];
+            let end = positions.get(index + 1).copied().unwrap_or(workflow.len());
+            assert!(
+                workflow[start..end].contains(verifier),
+                "release integrity step {} does not invoke the shared production verifier",
+                steps[index]
+            );
+        }
+        assert!(workflow[positions[7]..positions[8]].contains(" draft"));
+        assert!(workflow[positions[10]..].contains(" published"));
+    }
+
+    #[test]
     fn draft_asset_scope_uses_draft_capable_release_lookup() {
         let root = util::repo_root();
         let workflow = fs::read_to_string(root.join(".github/workflows/release.yml")).unwrap();
