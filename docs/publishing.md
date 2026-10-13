@@ -91,8 +91,9 @@ an authorized administrator must provision the environment-scoped
 `RELEASE_POLICY_READ_TOKEN` secret with a narrowly scoped fine-grained token
 or GitHub App token granting **repository Administration: read only**.
 It is used solely for policy GETs and must never be logged. Missing or
-expired credentials fail closed. The currently enabled status has **not**
-been verified through the connected GitHub app.
+expired credentials fail closed. An authorized operator confirmed repository-level immutable releases enabled
+on 2026-10-13; the environment-scoped policy-read credential is provisioned,
+but its live runtime authorization still requires separate verification.
 
 The active `main` ruleset already uses strict CI checks bound to GitHub
 Actions integration ID `15368`, and the frontend and CD now require
@@ -115,16 +116,21 @@ patterns whose complete coverage cannot be established.
 release-preparation PRs and protected CD publication. The effective `main`
 rules must still require a pull request, linear history and all six required
 CI checks. The `release` environment must exist and restrict deployment to
-**protected branches only**. The xtask frontend and protected CD fail closed
-on missing or unreadable rule/branch-policy data.
+**either protected branches only or a verified exact-`main` custom branch
+policy**. In custom mode, the frontend and protected CD inspect every page
+of GitHub's deployment branch-policy list and require a reported count of
+exactly one, containing only `name=main` and `type=branch`. Additional
+branches/tags, wildcard patterns, missing data, ambiguous flag combinations,
+and API failures block publication. Both modes also require the effective
+`main` ruleset to enforce a PR rule, linear history, and six strict CI
+checks from the trusted GitHub Actions integration.
 
-As inspected on 2026-10-09, `Protect main` requires zero approvals, which is
-now acceptable. An authenticated read confirmed that `release` has no
-required reviewers, but uses **custom branch policies** rather than
-protected-branches-only deployment. The latter is still a blocker; its
-configuration must be reviewed separately. No repository settings were
-changed. GitHub's native reviewer gate still applies if reviewers are
-configured in the future.
+As inspected on 2026-10-13, the `release` environment has a custom
+deployment policy selecting only branch `main`; no GitHub settings change
+is needed for this policy. This explicitly accepted alternative accommodates
+ruleset-protected `main` even when GitHub reports no classic branch
+protection. GitHub's native reviewer gate still applies if configured
+in the future.
 
 The reviewed release-preparation PR also defines the **exact release source
 commit**: its GitHub-reported merged SHA (including normal squash merges)
