@@ -6,7 +6,11 @@ tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 mkdir -p "$tmp/bin"
 export REAL_GIT="$real_git" FIXTURE_ROOT="$tmp"
+# Even Git commands outside the fixture shim must never reach network transports.
+# The exact synthetic canonical remote is intercepted below and rewritten to a
+# disposable filesystem remote; all real Git transport is file-only.
 export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+export GIT_ALLOW_PROTOCOL=file
 export CARGO_NET_OFFLINE=true GH_TOKEN=offline-synthetic GH_REPO=chiploom/zed-wit
 export GITHUB_ACTIONS=false MOCK_FAIL_PR_CREATE=0 MOCK_BAD_PR=0 MOCK_MERGED=0 MOCK_FILE_COUNT=0
 unset GITHUB_OUTPUT GITHUB_SHA
@@ -170,6 +174,22 @@ chmod +x "$tmp/bin/git" "$tmp/bin/gh"
 base=$("$real_git" -C "$tmp/repo" rev-parse main)
 export PATH="$tmp/bin:$PATH" CARGO_TARGET_DIR="$tmp/build"
 cd "$tmp/repo"
+# Exercise the fallthrough path in the Git shim: a future publishing refactor
+# must not silently make real Git network transport available to the fixture.
+for denied_remote in \
+  https://github.com/chiploom/zed-wit.git \
+  git@github.com:chiploom/zed-wit.git
+do
+  if "$tmp/bin/git" ls-remote "$denied_remote" >"$tmp/blocked-out" 2>"$tmp/blocked-err"; then
+    echo "fixture unexpectedly permitted Git network transport: $denied_remote" >&2
+    exit 1
+  fi
+  if ! grep -Eq "transport '[^']+' not allowed" "$tmp/blocked-err"; then
+    echo "fixture did not reject the transport before network access: $denied_remote" >&2
+    cat "$tmp/blocked-err" >&2
+    exit 1
+  fi
+done
 cargo build --offline --locked -p xtask
 reject() {
   local label=$1 expected=$2
