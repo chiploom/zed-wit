@@ -89,7 +89,7 @@ for scope in lsp extension; do
   branch=$("$real_git" symbolic-ref -q --short HEAD)
   case "$branch" in release-prep/"$scope"-*) ;; *) exit 1 ;; esac
   [ -z "$("$real_git" ls-remote --heads "$tmp/remote.git" "$branch")" ]
-  reject "unreviewed submit $scope" 'publish requires a clean worktree' cargo xtask publish --scope "$scope" --submit --confirm
+  reject "unreviewed submit $scope" 'publish requires a clean working tree' cargo xtask publish --scope "$scope" --submit --confirm
   echo "passed isolated production plan/prepare/submit-preflight: $scope"
 done
 echo 'passed real CLI subprocess fixture without external writes'
