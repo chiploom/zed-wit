@@ -259,7 +259,9 @@ mod tests {
         let mut positions = Vec::new();
         for name in steps {
             let marker = format!("      - name: {name}\n");
-            let offset = workflow.find(&marker).expect("missing required release integrity step");
+            let offset = workflow
+                .find(&marker)
+                .expect("missing required release integrity step");
             assert_eq!(workflow.match_indices(&marker).count(), 1);
             positions.push(offset);
         }
