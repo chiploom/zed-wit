@@ -4147,3 +4147,7 @@ mod tests {
         assert!(publish(&args(&["--scope", "lsp", "--resume", "--confirm"])).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "publish_lifecycle_tests.rs"]
+mod lifecycle_tests;
