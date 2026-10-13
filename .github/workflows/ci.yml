@@ -31,6 +31,37 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Diagnose redacted tag ruleset metadata with CI token
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          summary=$(gh api "repos/$GITHUB_REPOSITORY/rulesets?targets=tag&includes_parents=true&per_page=100")
+          details=$(gh api "repos/$GITHUB_REPOSITORY/rulesets/24620024?includes_parents=true")
+          jq -nc --argjson summary "$summary" --argjson rule "$details" '
+            {
+              summary_count: ($summary | length),
+              summary_matches_pin: any($summary[]; .id == 24620024 and .updated_at == "2026-10-06T21:11:44.860-04:00"),
+              id: $rule.id,
+              source_type: $rule.source_type,
+              source: $rule.source,
+              target: $rule.target,
+              enforcement: $rule.enforcement,
+              updated_at: $rule.updated_at,
+              include_type: ($rule.conditions.ref_name.include | type),
+              include_patterns: $rule.conditions.ref_name.include,
+              excludes: $rule.conditions.ref_name.exclude,
+              rules_type: ($rule.rules | type),
+              rule_types: [$rule.rules[]?.type],
+              bypass_shape: (
+                if ($rule | has("bypass_actors") | not) then "omitted"
+                elif ($rule.bypass_actors | type) != "array" then ($rule.bypass_actors | type)
+                elif ($rule.bypass_actors | length) == 0 then "empty"
+                else "nonempty"
+                end
+              )
+            }'
       - name: Install pinned toolchain
         run: rustup toolchain install
       # Pull-request caches are isolated to refs/pull/*/merge and cannot write to main's cache scope.
