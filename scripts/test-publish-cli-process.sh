@@ -8,7 +8,7 @@ mkdir -p "$tmp/bin"
 export REAL_GIT="$real_git" FIXTURE_ROOT="$tmp"
 export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 export CARGO_NET_OFFLINE=true GH_TOKEN=offline-synthetic GH_REPO=chiploom/zed-wit
-export GITHUB_ACTIONS=false MOCK_FAIL_PR_CREATE=0
+export GITHUB_ACTIONS=false MOCK_FAIL_PR_CREATE=0 MOCK_BAD_PR=0 MOCK_MERGED=0 MOCK_FILE_COUNT=0
 cat >"$tmp/bin/git" <<'GIT'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -68,6 +68,13 @@ esac
 endpoint=
 for endpoint in "$@"; do :; done
 if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$3" = github.com ]; then
+  case " $* " in
+    *"repos/chiploom/zed-wit/actions/workflows/release.yml/dispatches"*)
+      : >"$FIXTURE_ROOT/synthetic-cd-request"
+      echo 'synthetic workflow dispatch denied after all source checks' >&2
+      exit 79
+      ;;
+  esac
   case "$endpoint" in
     repos/chiploom/zed-wit/releases?*) exit 0 ;;
     repos/chiploom/zed-wit/rules/branches/main?*)
@@ -93,11 +100,53 @@ if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$3" = github.com ]; then
       echo '{"id":700}'
       exit 0
       ;;
+    repos/chiploom/zed-wit/environments/release)
+      echo '{"name":"release","protection_rules":[],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+      exit 0
+      ;;
+    repos/chiploom/zed-wit/environments/release/deployment-branch-policies?*)
+      echo '{"total_count":1,"branch_policies":[{"name":"main","type":"branch"}]}'
+      exit 0
+      ;;
+    repos/chiploom/zed-wit/pulls/314/files?*)
+      cat "$FIXTURE_ROOT/reviewed-files.jsonl"
+      exit 0
+      ;;
     repos/chiploom/zed-wit/pulls/314)
+      if [ "$MOCK_BAD_PR" = 1 ]; then
+        echo '{"merged":'
+        exit 0
+      fi
       head=$("$REAL_GIT" -C "$FIXTURE_ROOT/repo" rev-parse "refs/heads/$FIXTURE_BRANCH")
+      merge=$("$REAL_GIT" -C "$FIXTURE_ROOT/repo" rev-parse main)
       jq -nc --arg branch "$FIXTURE_BRANCH" --arg sha "$head" \
-        '{base:{ref:"main"},head:{ref:$branch,sha:$sha,
-        repo:{full_name:"chiploom/zed-wit"}}}'
+        --arg merged_sha "$merge" --argjson merged "$MOCK_MERGED" \
+        --argjson changed "$MOCK_FILE_COUNT" \
+        '{merged:($merged==1),commits:1,changed_files:$changed,
+        merge_commit_sha:$merged_sha,base:{ref:"main"},
+        head:{ref:$branch,sha:$sha,repo:{full_name:"chiploom/zed-wit"}}}'
+      exit 0
+      ;;
+    repos/chiploom/zed-wit/contents/*)
+      path=$(printf '%s' "$endpoint" | sed 's#^repos/chiploom/zed-wit/contents/##;s#?ref=.*##')
+      sha=$(printf '%s' "$endpoint" | sed 's/^.*?ref=//')
+      "$REAL_GIT" -C "$FIXTURE_ROOT/repo" show "$sha:$path"
+      exit 0
+      ;;
+    repos/chiploom/zed-wit/git/trees/*)
+      sha=$(printf '%s' "$endpoint" | sed 's#^repos/chiploom/zed-wit/git/trees/##;s#?recursive=.*##')
+      "$REAL_GIT" -C "$FIXTURE_ROOT/repo" ls-tree -r "$sha" |
+        jq -Rsc --arg sha "$sha" '
+          split("\n") | map(select(length > 0)) |
+          map(capture("^(?<mode>[0-9]+) (?<type>[^ ]+) (?<sha>[a-f0-9]+)\t(?<path>.*)$")) |
+          {sha:$sha,truncated:false,tree:.}'
+      exit 0
+      ;;
+    repos/chiploom/zed-wit/actions/workflows/release.yml)
+      echo '{"state":"active"}'
+      exit 0
+      ;;
+    repos/chiploom/zed-wit/actions/workflows/release.yml/runs?*)
       exit 0
       ;;
   esac
@@ -135,6 +184,14 @@ reject() {
   fi
 }
 for scope in lsp extension; do
+  # Restore both the checkout and the local bare server for each release stream.
+  "$real_git" -C "$tmp/remote.git" update-ref refs/heads/main "$base"
+  "$real_git" -C "$tmp/remote.git" for-each-ref --format='%(refname)' refs/heads/release-prep |
+    while IFS= read -r stale; do
+      [ -n "$stale" ] || continue
+      "$real_git" -C "$tmp/remote.git" update-ref -d "$stale"
+    done
+  export MOCK_MERGED=0 MOCK_BAD_PR=0 MOCK_FILE_COUNT=0
   "$real_git" reset --hard -q "$base"
   "$real_git" clean -fdq
   "$real_git" switch -C main "$base" >/dev/null
@@ -177,6 +234,41 @@ for scope in lsp extension; do
   grep -Fq 'Release preparation PR submitted' "$tmp/submitted"
   [ "$("$real_git" ls-remote --heads "$tmp/remote.git" "$branch" | cut -f1)" = "$reviewed" ]
   [ -z "$("$real_git" ls-remote --tags "$tmp/remote.git")" ]
-  echo "passed production CLI plan, prepare, interrupted submission, exact retry: $scope"
+  # Record the reviewed PR's complete file list and manifest patches.
+  : >"$tmp/reviewed-files.jsonl"
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    patch=$("$real_git" diff --no-ext-diff --unified=0 "$base" "$reviewed" -- "$file")
+    status=modified
+    case "$file" in docs/releases/*) status=added ;; esac
+    jq -nc --arg file "$file" --arg patch "$patch" --arg status "$status" \
+      '{filename:$file,status:$status,patch:$patch}' >>"$tmp/reviewed-files.jsonl"
+  done < <("$real_git" diff --no-ext-diff --name-only "$base" "$reviewed")
+  export MOCK_FILE_COUNT
+  MOCK_FILE_COUNT=$(wc -l <"$tmp/reviewed-files.jsonl" | tr -d '[:space:]')
+  [ "$MOCK_FILE_COUNT" = 4 ] || [ "$MOCK_FILE_COUNT" = 5 ]
+
+  "$real_git" switch main >/dev/null
+  "$real_git" merge --squash "$branch" >/dev/null
+  "$real_git" commit -qm 'simulated reviewed squash merge'
+  export MOCK_MERGED=1
+  reject "stale remote main $scope" 'main differs from latest origin/main' \
+    cargo xtask publish --scope "$scope" --resume --pr 314 --confirm
+  "$real_git" push -q origin main
+
+  export MOCK_BAD_PR=1
+  reject "malformed merged PR $scope" 'parse preparation PR' \
+    cargo xtask publish --scope "$scope" --resume --pr 314 --confirm
+  export MOCK_BAD_PR=0
+  rm -f -- "$tmp/synthetic-cd-request"
+  reject "synthetically denied CD dispatch $scope" \
+    'CD dispatch may have been accepted' \
+    cargo xtask publish --scope "$scope" --resume --pr 314 --confirm
+  [ -f "$tmp/synthetic-cd-request" ] || {
+    echo "resume did not reach protected CD dispatch after full provenance checks" >&2
+    exit 1
+  }
+  [ -z "$("$real_git" ls-remote --tags "$tmp/remote.git")" ]
+  echo "passed real CLI prepare, interrupted submit/retry, merged-provenance resume and mock dispatch denial: $scope"
 done
-echo 'passed real CLI subprocess fixture without external writes'
+echo 'passed real CLI subprocess qualification without production GitHub writes'
