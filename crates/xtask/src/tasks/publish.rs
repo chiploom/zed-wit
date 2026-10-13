@@ -420,9 +420,20 @@ fn verified_regular_git_blob_entry(record: &str, expected_path: &str) -> Result<
     Ok(fields[2].to_owned())
 }
 
-fn verified_reviewed_git_blob(tree: &Value, head_sha: &str, path: &str) -> Result<String, String> {
-    if !valid_sha(head_sha)
-        || tree["sha"].as_str() != Some(head_sha)
+fn reviewed_commit_root_tree_sha(commit: &Value, head_sha: &str) -> Result<String, String> {
+    if !valid_sha(head_sha) || commit["sha"].as_str() != Some(head_sha) {
+        return Err("reviewed PR Git commit identity does not match its approved head".into());
+    }
+    let tree_sha = commit["tree"]["sha"]
+        .as_str()
+        .filter(|sha| valid_sha(sha) && *sha != head_sha)
+        .ok_or("reviewed PR Git commit omitted a valid distinct root tree SHA")?;
+    Ok(tree_sha.to_owned())
+}
+
+fn verified_reviewed_git_blob(tree: &Value, root_tree_sha: &str, path: &str) -> Result<String, String> {
+    if !valid_sha(root_tree_sha)
+        || tree["sha"].as_str() != Some(root_tree_sha)
         || tree["truncated"].as_bool() != Some(false)
     {
         return Err(
@@ -2141,18 +2152,27 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         pr_commits,
     )?;
     require_exact_release_source(&main_sha, &merge_sha)?;
-    // The Git Trees API preserves blob modes, unlike the Contents API,
+    // Bind the immutable reviewed commit to its Git root tree object first.
+    // The Trees endpoint also accepts commit refs, but the response's SHA
+    // then identifies the supplied commit rather than the underlying tree.
+    let reviewed_commit: Value = serde_json::from_str(&gh(
+        &["api", &format!("repos/{REPO}/git/commits/{head_sha}")],
+        root,
+    )?)
+    .map_err(|_| "cannot read the reviewed PR's immutable Git commit")?;
+    let root_tree_sha = reviewed_commit_root_tree_sha(&reviewed_commit, &head_sha)?;
+    // The explicit root tree preserves blob modes, unlike the Contents API,
     // which may transparently dereference symbolic links.
     let reviewed_tree: Value = serde_json::from_str(&gh(
         &[
             "api",
-            &format!("repos/{REPO}/git/trees/{head_sha}?recursive=1"),
+            &format!("repos/{REPO}/git/trees/{root_tree_sha}?recursive=1"),
         ],
         root,
     )?)
     .map_err(|_| "cannot read the reviewed PR's immutable Git tree")?;
     verify_reviewed_merge_tree(root, scope, version, &merge_sha, pr_commits, |file| {
-        verified_reviewed_git_blob(&reviewed_tree, &head_sha, file)
+        verified_reviewed_git_blob(&reviewed_tree, &root_tree_sha, file)
     })?;
 
     // Serialize this checkout's entire history-check -> dispatch transition.
@@ -2335,6 +2355,62 @@ fn cleanup_disposable_fixture(root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_commit_binds_exact_head_to_distinct_root_tree() {
+        let head = "a".repeat(40);
+        let root = "b".repeat(40);
+        let commit = json!({"sha":head,"tree":{"sha":root}});
+        assert_eq!(reviewed_commit_root_tree_sha(&commit, &head).unwrap(), root);
+        for invalid in [
+            json!({"sha":"c".repeat(40),"tree":{"sha":root}}),
+            json!({"sha":head,"tree":{"sha":"c".repeat(39)}}),
+            json!({"sha":head,"tree":{"sha":head}}),
+            json!({"sha":head,"tree":{}}),
+            json!({"tree":{"sha":root}}),
+        ] {
+            assert!(reviewed_commit_root_tree_sha(&invalid, &head).is_err());
+        }
+    }
+
+    #[test]
+    fn reviewed_root_tree_rejects_wrong_identity_truncation_and_unsafe_modes() {
+        let root = "b".repeat(40);
+        let blob = "c".repeat(40);
+        let path = "CHANGELOG.md";
+        let entry = json!({"path":path,"mode":"100644","type":"blob","sha":blob});
+        let expected = json!({"sha":root,"truncated":false,"tree":[entry]});
+        assert_eq!(verified_reviewed_git_blob(&expected, &root, path).unwrap(), blob);
+
+        let mut invalid = expected.clone();
+        invalid["sha"] = json!("d".repeat(40));
+        assert!(verified_reviewed_git_blob(&invalid, &root, path).is_err());
+        invalid = expected.clone();
+        invalid["truncated"] = json!(true);
+        assert!(verified_reviewed_git_blob(&invalid, &root, path).is_err());
+        invalid = expected.clone();
+        invalid.as_object_mut().unwrap().remove("truncated");
+        assert!(verified_reviewed_git_blob(&invalid, &root, path).is_err());
+        invalid = expected.clone();
+        invalid["tree"].as_array_mut().unwrap().push(entry.clone());
+        assert!(verified_reviewed_git_blob(&invalid, &root, path).is_err());
+
+        for (mode, kind) in [
+            ("100755", "blob"),
+            ("120000", "blob"),
+            ("160000", "commit"),
+            ("040000", "tree"),
+        ] {
+            invalid = expected.clone();
+            invalid["tree"][0]["mode"] = json!(mode);
+            invalid["tree"][0]["type"] = json!(kind);
+            assert!(verified_reviewed_git_blob(&invalid, &root, path).is_err());
+        }
+        invalid = expected.clone();
+        invalid["tree"][0]["sha"] = json!("invalid");
+        assert!(verified_reviewed_git_blob(&invalid, &root, path).is_err());
+        assert!(verified_reviewed_git_blob(&expected, &root, "missing.md").is_err());
+    }
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| (*s).to_owned()).collect()
