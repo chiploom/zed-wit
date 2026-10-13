@@ -283,13 +283,19 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn release_tag_ruleset_policy_accepts_only_the_audited_revision() {
-        use std::{io::Write, process::{Command, Stdio}};
-        let workflow = fs::read_to_string(util::repo_root().join(".github/workflows/release.yml"))
-            .unwrap();
+        use std::{
+            io::Write,
+            process::{Command, Stdio},
+        };
+        let workflow =
+            fs::read_to_string(util::repo_root().join(".github/workflows/release.yml")).unwrap();
         let marker = "          if ! jq -e '\n            . as $details\n";
-        let start = workflow.find(marker).expect("missing release tag policy filter")
+        let start = workflow
+            .find(marker)
+            .expect("missing release tag policy filter")
             + "          if ! jq -e '\n".len();
-        let end = workflow[start..].find("' <<<\"$details\" >/dev/null; then")
+        let end = workflow[start..]
+            .find("' <<<\"$details\" >/dev/null; then")
             .map(|offset| start + offset)
             .expect("missing release tag policy filter terminator");
         let filter = &workflow[start..end];
@@ -316,7 +322,12 @@ mod tests {
                 .stderr(Stdio::piped())
                 .spawn()
                 .expect("jq is required by protected CD and release policy testing");
-            child.stdin.take().unwrap().write_all(fixture.to_string().as_bytes()).unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(fixture.to_string().as_bytes())
+                .unwrap();
             let output = child.wait_with_output().unwrap();
             assert!(
                 output.status.code() != Some(3),
@@ -326,7 +337,10 @@ mod tests {
             output.status.success()
         };
 
-        assert!(passes(&valid), "redacted bypass field must use the audited pin");
+        assert!(
+            passes(&valid),
+            "redacted bypass field must use the audited pin"
+        );
         let mut changed = valid.clone();
         changed[0]["bypass_actors"] = serde_json::json!([]);
         assert!(passes(&changed), "visible empty bypass list must pass");
@@ -335,7 +349,10 @@ mod tests {
         assert!(!passes(&changed), "a visible bypass actor must fail");
         changed = valid.clone();
         changed[0]["updated_at"] = serde_json::json!("2026-10-13T23:00:00Z");
-        assert!(!passes(&changed), "any unreviewed ruleset revision must fail");
+        assert!(
+            !passes(&changed),
+            "any unreviewed ruleset revision must fail"
+        );
         changed = valid.clone();
         changed[0]["id"] = serde_json::json!(24620025);
         assert!(!passes(&changed), "an unreviewed ruleset ID must fail");
