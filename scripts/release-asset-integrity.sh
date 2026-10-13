@@ -85,8 +85,120 @@ title=$7
 phase=$8
 case "$phase" in draft|published) ;; *) echo "invalid release phase" >&2; exit 2 ;; esac
 if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ]; then echo "missing GitHub API context" >&2; exit 1; fi
-if ! [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+|extension-[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-  echo "invalid release tag" >&2
+case "$scope" in
+  lsp) tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+
+
+captured=$(cat -- "$manifest")
+current=$(collect_local | jq -s 'sort_by(.name)')
+if ! jq -ne --argjson a "$captured" --argjson b "$current" '$a == $b'; then
+  echo "locally verified release assets changed after digest capture" >&2
+  exit 1
+fi
+
+release_json=$(gh api "repos/$GH_REPO/releases/tags/$tag")
+release_id=$(jq -er '.id | select(type=="number" and . > 0 and floor == .)' <<<"$release_json")
+# --slurp retains all API pages as nested arrays; incomplete pages fail closed.
+pages_json=$(gh api --paginate --slurp "repos/$GH_REPO/releases/$release_id/assets?per_page=100")
+
+if ! jq -ne \
+  --argjson release "$release_json" \
+  --argjson pages "$pages_json" \
+  --argjson expected "$captured" \
+  --arg tag "$tag" --arg title "$title" --arg phase "$phase" --arg scope "$scope" '
+  def valid_asset:
+    (type == "object")
+    and (.id | type == "number" and . > 0 and floor == .)
+    and (.name | type == "string" and length > 0)
+    and (.state == "uploaded")
+    and (.size | type == "number" and . > 0 and floor == .)
+    and (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"));
+  def identity: {id,name,size,state,digest};
+  ($release | type == "object")
+  and ($release.tag_name == $tag)
+  and ($release.name == $title)
+  and ($release.draft == ($phase == "draft"))
+  and (if $phase == "published" then $release.immutable == true else true end)
+  and ($release.assets | type == "array")
+  and ($pages | type == "array" and length > 0 and all(.[];type == "array" and length <= 100))
+  and (($pages | add) | type == "array")
+  and ($expected | type == "array" and length == (if $scope == "lsp" then 23 else 0 end))
+  and ([$expected[].name] | unique | length == ($expected | length))
+  and (all($expected[]; (.name | type == "string") and (.size | type == "number" and . > 0) and (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))))
+  and ($release.assets | length == ($expected | length))
+  and (($pages | add) | length == ($expected | length))
+  and (all($release.assets[]; valid_asset))
+  and (all(($pages | add)[]; valid_asset))
+  and ([$release.assets[].name] | unique | length == ($expected | length))
+  and ([($pages | add)[].name] | unique | length == ($expected | length))
+  and ([$release.assets[].id] | unique | length == ($expected | length))
+  and ([($pages | add)[].id] | unique | length == ($expected | length))
+  and (([$release.assets[] | identity] | sort_by(.name)) ==
+       ([($pages | add)[] | identity] | sort_by(.name)))
+  and (([$release.assets[] | {name,size,digest}] | sort_by(.name)) == ($expected | sort_by(.name)))
+  ' >/dev/null; then
+  echo "GitHub release assets differ from captured SHA-256, size or uploaded state" >&2
+  exit 1
+fi
+echo "verified $phase release assets against captured local SHA-256 digests ($scope)"
+ ;;
+  extension) tag_pattern='^v-extension-[0-9]+\.[0-9]+\.[0-9]+
+
+captured=$(cat -- "$manifest")
+current=$(collect_local | jq -s 'sort_by(.name)')
+if ! jq -ne --argjson a "$captured" --argjson b "$current" '$a == $b'; then
+  echo "locally verified release assets changed after digest capture" >&2
+  exit 1
+fi
+
+release_json=$(gh api "repos/$GH_REPO/releases/tags/$tag")
+release_id=$(jq -er '.id | select(type=="number" and . > 0 and floor == .)' <<<"$release_json")
+# --slurp retains all API pages as nested arrays; incomplete pages fail closed.
+pages_json=$(gh api --paginate --slurp "repos/$GH_REPO/releases/$release_id/assets?per_page=100")
+
+if ! jq -ne \
+  --argjson release "$release_json" \
+  --argjson pages "$pages_json" \
+  --argjson expected "$captured" \
+  --arg tag "$tag" --arg title "$title" --arg phase "$phase" --arg scope "$scope" '
+  def valid_asset:
+    (type == "object")
+    and (.id | type == "number" and . > 0 and floor == .)
+    and (.name | type == "string" and length > 0)
+    and (.state == "uploaded")
+    and (.size | type == "number" and . > 0 and floor == .)
+    and (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"));
+  def identity: {id,name,size,state,digest};
+  ($release | type == "object")
+  and ($release.tag_name == $tag)
+  and ($release.name == $title)
+  and ($release.draft == ($phase == "draft"))
+  and (if $phase == "published" then $release.immutable == true else true end)
+  and ($release.assets | type == "array")
+  and ($pages | type == "array" and length > 0 and all(.[];type == "array" and length <= 100))
+  and (($pages | add) | type == "array")
+  and ($expected | type == "array" and length == (if $scope == "lsp" then 23 else 0 end))
+  and ([$expected[].name] | unique | length == ($expected | length))
+  and (all($expected[]; (.name | type == "string") and (.size | type == "number" and . > 0) and (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))))
+  and ($release.assets | length == ($expected | length))
+  and (($pages | add) | length == ($expected | length))
+  and (all($release.assets[]; valid_asset))
+  and (all(($pages | add)[]; valid_asset))
+  and ([$release.assets[].name] | unique | length == ($expected | length))
+  and ([($pages | add)[].name] | unique | length == ($expected | length))
+  and ([$release.assets[].id] | unique | length == ($expected | length))
+  and ([($pages | add)[].id] | unique | length == ($expected | length))
+  and (([$release.assets[] | identity] | sort_by(.name)) ==
+       ([($pages | add)[] | identity] | sort_by(.name)))
+  and (([$release.assets[] | {name,size,digest}] | sort_by(.name)) == ($expected | sort_by(.name)))
+  ' >/dev/null; then
+  echo "GitHub release assets differ from captured SHA-256, size or uploaded state" >&2
+  exit 1
+fi
+echo "verified $phase release assets against captured local SHA-256 digests ($scope)"
+ ;;
+esac
+if ! [[ "$tag" =~ $tag_pattern ]]; then
+  echo "release tag does not match the validated scope" >&2
   exit 2
 fi
 
