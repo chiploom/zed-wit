@@ -414,29 +414,23 @@ fn verify_reviewed_merge_tree(
     // a rebase merge instead applies N commits consecutively. Do not infer
     // that layout from the version in the immediate parent alone.
     let first_parent = git(&["rev-parse", &format!("{merge_sha}^")], root)?;
-    let mut predecessors = vec![first_parent];
-    if pr_commits > 1 {
-        let rebase_parent = git(&["rev-parse", &format!("{merge_sha}~{pr_commits}")], root)?;
-        if !predecessors.contains(&rebase_parent) {
-            predecessors.push(rebase_parent);
+    let first_parent_diff = git(
+        &["diff", "--no-ext-diff", "--name-only", &first_parent, merge_sha, "--"],
+        root,
+    )?;
+    // Try a squash or two-parent merge first. Resolving merge~N is only
+    // appropriate for a rebase and may not exist for a short-history squash.
+    if validate_changed_files(&first_parent_diff, scope, candidate).is_err() {
+        if pr_commits == 1 {
+            return Err("merged release tree contains unreviewed paths or misses release files".into());
         }
-    }
-    // The actual merged diff must be release-only for at least one supported
-    // merge layout. All approved file blobs must match the PR head below,
-    // regardless of which layout produced the merge commit.
-    let mut valid_merged_delta = false;
-    for predecessor in predecessors {
-        let changed = git(
-            &["diff", "--no-ext-diff", "--name-only", &predecessor, merge_sha, "--"],
+        let rebase_parent = git(&["rev-parse", &format!("{merge_sha}~{pr_commits}")], root)?;
+        let rebase_diff = git(
+            &["diff", "--no-ext-diff", "--name-only", &rebase_parent, merge_sha, "--"],
             root,
         )?;
-        if validate_changed_files(&changed, scope, candidate).is_ok() {
-            valid_merged_delta = true;
-            break;
-        }
-    }
-    if !valid_merged_delta {
-        return Err("merged release tree contains unreviewed paths or misses release files".into());
+        validate_changed_files(&rebase_diff, scope, candidate)
+            .map_err(|_| "merged release tree contains unreviewed paths or misses release files")?;
     }
 
     let notes = format!("docs/releases/{}/v{}.md", scope.name(), candidate.value());
