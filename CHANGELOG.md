@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### v-extension-0.5.0 (extension)
+
+- TODO: Replace with reviewed release details
+
 - Add an opt-in, version-aware Rust xtask publishing frontend with a read-only
   default plan, separate LSP/extension SemVer streams, human-reviewed
   release-preparation PRs, and explicitly confirmed protected CD dispatch.
