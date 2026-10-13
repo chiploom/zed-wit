@@ -2941,7 +2941,7 @@ dependencies = [
 
 [[package]]
 name = "zed-wit"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "sha2",
  "toml",
