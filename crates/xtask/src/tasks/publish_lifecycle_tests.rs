@@ -358,7 +358,6 @@ fn exercise_lifecycle(scope: Scope) {
         &tag,
         &merged_sha,
         false,
-        true,
         3,
         |args| {
             requests.push(args.join(" "));
@@ -455,7 +454,6 @@ fn protected_cd_transport_failures_do_not_qualify_publication() {
             tag,
             sha,
             scenario == Failure::MissingRetryHistory,
-            true,
             2,
             |args| {
                 requests.push(args.join(" "));
@@ -540,7 +538,6 @@ fn failed_cd_run_allows_explicit_retry_without_claiming_publication() {
         tag,
         sha,
         true,
-        false,
         0,
         |args| {
             endpoints.push(args.join(" "));
