@@ -84,10 +84,7 @@ pub(crate) fn test_publish(args: &[String]) -> Result<(), String> {
     ])?;
     // Execute the same production shell verifier used in protected CD with
     // disposable files and a stubbed GitHub CLI. Never contact GitHub here.
-    run(
-        "bash",
-        &["scripts/test-release-asset-integrity.sh".into()],
-    )
+    run("bash", &["scripts/test-release-asset-integrity.sh".into()])
 }
 
 pub(crate) fn test_all(args: &[String]) -> Result<(), String> {
