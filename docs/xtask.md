@@ -202,11 +202,14 @@ responses; and validate mock CD dispatch, run identity, and immutable publicatio
 No production GitHub credentials, network calls, release tags, or protected CD
 dispatches are involved. Tests clean up their temporary fixtures automatically.
 The same tests are included in `cargo xtask verify` and CI. These scenarios
-exercise real Git operations and the production `resume` helper that checks the
-protected workflow, run history, exact dispatch response, run identity, polling,
-and immutable-release finalization through a deterministic mocked request
-transport. Negative cases cover concurrent CD runs, ambiguous dispatches,
-unexpected SHA, stalled runs, immutable-release failures, and controlled retries.
+exercise real Git operations and the production `submit` PR-creation and
+`resume` CD-dispatch helpers through deterministic mocked GitHub requests.
+The submission fixture tests atomic branch creation, PR identity verification,
+partial-response recovery without re-pushing, duplicate-PR refusal, and
+conflicting remote refs. The resume fixture checks protected workflow state,
+global run history, exact dispatch response, run identity, polling, and immutable
+release finalization. Negative cases cover concurrent CD runs, ambiguous
+dispatches, unexpected SHA, stalled runs, mutable releases, and controlled retries.
 
 **Qualification boundary:** the complete `publish --prepare`/`--submit`/`--resume`
 CLI commands are not yet invoked as separate child processes against a
