@@ -180,7 +180,10 @@ reject() {
   fi
   if ! grep -Fq -- "$expected" "$tmp/err"; then
     echo "unexpected CLI rejection: $label" >&2
-    cat "$tmp/err" >&2
+    # These are disposable synthetic fixtures without real credentials.
+    # Cargo test failures report their reason on stdout, not stderr.
+    tail -n 100 "$tmp/out" >&2
+    tail -n 100 "$tmp/err" >&2
     exit 1
   fi
 }
