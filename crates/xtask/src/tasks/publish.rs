@@ -399,6 +399,47 @@ fn historical_predecessor_version(
     }
     Ok(immediate)
 }
+fn verified_regular_git_blob_entry(record: &str, expected_path: &str) -> Result<String, String> {
+    // git ls-tree emits MODE TYPE SHA<TAB>PATH. Release metadata files must
+    // be regular, non-executable tracked files, never symlinks/submodules.
+    let (metadata, path) = record
+        .trim_end_matches('\n')
+        .split_once('\t')
+        .ok_or("release file has no unambiguous Git tree entry")?;
+    let fields = metadata.split_whitespace().collect::<Vec<_>>();
+    if path != expected_path
+        || fields.len() != 3
+        || fields[0] != "100644"
+        || fields[1] != "blob"
+        || !valid_sha(fields[2])
+    {
+        return Err(format!(
+            "release path {expected_path} must be a normal non-executable Git blob"
+        ));
+    }
+    Ok(fields[2].to_owned())
+}
+
+fn verified_reviewed_git_blob(tree: &Value, head_sha: &str, path: &str) -> Result<String, String> {
+    if !valid_sha(head_sha)
+        || tree["sha"].as_str() != Some(head_sha)
+        || tree["truncated"].as_bool() != Some(false)
+    {
+        return Err("reviewed PR Git tree is incomplete or does not match the reviewed commit".into());
+    }
+    let entries = tree["tree"].as_array().ok_or("reviewed PR Git tree omitted its entries")?;
+    let mut matches = entries.iter().filter(|entry| entry["path"].as_str() == Some(path));
+    let item = matches.next().ok_or_else(|| format!("reviewed PR Git tree omitted expected file: {path}"))?;
+    if matches.next().is_some()
+        || item["mode"].as_str() != Some("100644")
+        || item["type"].as_str() != Some("blob")
+    {
+        return Err(format!("reviewed release file has unsafe or ambiguous Git mode: {path}"));
+    }
+    item["sha"].as_str().filter(|sha| valid_sha(sha)).map(str::to_owned)
+        .ok_or_else(|| format!("reviewed PR Git tree has an invalid blob SHA: {path}"))
+}
+
 fn verify_reviewed_merge_tree(
     root: &Path,
     scope: Scope,
@@ -456,9 +497,10 @@ fn verify_reviewed_merge_tree(
         "CHANGELOG.md",
         notes.as_str(),
     ] {
-        let merged = git(&["rev-parse", &format!("{merge_sha}:{path}")], root)?;
+        let merged_entry = git(&["ls-tree", merge_sha, "--", path], root)?;
+        let merged = verified_regular_git_blob_entry(&merged_entry, path)?;
         let approved = reviewed_blob(path)?;
-        if !valid_sha(&merged) || !valid_sha(&approved) || merged != approved {
+        if !valid_sha(&approved) || merged != approved {
             return Err(format!(
                 "merged release content differs from the reviewed PR head: {path}"
             ));
@@ -466,9 +508,10 @@ fn verify_reviewed_merge_tree(
     }
     if scope == Scope::Extension {
         let path = "extension.toml";
-        let merged = git(&["rev-parse", &format!("{merge_sha}:{path}")], root)?;
+        let merged_entry = git(&["ls-tree", merge_sha, "--", path], root)?;
+        let merged = verified_regular_git_blob_entry(&merged_entry, path)?;
         let approved = reviewed_blob(path)?;
-        if !valid_sha(&merged) || !valid_sha(&approved) || merged != approved {
+        if !valid_sha(&approved) || merged != approved {
             return Err("merged extension manifest differs from reviewed PR head".into());
         }
     }
@@ -2085,20 +2128,15 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         pr_commits,
     )?;
     require_exact_release_source(&main_sha, &merge_sha)?;
+    // The Git Trees API preserves blob modes, unlike the Contents API,
+    // which may transparently dereference symbolic links.
+    let reviewed_tree: Value = serde_json::from_str(&gh(
+        &["api", &format!("repos/{REPO}/git/trees/{head_sha}?recursive=1")],
+        root,
+    )?)
+    .map_err(|_| "cannot read the reviewed PR's immutable Git tree")?;
     verify_reviewed_merge_tree(root, scope, version, &merge_sha, pr_commits, |file| {
-        let response: Value = serde_json::from_str(&gh(
-            &[
-                "api",
-                &format!("repos/{REPO}/contents/{file}?ref={head_sha}"),
-            ],
-            root,
-        )?)
-        .map_err(|_| format!("cannot verify reviewed Git blob identity: {file}"))?;
-        response["sha"]
-            .as_str()
-            .filter(|sha| valid_sha(sha))
-            .map(str::to_owned)
-            .ok_or_else(|| format!("reviewed PR file has no valid Git blob SHA: {file}"))
+        verified_reviewed_git_blob(&reviewed_tree, &head_sha, file)
     })?;
 
     // Serialize this checkout's entire history-check -> dispatch transition.
