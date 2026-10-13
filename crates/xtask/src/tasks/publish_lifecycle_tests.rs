@@ -99,7 +99,7 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        cleanup_disposable_fixture(&self.root);
     }
 }
 
