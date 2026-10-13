@@ -1530,21 +1530,46 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
     crate::tasks::validation::verify(&[])?;
 
     validate_candidate(scope, version, &release_tag_history(root)?)?;
-    let existing = gh(
-        &[
-            "pr",
-            "list",
-            "-R",
-            REPO,
-            "--state",
-            "all",
-            "--head",
-            &branch,
-            "--json",
-            "number,headRefName,baseRefName",
-        ],
+    let push_url = canonical_push_destination(root)?;
+    submit_preparation_pr(
         root,
-    )?;
+        scope,
+        version,
+        &remote_sha,
+        &push_url,
+        |args| gh(args, root),
+        || {
+            Ok(check_remote(root)? == remote_sha
+                && canonical_push_destination(root)? == push_url)
+        },
+    )
+}
+
+fn submit_preparation_pr(
+    root: &Path,
+    scope: Scope,
+    version: Version,
+    remote_sha: &str,
+    push_url: &str,
+    mut request: impl FnMut(&[&str]) -> Result<String, String>,
+    mut verify_remote: impl FnMut() -> Result<bool, String>,
+) -> Result<(), String> {
+    // The caller must have completed the manifest, review, policy, and
+    // canonical remote/push-destination checks before entering this stage.
+    let tag = scope.tag(version);
+    let branch = format!("release-prep/{}-{tag}", scope.name());
+    let existing = request(&[
+        "pr",
+        "list",
+        "-R",
+        REPO,
+        "--state",
+        "all",
+        "--head",
+        &branch,
+        "--json",
+        "number,headRefName,baseRefName",
+    ])?;
     let prs: Value = serde_json::from_str(&existing)
         .map_err(|e| format!("parse existing preparation PRs: {e}"))?;
     if !prs.as_array().is_some_and(Vec::is_empty) {
@@ -1553,27 +1578,23 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
                 .into(),
         );
     }
-    // A prior attempt may have pushed successfully before gh pr create failed.
-    // Resume only if the remote ref is exactly the validated local commit;
-    // never force-push or silently replace another person's branch.
+    // A prior attempt may have pushed successfully before PR creation failed.
+    // Resume only when the remote ref is exactly the validated local commit.
     let head_sha = git(&["rev-parse", "HEAD"], root)?;
-    let push_url = canonical_push_destination(root)?;
     let ref_name = format!("refs/heads/{branch}");
-    let remote_ref = git(&["ls-remote", "--heads", &push_url, &ref_name], root)?;
+    let remote_ref = git(&["ls-remote", "--heads", push_url, &ref_name], root)?;
     let push_state = classify_preparation_branch(&remote_ref, &branch, &head_sha)?;
     if push_state == PreparationPush::PushNew {
-        if check_remote(root)? != remote_sha || canonical_push_destination(root)? != push_url {
+        if !verify_remote()? {
             return Err("remote identity or default branch moved before PR submission".into());
         }
-        // Explicit empty expected value atomically asserts the branch does
-        // not exist on the server. Git rejects a competing branch creation
-        // even when its commit is an ancestor of our HEAD.
+        // An empty expected SHA rejects concurrent branch creation.
         git(
             &[
                 "push",
                 "--porcelain",
                 &format!("--force-with-lease={ref_name}:"),
-                &push_url,
+                push_url,
                 &format!("HEAD:{ref_name}"),
             ],
             root,
@@ -1583,7 +1604,7 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
             "Remote preparation branch already matches validated local HEAD; resuming PR creation without a new push."
         );
     }
-    let written_ref = git(&["ls-remote", "--heads", &push_url, &ref_name], root)?;
+    let written_ref = git(&["ls-remote", "--heads", push_url, &ref_name], root)?;
     if classify_preparation_branch(&written_ref, &branch, &head_sha)?
         != PreparationPush::ExistingExactCommit
     {
@@ -1599,23 +1620,30 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
         version.value(),
         scope.name()
     );
-    let created = gh(
-        &[
-            "pr", "create", "-R", REPO, "--base", "main", "--head", &branch, "--title", &title,
-            "--body", &body,
-        ],
-        root,
-    )?;
+    let created = request(&[
+        "pr",
+        "create",
+        "-R",
+        REPO,
+        "--base",
+        "main",
+        "--head",
+        &branch,
+        "--title",
+        &title,
+        "--body",
+        &body,
+    ])?;
     let created_url = created.trim();
     let number = created_url
         .strip_prefix("https://github.com/chiploom/zed-wit/pull/")
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value != 0)
         .ok_or("GitHub returned an ambiguous preparation PR URL; inspect remotely")?;
-    let created_pr: Value = serde_json::from_str(&gh(
-        &["api", &format!("repos/{REPO}/pulls/{number}")],
-        root,
-    )?)
+    let created_pr: Value = serde_json::from_str(&request(&[
+        "api",
+        &format!("repos/{REPO}/pulls/{number}"),
+    ])?)
     .map_err(|_| "cannot verify created PR identity; inspect remotely".to_owned())?;
     if created_pr["base"]["ref"].as_str() != Some("main")
         || created_pr["head"]["ref"].as_str() != Some(branch.as_str())
@@ -1626,7 +1654,7 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
             "created PR head, repository, or base differs from validated submission".into(),
         );
     }
-    let final_ref = git(&["ls-remote", "--heads", &push_url, &ref_name], root)?;
+    let final_ref = git(&["ls-remote", "--heads", push_url, &ref_name], root)?;
     if classify_preparation_branch(&final_ref, &branch, &head_sha)?
         != PreparationPush::ExistingExactCommit
     {
