@@ -418,3 +418,149 @@ fn lsp_prepare_submit_squash_resume_mocked_cd_lifecycle() {
 fn extension_prepare_submit_squash_resume_mocked_cd_lifecycle() {
     exercise_lifecycle(Scope::Extension);
 }
+
+
+#[test]
+fn protected_cd_transport_failures_do_not_qualify_publication() {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum Failure {
+        InactiveWorkflow,
+        MalformedWorkflow,
+        ConcurrentRun,
+        MissingRetryHistory,
+        FailedDispatch,
+        AmbiguousDispatch,
+        MismatchedRun,
+        NonimmutableRelease,
+        PendingTimeout,
+    }
+    let scenarios = [
+        Failure::InactiveWorkflow,
+        Failure::MalformedWorkflow,
+        Failure::ConcurrentRun,
+        Failure::MissingRetryHistory,
+        Failure::FailedDispatch,
+        Failure::AmbiguousDispatch,
+        Failure::MismatchedRun,
+        Failure::NonimmutableRelease,
+        Failure::PendingTimeout,
+    ];
+    let sha = "0123456789abcdef0123456789abcdef01234567";
+    let tag = "v0.1.3";
+    for scenario in scenarios {
+        let mut requests = Vec::new();
+        let mut sleeps = 0;
+        let result = dispatch_protected_cd(
+            Scope::Lsp,
+            tag,
+            sha,
+            scenario == Failure::MissingRetryHistory,
+            true,
+            2,
+            |args| {
+                requests.push(args.join(" "));
+                match args {
+                    ["api", endpoint] if *endpoint == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}") => {
+                        match scenario {
+                            Failure::MalformedWorkflow => Ok("{".to_owned()),
+                            Failure::InactiveWorkflow => Ok(json!({"state":"disabled_manually"}).to_string()),
+                            _ => Ok(json!({"state":"active"}).to_string()),
+                        }
+                    }
+                    ["api", "--paginate", "--jq", _, endpoint] if *endpoint == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100") => {
+                        if scenario == Failure::ConcurrentRun {
+                            Ok(format!("2\t{sha}\tworkflow_dispatch\tqueued\tunknown\tCD / publish / lsp / {tag}"))
+                        } else {
+                            Ok(String::new())
+                        }
+                    }
+                    ["api", "-X", "POST", ..] => match scenario {
+                        Failure::FailedDispatch => Err("simulated dispatch transport failure".into()),
+                        Failure::AmbiguousDispatch => Ok("{}".into()),
+                        _ => Ok(json!({
+                            "workflow_run_id":42,
+                            "html_url":"https://github.com/chiploom/zed-wit/actions/runs/42"
+                        }).to_string()),
+                    },
+                    ["api", endpoint] if *endpoint == format!("repos/{REPO}/actions/runs/42") => {
+                        Ok(json!({
+                            "id":42,
+                            "head_sha":if scenario == Failure::MismatchedRun {"bad-sha"} else {sha},
+                            "head_branch":"main",
+                            "event":"workflow_dispatch",
+                            "path":".github/workflows/release.yml",
+                            "display_title":format!("CD / publish / lsp / {tag}"),
+                            "status":if scenario == Failure::PendingTimeout {"queued"} else {"completed"},
+                            "conclusion":if scenario == Failure::PendingTimeout {Value::Null} else {json!("success")}
+                        }).to_string())
+                    }
+                    ["api", endpoint] if *endpoint == format!("repos/{REPO}/releases/tags/{tag}") => {
+                        Ok(json!({
+                            "draft":false,
+                            "tag_name":tag,
+                            "immutable":scenario != Failure::NonimmutableRelease
+                        }).to_string())
+                    }
+                    _ => Err(format!("unexpected mocked API endpoint: {args:?}")),
+                }
+            },
+            |_| sleeps += 1,
+        );
+        assert!(result.is_err(), "unsafe scenario {scenario:?} succeeded");
+        assert!(
+            !requests.iter().any(|v| v.contains("releases/tags/"))
+                || scenario == Failure::NonimmutableRelease,
+            "failed scenario {scenario:?} queried publication state unexpectedly"
+        );
+        let posted = requests.iter().any(|v| v.contains(" POST "));
+        if matches!(
+            scenario,
+            Failure::InactiveWorkflow
+                | Failure::MalformedWorkflow
+                | Failure::ConcurrentRun
+                | Failure::MissingRetryHistory
+        ) {
+            assert!(!posted, "{scenario:?} dispatched despite unsafe precondition");
+        }
+        assert_eq!(
+            sleeps,
+            if scenario == Failure::PendingTimeout { 2 } else { 0 },
+            "unexpected polling side effects in {scenario:?}"
+        );
+    }
+}
+
+#[test]
+fn failed_cd_run_allows_explicit_retry_without_claiming_publication() {
+    let sha = "0123456789abcdef0123456789abcdef01234567";
+    let tag = "v0.1.3";
+    let mut endpoints = Vec::new();
+    dispatch_protected_cd(
+        Scope::Lsp,
+        tag,
+        sha,
+        true,
+        false,
+        0,
+        |args| {
+            endpoints.push(args.join(" "));
+            match args {
+                ["api", endpoint] if *endpoint == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}") => {
+                    Ok(json!({"state":"active"}).to_string())
+                }
+                ["api", "--paginate", "--jq", _, endpoint] if *endpoint == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100") => {
+                    Ok(format!("41\t{sha}\tworkflow_dispatch\tcompleted\tfailure\tCD / publish / lsp / {tag}"))
+                }
+                ["api", "-X", "POST", ..] => Ok(json!({
+                    "workflow_run_id":42,
+                    "html_url":"https://github.com/chiploom/zed-wit/actions/runs/42"
+                }).to_string()),
+                _ => Err("retry fixture refused extra request".to_owned()),
+            }
+        },
+        |_| panic!("nonwaiting CD dispatch cannot sleep"),
+    )
+    .unwrap();
+    assert_eq!(endpoints.len(), 3);
+    assert!(endpoints[2].contains(" POST "));
+}
