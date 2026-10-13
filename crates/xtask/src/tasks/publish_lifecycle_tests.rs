@@ -710,7 +710,7 @@ fn merged_release_tree_rejects_unreviewed_source_and_release_file_edits() {
             )
             .expect_err("merged tree must be identical to the reviewed release content");
             assert!(
-                err.contains("unexpected change")
+                err.contains("unreviewed paths")
                     || err.contains("differs from the reviewed PR head"),
                 "unexpected provenance error for {tampered}: {err}"
             );
