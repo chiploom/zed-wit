@@ -39,7 +39,11 @@ impl Fixture {
         git(&["config", "commit.gpgSign", "false"], &repo).unwrap();
         let hooks = root.join("empty-hooks");
         fs::create_dir(&hooks).unwrap();
-        git(&["config", "core.hooksPath", hooks.to_str().unwrap()], &repo).unwrap();
+        git(
+            &["config", "core.hooksPath", hooks.to_str().unwrap()],
+            &repo,
+        )
+        .unwrap();
 
         fs::create_dir_all(repo.join("src")).unwrap();
         fs::create_dir_all(repo.join("crates/wit-language-server/src")).unwrap();
@@ -48,7 +52,8 @@ impl Fixture {
         fs::write(
             repo.join("crates/wit-language-server/src/lib.rs"),
             "pub fn fixture() {}\n",
-        ).unwrap();
+        )
+        .unwrap();
         fs::write(
             repo.join("Cargo.toml"),
             "[package]\nname = \"zed-wit\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\nmembers = [\"crates/wit-language-server\"]\nresolver = \"3\"\n",
@@ -56,18 +61,18 @@ impl Fixture {
         fs::write(
             repo.join("crates/wit-language-server/Cargo.toml"),
             "[package]\nname = \"wit-language-server\"\nversion = \"0.1.2\"\nedition = \"2024\"\n",
-        ).unwrap();
+        )
+        .unwrap();
         fs::write(repo.join("extension.toml"), "version = \"0.1.0\"\n").unwrap();
-        fs::write(repo.join("CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n- fixture\n")
-            .unwrap();
+        fs::write(
+            repo.join("CHANGELOG.md"),
+            "# Changelog\n\n## Unreleased\n\n- fixture\n",
+        )
+        .unwrap();
         command("cargo", &["generate-lockfile", "--offline"], &repo).unwrap();
         git(&["add", "."], &repo).unwrap();
         git(&["commit", "--no-verify", "-qm", "initial"], &repo).unwrap();
-        git(
-            &["remote", "add", "origin", bare.to_str().unwrap()],
-            &repo,
-        )
-        .unwrap();
+        git(&["remote", "add", "origin", bare.to_str().unwrap()], &repo).unwrap();
         git(&["push", "-q", "origin", "main"], &repo).unwrap();
         Self { root, repo, bare }
     }
@@ -170,8 +175,7 @@ fn exercise_lifecycle(scope: Scope) {
     let ref_name = format!("refs/heads/{branch}");
     let push_url = fixture.bare.to_str().unwrap();
     assert_eq!(
-        classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha)
-            .unwrap(),
+        classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha).unwrap(),
         PreparationPush::PushNew
     );
     git(
@@ -186,15 +190,20 @@ fn exercise_lifecycle(scope: Scope) {
     )
     .unwrap();
     assert_eq!(
-        classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha)
-            .unwrap(),
+        classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha).unwrap(),
         PreparationPush::ExistingExactCommit
     );
     // A same-SHA push is a no-op and may legitimately succeed. Advance
     // this disposable checkout so the second push actually tries to update
     // an already-allocated ref; the expected-absent lease must reject it.
     git(
-        &["commit", "--allow-empty", "--no-verify", "-qm", "competing commit"],
+        &[
+            "commit",
+            "--allow-empty",
+            "--no-verify",
+            "-qm",
+            "competing commit",
+        ],
         repo,
     )
     .unwrap();
@@ -213,8 +222,7 @@ fn exercise_lifecycle(scope: Scope) {
         .is_err()
     );
     assert_eq!(
-        classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha)
-            .unwrap(),
+        classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha).unwrap(),
         PreparationPush::ExistingExactCommit
     );
     git(&["reset", "--hard", &reviewed_sha], repo).unwrap();
@@ -244,7 +252,11 @@ fn exercise_lifecycle(scope: Scope) {
             "patch":patch,
         }));
     }
-    let pr_files = records.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+    let pr_files = records
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
     let reviewed_prior = reviewed_pr_file_versions(&pr_files, scope, candidate).unwrap();
     assert_eq!(reviewed_prior, before);
 
@@ -255,7 +267,10 @@ fn exercise_lifecycle(scope: Scope) {
     let merged_sha = fixture.commit("merge reviewed release preparation");
     assert_ne!(reviewed_sha, merged_sha);
     git(&["push", "-q", "origin", "main"], repo).unwrap();
-    assert_eq!(fixture.remote_ref("main").split_whitespace().next(), Some(merged_sha.as_str()));
+    assert_eq!(
+        fixture.remote_ref("main").split_whitespace().next(),
+        Some(merged_sha.as_str())
+    );
     let pr = json!({
         "merged":true,
         "base":{"ref":"main"},
@@ -269,13 +284,18 @@ fn exercise_lifecycle(scope: Scope) {
     assert_eq!(merged, merged_sha);
     assert_eq!(reviewed_head, reviewed_sha);
     assert_eq!(commits, 1);
-    let historical = historical_predecessor_version(repo, scope, &merged, commits, false, candidate)
-        .unwrap();
+    let historical =
+        historical_predecessor_version(repo, scope, &merged, commits, false, candidate).unwrap();
     assert_eq!(historical, reviewed_prior);
     let on_reviewed_head = git_manifest_version(repo, &reviewed_sha, scope, false).unwrap();
     let on_merge = git_manifest_version(repo, &merged, scope, false).unwrap();
-    ensure_release_transition(historical, on_reviewed_head, on_merge, manifest_version(repo, scope).unwrap())
-        .unwrap();
+    ensure_release_transition(
+        historical,
+        on_reviewed_head,
+        on_merge,
+        manifest_version(repo, scope).unwrap(),
+    )
+    .unwrap();
     if scope == Scope::Extension {
         let predecessor =
             historical_predecessor_version(repo, scope, &merged, commits, true, candidate).unwrap();
@@ -315,19 +335,26 @@ fn exercise_lifecycle(scope: Scope) {
     })
     .to_string();
     validate_release_environment_protection(&environment, Some(&only_main)).unwrap();
-    assert!(validate_release_environment_protection(
-        &environment,
-        Some(&only_main.replace("\"main\"", "\"main*\"")),
-    )
-    .is_err());
+    assert!(
+        validate_release_environment_protection(
+            &environment,
+            Some(&only_main.replace("\"main\"", "\"main*\"")),
+        )
+        .is_err()
+    );
     validate_resume_candidate(scope, candidate, &BTreeSet::new(), false).unwrap();
-    let dispatch_lock = try_acquire_dispatch_lock(&repo.join(".git/lifecycle-dispatch.lock")).unwrap();
+    let dispatch_lock =
+        try_acquire_dispatch_lock(&repo.join(".git/lifecycle-dispatch.lock")).unwrap();
     assert!(try_acquire_dispatch_lock(&repo.join(".git/lifecycle-dispatch.lock")).is_err());
     validate_prior_cd_runs("", &merged_sha, scope, &tag, false).unwrap();
     let inputs = protected_dispatch_args(scope, &tag, &merged_sha);
     assert!(inputs.iter().any(|v| v == "inputs[operation]=publish"));
     assert!(inputs.iter().any(|v| v == &format!("inputs[tag]={tag}")));
-    assert!(inputs.iter().any(|v| v == &format!("inputs[expected_sha]={merged_sha}")));
+    assert!(
+        inputs
+            .iter()
+            .any(|v| v == &format!("inputs[expected_sha]={merged_sha}"))
+    );
     let (run_id, _) = parse_dispatch_identity(
         r#"{"workflow_run_id":42,"html_url":"https://github.com/chiploom/zed-wit/actions/runs/42"}"#,
     )
@@ -344,27 +371,30 @@ fn exercise_lifecycle(scope: Scope) {
     );
     let published = json!({"draft":false,"tag_name":tag,"immutable":true});
     verify_published_release(&published, &tag).unwrap();
-    assert!(verify_published_release(
-        &json!({"draft":true,"tag_name":tag,"immutable":true}),
-        &tag,
-    )
-    .is_err());
-    assert!(verify_published_release(
-        &json!({"draft":false,"tag_name":tag,"immutable":false}),
-        &tag,
-    )
-    .is_err());
-    assert!(validate_prior_cd_runs(
-        &format!("42\t{merged}\tworkflow_dispatch\tcompleted\tsuccess\t{title}"),
-        &merged,
-        scope,
-        &tag,
-        false,
-    )
-    .is_err());
+    assert!(
+        verify_published_release(&json!({"draft":true,"tag_name":tag,"immutable":true}), &tag,)
+            .is_err()
+    );
+    assert!(
+        verify_published_release(
+            &json!({"draft":false,"tag_name":tag,"immutable":false}),
+            &tag,
+        )
+        .is_err()
+    );
+    assert!(
+        validate_prior_cd_runs(
+            &format!("42\t{merged}\tworkflow_dispatch\tcompleted\tsuccess\t{title}"),
+            &merged,
+            scope,
+            &tag,
+            false,
+        )
+        .is_err()
+    );
     drop(dispatch_lock);
     assert!(try_acquire_dispatch_lock(&repo.join(".git/lifecycle-dispatch.lock")).is_ok());
-    assert!(git(&["status","--porcelain"],repo).unwrap().is_empty());
+    assert!(git(&["status", "--porcelain"], repo).unwrap().is_empty());
 }
 
 #[test]
