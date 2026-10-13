@@ -455,9 +455,43 @@ jobs:
           if ! jq -e '
             .name == "release"
             and (.protection_rules | type) == "array"
-            and .deployment_branch_policy.protected_branches == true
           ' <<<"$release_environment" >/dev/null; then
-            echo "::error::Release environment is missing verified protected-branch deployment restrictions"
+            echo "::error::Release environment metadata is missing or malformed"
+            exit 1
+          fi
+
+          if jq -e '
+            .deployment_branch_policy.protected_branches == true
+            and .deployment_branch_policy.custom_branch_policies == false
+          ' <<<"$release_environment" >/dev/null; then
+            :
+          elif jq -e '
+            .deployment_branch_policy.protected_branches == false
+            and .deployment_branch_policy.custom_branch_policies == true
+          ' <<<"$release_environment" >/dev/null; then
+            # An exact main-only branch allowlist is equivalent for this
+            # workflow because the effective main rules were verified above.
+            # Enumerate all policy pages, not just the first matching entry.
+            policy_pages=$(gh api --paginate --jq '. | @json' \
+              "repos/$GH_REPO/environments/release/deployment-branch-policies?per_page=100")
+            if ! jq -s -e '
+              length > 0
+              and all(.[];
+                .total_count == 1
+                and (.branch_policies | type) == "array"
+              )
+              and (
+                [.[].branch_policies[]]
+                | length == 1
+                and .[0].name == "main"
+                and .[0].type == "branch"
+              )
+            ' <<<"$policy_pages" >/dev/null; then
+              echo "::error::Release environment must allow exactly one deployment policy for branch main"
+              exit 1
+            fi
+          else
+            echo "::error::Release environment has an unsupported deployment branch policy"
             exit 1
           fi
 
