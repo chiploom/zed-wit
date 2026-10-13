@@ -2039,38 +2039,56 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         matching_draft = true;
     }
     validate_resume_candidate(scope, version, &known, matching_draft)?;
-    // Require the configured workflow to be enabled; do not create an alternate.
-    let workflow: Value = serde_json::from_str(&gh(
-        &[
-            "api",
-            &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}"),
-        ],
-        root,
-    )?)
+    dispatch_protected_cd(
+        scope,
+        &tag,
+        &main_sha,
+        matching_draft,
+        wait,
+        180,
+        |args| gh(args, root),
+        thread::sleep,
+    )
+}
+
+fn dispatch_protected_cd(
+    scope: Scope,
+    tag: &str,
+    main_sha: &str,
+    matching_draft: bool,
+    wait: bool,
+    max_polls: usize,
+    mut request: impl FnMut(&[&str]) -> Result<String, String>,
+    mut sleep: impl FnMut(Duration),
+) -> Result<(), String> {
+    // This is the actual production workflow/dispatch/polling path. Tests
+    // inject a deterministic local transport; production injects pinned gh.
+    // Caller must first validate provenance and hold its local dispatch lock.
+    let workflow: Value = serde_json::from_str(&request(&[
+        "api",
+        &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}"),
+    ])?)
     .map_err(|e| format!("parse protected CD workflow: {e}"))?;
     if workflow["state"].as_str() != Some("active") {
         return Err("protected CD workflow is not active".into());
     }
 
-    // Conservatively refuse an uncorrelatable repeated dispatch from the same
-    // protected source commit. The user must inspect previous runs manually.
-    let runs = gh(
-        &[
-            "api",
-            "--paginate",
-            "--jq",
-            ".workflow_runs[] | [.id, .head_sha, .event, .status, (.conclusion // \"unknown\"), .display_title] | @tsv",
-            &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100"),
-        ],
-        root,
-    )?;
-    validate_prior_cd_runs(&runs, &main_sha, scope, &tag, matching_draft)?;
+    // The global cd-release concurrency group means active runs on *any*
+    // release scope or SHA block a new dispatch, not only this candidate.
+    let runs = request(&[
+        "api",
+        "--paginate",
+        "--jq",
+        ".workflow_runs[] | [.id, .head_sha, .event, .status, (.conclusion // \"unknown\"), .display_title] | @tsv",
+        &format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100"),
+    ])?;
+    validate_prior_cd_runs(&runs, main_sha, scope, tag, matching_draft)?;
 
-    // GitHub's 2026 workflow_dispatch response gives the exact run ID.
-    // Never fall back to scanning the latest run after an ambiguous dispatch.
-    let dispatch = protected_dispatch_args(scope, &tag, &main_sha);
-    let dispatch_refs = dispatch.iter().map(String::as_str).collect::<Vec<_>>();
-    let response = gh(&dispatch_refs, root).map_err(|_| {
+    // GitHub's workflow_dispatch response carries an exact run ID.
+    // Never infer a run from a later listing after an ambiguous response.
+    let dispatch = protected_dispatch_args(scope, tag, main_sha);
+    let refs = dispatch.iter().map(String::as_str).collect::<Vec<_>>();
+    let response = request(&refs).map_err(|_| {
         "CD dispatch may have been accepted; check GitHub Actions before retrying".to_owned()
     })?;
     let (id, run_url) = parse_dispatch_identity(&response)?;
@@ -2079,26 +2097,26 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         println!("Status: requested/pending. This is not a published release.");
         return Ok(());
     }
-    for _ in 0..180 {
-        let run: Value = serde_json::from_str(&gh(
-            &["api", &format!("repos/{REPO}/actions/runs/{id}")],
-            root,
-        )?)
+    for _ in 0..max_polls {
+        let run: Value = serde_json::from_str(&request(&[
+            "api",
+            &format!("repos/{REPO}/actions/runs/{id}"),
+        ])?)
         .map_err(|e| format!("parse exact workflow run {id}: {e}"))?;
-        match classify_workflow_run(&run, id, &main_sha, scope, &tag)? {
+        match classify_workflow_run(&run, id, main_sha, scope, tag)? {
             WorkflowProgress::Pending => {}
             WorkflowProgress::Succeeded => {
-                let release: Value = serde_json::from_str(&gh(
-                    &["api", &format!("repos/{REPO}/releases/tags/{tag}")],
-                    root,
-                )?)
+                let release: Value = serde_json::from_str(&request(&[
+                    "api",
+                    &format!("repos/{REPO}/releases/tags/{tag}"),
+                ])?)
                 .map_err(|e| format!("parse published release after CD success: {e}"))?;
-                verify_published_release(&release, &tag)?;
+                verify_published_release(&release, tag)?;
                 println!("Published immutable release {tag}: {run_url}");
                 return Ok(());
             }
         }
-        thread::sleep(Duration::from_secs(10));
+        sleep(Duration::from_secs(10));
     }
     Err(format!(
         "timed out watching CD run {id}; outcome pending: {run_url}"
