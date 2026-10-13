@@ -167,8 +167,9 @@ fn exercise_lifecycle(scope: Scope) {
     .unwrap();
     notes_reviewed(repo, scope, candidate).unwrap();
 
-    // Submit to a disposable bare repository with the production atomic
-    // expected-absent-branch lease. Simulated PR creation does not touch GH.
+    // Exercise the actual post-review submit implementation against a
+    // disposable Git remote and fake PR API. Its first attempt intentionally
+    // loses the PR-create response after the branch was pushed.
     let reviewed_sha = fixture.commit("reviewed release preparation");
     let delta = git(&["diff", "--name-only", &base, &reviewed_sha], repo).unwrap();
     validate_changed_files(&delta, scope, candidate).unwrap();
@@ -178,17 +179,63 @@ fn exercise_lifecycle(scope: Scope) {
         classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha).unwrap(),
         PreparationPush::PushNew
     );
-    git(
-        &[
-            "push",
-            "--porcelain",
-            &format!("--force-with-lease={ref_name}:"),
-            push_url,
-            &format!("HEAD:{ref_name}"),
-        ],
+    let mut first_calls = Vec::new();
+    let failed = submit_preparation_pr(
         repo,
+        scope,
+        candidate,
+        &base,
+        push_url,
+        |args| {
+            first_calls.push(args.join(" "));
+            match args {
+                ["pr", "list", ..] => Ok("[]".to_owned()),
+                ["pr", "create", ..] => Err("simulated lost PR creation response".into()),
+                _ => Err(format!("unexpected mock PR API request: {args:?}")),
+            }
+        },
+        || {
+            Ok(fixture.remote_ref("main").split_whitespace().next() == Some(base.as_str()))
+        },
+    );
+    assert!(failed.is_err());
+    assert_eq!(first_calls.len(), 2);
+    assert_eq!(
+        classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha).unwrap(),
+        PreparationPush::ExistingExactCommit
+    );
+
+    // A new submit invocation may reuse only the identical existing branch.
+    // Production must not push again or silently overwrite it.
+    let mut retry_calls = Vec::new();
+    submit_preparation_pr(
+        repo,
+        scope,
+        candidate,
+        &base,
+        push_url,
+        |args| {
+            retry_calls.push(args.join(" "));
+            match args {
+                ["pr", "list", ..] => Ok("[]".to_owned()),
+                ["pr", "create", ..] => {
+                    assert!(args.contains(&"main"));
+                    assert!(args.contains(&branch.as_str()));
+                    Ok("https://github.com/chiploom/zed-wit/pull/123".into())
+                }
+                ["api", endpoint] if *endpoint == format!("repos/{REPO}/pulls/123") => {
+                    Ok(json!({
+                        "base":{"ref":"main"},
+                        "head":{"ref":branch,"repo":{"full_name":REPO},"sha":reviewed_sha},
+                    }).to_string())
+                }
+                _ => Err(format!("unexpected mock PR API request: {args:?}")),
+            }
+        },
+        || panic!("retry must not issue another Git push"),
     )
     .unwrap();
+    assert_eq!(retry_calls.len(), 3);
     assert_eq!(
         classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha).unwrap(),
         PreparationPush::ExistingExactCommit
