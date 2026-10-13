@@ -1538,10 +1538,7 @@ fn submit(root: &Path, scope: Scope) -> Result<(), String> {
         &remote_sha,
         &push_url,
         |args| gh(args, root),
-        || {
-            Ok(check_remote(root)? == remote_sha
-                && canonical_push_destination(root)? == push_url)
-        },
+        || Ok(check_remote(root)? == remote_sha && canonical_push_destination(root)? == push_url),
     )
 }
 
@@ -1624,18 +1621,8 @@ fn submit_preparation_pr(
         scope.name()
     );
     let created = request(&[
-        "pr",
-        "create",
-        "-R",
-        REPO,
-        "--base",
-        "main",
-        "--head",
-        &branch,
-        "--title",
-        &title,
-        "--body",
-        &body,
+        "pr", "create", "-R", REPO, "--base", "main", "--head", &branch, "--title", &title,
+        "--body", &body,
     ])?;
     let created_url = created.trim();
     let number = created_url
@@ -1643,11 +1630,9 @@ fn submit_preparation_pr(
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value != 0)
         .ok_or("GitHub returned an ambiguous preparation PR URL; inspect remotely")?;
-    let created_pr: Value = serde_json::from_str(&request(&[
-        "api",
-        &format!("repos/{REPO}/pulls/{number}"),
-    ])?)
-    .map_err(|_| "cannot verify created PR identity; inspect remotely".to_owned())?;
+    let created_pr: Value =
+        serde_json::from_str(&request(&["api", &format!("repos/{REPO}/pulls/{number}")])?)
+            .map_err(|_| "cannot verify created PR identity; inspect remotely".to_owned())?;
     if created_pr["base"]["ref"].as_str() != Some("main")
         || created_pr["head"]["ref"].as_str() != Some(branch.as_str())
         || created_pr["head"]["repo"]["full_name"].as_str() != Some(REPO)
