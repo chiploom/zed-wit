@@ -2337,6 +2337,69 @@ mod tests {
     }
 
     #[test]
+    fn disposable_cleanup_retries_transient_errors_without_hiding_permanent_failures() {
+        use std::io::{Error, ErrorKind};
+        let path = Path::new("synthetic-disposable-fixture");
+
+        let mut attempts = 0;
+        let mut yields = 0;
+        let recovered = remove_disposable_fixture_with_retry(
+            path,
+            |actual| {
+                assert_eq!(actual, path);
+                attempts += 1;
+                if attempts < 3 {
+                    Err(Error::from(ErrorKind::DirectoryNotEmpty))
+                } else {
+                    Ok(())
+                }
+            },
+            || yields += 1,
+        );
+        assert!(recovered.is_ok());
+        assert_eq!(attempts, 3);
+        assert_eq!(yields, 2);
+
+        let mut attempts = 0;
+        let mut yields = 0;
+        let persistent = remove_disposable_fixture_with_retry(
+            path,
+            |_| {
+                attempts += 1;
+                Err(Error::from(ErrorKind::DirectoryNotEmpty))
+            },
+            || yields += 1,
+        );
+        assert_eq!(persistent.unwrap_err().kind(), ErrorKind::DirectoryNotEmpty);
+        assert_eq!(attempts, 5, "cleanup retries must remain bounded");
+        assert_eq!(yields, 4);
+
+        let mut attempts = 0;
+        let permanent = remove_disposable_fixture_with_retry(
+            path,
+            |_| {
+                attempts += 1;
+                Err(Error::from(ErrorKind::PermissionDenied))
+            },
+            || panic!("nontransient cleanup errors must not retry"),
+        );
+        assert_eq!(permanent.unwrap_err().kind(), ErrorKind::PermissionDenied);
+        assert_eq!(attempts, 1);
+
+        let mut attempts = 0;
+        assert!(remove_disposable_fixture_with_retry(
+            path,
+            |_| {
+                attempts += 1;
+                Err(Error::from(ErrorKind::NotFound))
+            },
+            || panic!("already-removed fixture must not retry"),
+        )
+        .is_ok());
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
     fn mocked_remote_run_history_has_no_atomic_dispatch_reservation() {
         // Two independent checkouts can both read a valid empty API listing
         // before GitHub accepts either workflow dispatch. This is explicitly
