@@ -299,6 +299,24 @@ All mutation tests must run in disposable Git repositories and Cargo fixtures,
 with mocked GitHub responses. Never test these stages by dispatching the
 production workflow or creating production release branches.
 
+## Reviewed merge-tree integrity
+
+The release resumption preflight now verifies the **actual merged Git tree**,
+not only GitHub's reviewed PR file list and scoped SemVer transition. Across
+supported merge, squash, and rebase layouts, the merged commit's aggregate
+change set must contain only the expected release preparation files.
+For each scoped manifest, `Cargo.lock`, changelog, and release notes,
+the merged Git blob SHA must equal the blob SHA at the reviewed PR head.
+The extension scope additionally compares `extension.toml`. Immutable
+GitHub content API responses identify the reviewed blobs by the exact PR
+head SHA. Missing or inconsistent blob metadata blocks publication.
+
+This addresses a provenance gap in which extra source changes or altered
+release metadata could otherwise be included in a merged commit while
+its version values and reviewed PR file list appeared valid.
+The isolated lifecycle regression fixtures now cover unreviewed source,
+changelog, and lockfile changes in both release scopes.
+
 ## Connected offline lifecycle integration tests
 
 Run `cargo xtask test-publish` for the dedicated LSP and extension
