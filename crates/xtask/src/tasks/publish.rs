@@ -2792,7 +2792,7 @@ mod tests {
             "pub fn fixture() {}\n",
         )
         .unwrap();
-        fs::write(root.join("Cargo.toml"), 
+        fs::write(root.join("Cargo.toml"),
             "[package]\nname = \"zed-wit\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[workspace]\nmembers = [\"crates/wit-language-server\"]\nresolver = \"3\"\n"
         ).unwrap();
         fs::write(
