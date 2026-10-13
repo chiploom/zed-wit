@@ -78,14 +78,14 @@ if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$3" = github.com ]; then
         )}}'
       exit 0
       ;;
-    repos/chiploom/zed-wit/rulesets?*)
-      echo '{"id":700}'
-      exit 0
-      ;;
     repos/chiploom/zed-wit/rulesets/700?*)
       jq -nc '{id:700,target:"tag",enforcement:"active",bypass_actors:[],
         conditions:{ref_name:{include:["refs/tags/v*"],exclude:[]}},
         rules:[{type:"update"},{type:"deletion"},{type:"non_fast_forward"}]}'
+      exit 0
+      ;;
+    repos/chiploom/zed-wit/rulesets?*)
+      echo '{"id":700}'
       exit 0
       ;;
     repos/chiploom/zed-wit/pulls/314)
