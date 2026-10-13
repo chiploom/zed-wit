@@ -86,7 +86,13 @@ phase=$8
 case "$phase" in draft|published) ;; *) echo "invalid release phase" >&2; exit 2 ;; esac
 if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ]; then echo "missing GitHub API context" >&2; exit 1; fi
 case "$scope" in
-  lsp) tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+
+  lsp) tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+$' ;;
+  extension) tag_pattern='^v-extension-[0-9]+\.[0-9]+\.[0-9]+$' ;;
+esac
+if ! [[ "$tag" =~ $tag_pattern ]]; then
+  echo "release tag does not match the validated scope" >&2
+  exit 2
+fi
 
 captured=$(cat -- "$manifest")
 current=$(collect_local | jq -s 'sort_by(.name)')
