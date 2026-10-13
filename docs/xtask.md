@@ -178,6 +178,12 @@ manual inspection before any retry.
 run, reports failure/cancellation, and calls a release *published* only when a
 successful run is accompanied by the matching non-draft immutable GitHub Release.
 Without `--wait`, the outcome is **requested/pending**, not published.
+
+When `--wait` is enabled, xtask queries only the run ID returned by the
+confirmed dispatch. GitHub may briefly return incomplete run metadata; xtask
+allows up to six short identity rechecks before failing closed. An explicit
+wrong run ID or commit is rejected immediately, and a run is never treated as
+published until every identity field and the immutable GitHub Release agree.
 Neither confirmed dispatch nor workflow success bypasses the `release`
 environment's human approval gate or the five-target LSP release contract.
 

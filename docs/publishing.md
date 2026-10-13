@@ -79,6 +79,32 @@ itself a cryptographic attestation.
 
 ## Immutable-release enforcement (protected CD)
 
+### Audited tag-ruleset revision
+
+GitHub's REST API omits `bypass_actors` when the caller lacks ruleset-write
+permission, even when no bypass actors are configured. The protected CD job
+therefore verifies the active tag rules and matches the repository's **audited
+ruleset revision**, rather than treating missing bypass metadata as an empty
+list or granting `Administration:write` to its token.
+
+The required `Protect release tags` ruleset is ID `24620024`, last updated
+`2026-10-06T21:11:44.860-04:00`. On 2026-10-13 its full privileged response
+was independently checked to have `bypass_actors: []`, active `refs/tags/v*`
+coverage, and `update`, `deletion`, and `non_fast_forward` restrictions
+without a `creation` restriction. CD pins the ID and exact update revision,
+checks these structural rules again on every publication, and rejects any
+visible nonempty bypass list. An omitted bypass field is accepted **only for
+that already-audited revision**.
+
+If the ruleset is changed, removed, replaced or its update timestamp changes,
+publication fails closed. A repository administrator must independently inspect
+the full unredacted ruleset (including bypass actors), review the new revision,
+and update the pin through a protected PR. Changing the pin without this audit
+is not a valid recovery. The `RELEASE_POLICY_READ_TOKEN` remains
+Administration:read only, for immutable-release enforcement; it is not a
+ruleset-write credential.
+
+
 Before creating or resuming any GitHub Release, the protected `release`
 job requires GitHub's Administration-read immutable-release status endpoint
 to confirm `enabled=true`; it repeats this check immediately before
