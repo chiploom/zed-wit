@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add an opt-in, version-aware Rust xtask publishing frontend with a read-only
+  default plan, separate LSP/extension SemVer streams, human-reviewed
+  release-preparation PRs, and explicitly confirmed protected CD dispatch.
+  Local commands still do not create tags, publish releases or update the Zed
+  registry.
+
 - Refactor xtask into a unified CLI registry and focused Rust modules for
   build, validation, release preparation, maintenance and performance, with
   regression checks for all 27 existing and new commands.

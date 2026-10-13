@@ -77,6 +77,113 @@ a newline, a `<asset>.provenance.json` build record, and an
 dependency closure and pinned Rust standard library. Build provenance JSON is not
 itself a cryptographic attestation.
 
+## Immutable-release enforcement (protected CD)
+
+Before creating or resuming any GitHub Release, the protected `release`
+job requires GitHub's Administration-read immutable-release status endpoint
+to confirm `enabled=true`; it repeats this check immediately before
+promoting the draft, and afterward requires `immutable=true` on the
+published GitHub Release. A denial, 404, malformed or disabled response
+blocks publication rather than assuming tag rules alone are sufficient.
+
+Because `GITHUB_TOKEN` has no configurable Administration-read scope,
+an authorized administrator must provision the environment-scoped
+`RELEASE_POLICY_READ_TOKEN` secret with a narrowly scoped fine-grained token
+or GitHub App token granting **repository Administration: read only**.
+It is used solely for policy GETs and must never be logged. Missing or
+expired credentials fail closed. An authorized operator confirmed repository-level immutable releases enabled
+on 2026-10-13; the environment-scoped policy-read credential is provisioned,
+but its live runtime authorization still requires separate verification.
+
+The active `main` ruleset already uses strict CI checks bound to GitHub
+Actions integration ID `15368`, and the frontend and CD now require
+that exact trusted publisher for each of the six release CI contexts even
+when checks appear across multiple applicable rulesets.
+
+The version-aware submit/resume preflight and protected CD also require active
+repository or inherited **tag rulesets** covering both release streams via
+`refs/tags/v*` (or `~ALL`), with no excluded release tags or bypass actors.
+Effective rules must prohibit updates, deletions and non-fast-forward changes.
+A matching `creation` restriction is rejected because protected CD must be able
+to create the next release tag. These requirements can be satisfied by layered
+rulesets and are checked by effective policy, not a hardcoded ruleset ID.
+Other patterns may be secure, but the automated check conservatively rejects
+patterns whose complete coverage cannot be established.
+
+## Release authorization requirements
+
+**Temporary policy: zero required reviewers are permitted** for both
+release-preparation PRs and protected CD publication. The effective `main`
+rules must still require a pull request, linear history and all six required
+CI checks. The `release` environment must exist and restrict deployment to
+**either protected branches only or a verified exact-`main` custom branch
+policy**. In custom mode, the frontend and protected CD inspect every page
+of GitHub's deployment branch-policy list and require a reported count of
+exactly one, containing only `name=main` and `type=branch`. Additional
+branches/tags, wildcard patterns, missing data, ambiguous flag combinations,
+and API failures block publication. Both modes also require the effective
+`main` ruleset to enforce a PR rule, linear history, and six strict CI
+checks from the trusted GitHub Actions integration.
+
+As inspected on 2026-10-13, the `release` environment has a custom
+deployment policy selecting only branch `main`; no GitHub settings change
+is needed for this policy. This explicitly accepted alternative accommodates
+ruleset-protected `main` even when GitHub reports no classic branch
+protection. GitHub's native reviewer gate still applies if configured
+in the future.
+
+The reviewed release-preparation PR also defines the **exact release source
+commit**: its GitHub-reported merged SHA (including normal squash merges)
+must equal the current protected `main` SHA at resume. Even an otherwise
+legitimate later change to code, Cargo.lock or release notes requires a
+new reviewed preparation for that source. A future explicitly reviewed
+requalification protocol may expand this rule; this implementation does
+not silently requalify newer source revisions.
+
+## Version-aware preparation frontend
+
+The optional `cargo xtask publish --scope lsp|extension` command provides a
+**read-only version plan** by default. See [xtask publish stages](xtask.md#version-aware-release-preparation-and-protected-cd)
+and the [implementation contract](xtask-publish-implementation.md).
+It does not create tags, GitHub Releases, registry submissions or attestations.
+
+The only authorized path to a new publication is:
+
+1. Run a read-only plan on clean, current `main`. Check exact next version,
+   candidate tag, remote collision history and expected release note files.
+2. Use `--prepare --confirm` to create a local branch, bump only the chosen
+   release stream and `Cargo.lock`, and generate **unreviewed** notes/changelog
+   placeholders. No PR or publication is created by this stage.
+3. Have a human replace the placeholders, review and commit the scoped changes,
+   then explicitly invoke `--submit --confirm` to run checks, push the release
+   branch, and open a PR. Review and merge it through normal `main` protections.
+4. On the new protected `main`, use `--resume --pr N --confirm` to revalidate
+   the exact merged preparation PR and request **only** the existing
+   `release.yml` workflow with `operation=publish`. `--wait` watches the
+   exact returned run ID, never an inferred most-recent run.
+5. CD remains responsible for protected tags, environment approval,
+   attestation, immutable GitHub Releases and the five-target native artifact
+   contract; no local xtask action may bypass it.
+
+For PR submission, effective Git push URLs (including `pushurl` and rewrite
+rules) must identify only the canonical repository. A new branch is pushed
+with an explicit expected-absent-ref lease, not a plain fast-forward push.
+The remote ref and GitHub PR head are verified against the validated commit.
+
+For publication requests, the checkout's exclusive Git lock prevents
+simultaneous local resume calls, while CD's protected serialization and
+last-moment draft/tag check prevent duplicate release promotion. No
+distributed exactly-once dispatch claim is made for separate hosts or
+temporary API inconsistency. Inspect existing Actions runs before retrying
+ambiguous dispatch outcomes.
+
+A successful dispatch means **requested**, not published. Missing/ambiguous
+GitHub history, an existing non-draft tag, duplicate active CD runs, denied
+permissions, or a reserved immutable tag requires human inspection rather than
+blind retry. Because deleted immutable-release tags may be invisible to listing
+APIs, the existing protected workflow remains the authoritative final gate.
+LSP upgrades do not change the extension runtime LSP pin automatically.
+
 ## Release gate
 
 The CD workflow is dispatched from the protected default branch with either

@@ -52,6 +52,7 @@ pub(crate) const COMMAND_HELP: &[(&str, &str)] = &[
     ),
     ("test-lsp", ""),
     ("test-extension", ""),
+    ("test-publish", ""),
     (
         "install-dev",
         "--destination <binary-path> [--target <release-target>]",
@@ -60,6 +61,10 @@ pub(crate) const COMMAND_HELP: &[(&str, &str)] = &[
     ("coverage", "[--output <path-under-target>]"),
     ("changelog-check", "[--scope <lsp|extension> --tag <tag>]"),
     ("update-grammar", "[--candidate <40-character-git-sha>]"),
+    (
+        "publish",
+        "--scope <lsp|extension> [--bump <patch|minor|major>] [--dry-run|--prepare|--submit|--resume] [--confirm] [--pr <number>] [--wait]",
+    ),
 ];
 
 pub(crate) fn run() -> Result<(), String> {
@@ -80,7 +85,10 @@ pub(crate) fn dispatch(command: &str, rest: &[String]) -> Result<(), String> {
         && let Some((_, options)) = COMMAND_HELP.iter().find(|(name, _)| *name == command)
     {
         println!("Usage: cargo xtask {command} {options}");
-        if matches!(command, "release" | "release-build" | "release-check") {
+        if matches!(
+            command,
+            "release" | "release-build" | "release-check" | "publish"
+        ) {
             println!("Local preparation only: protected CD controls publication.");
         }
         if command == "update-grammar" {
@@ -272,11 +280,13 @@ pub(crate) fn dispatch(command: &str, rest: &[String]) -> Result<(), String> {
         "clean" => tasks::maintenance::clean(rest),
         "test-lsp" => tasks::validation::test_lsp(rest),
         "test-extension" => tasks::validation::test_extension(rest),
+        "test-publish" => tasks::validation::test_publish(rest),
         "install-dev" => tasks::build::install_dev(rest),
         "bench" => tasks::performance::bench(rest),
         "coverage" => tasks::performance::coverage(rest),
         "changelog-check" => tasks::release_ops::changelog_check(rest),
         "update-grammar" => tasks::maintenance::update_grammar(rest),
+        "publish" => tasks::publish::publish(rest),
         other => Err(format!(
             "unknown xtask command {other:?}; run `cargo xtask help`"
         )),
@@ -298,7 +308,7 @@ mod tests {
 
     #[test]
     fn command_registry_is_unique_and_all_help_paths_work() {
-        assert_eq!(COMMAND_HELP.len(), 27);
+        assert_eq!(COMMAND_HELP.len(), 29);
         let mut seen = BTreeSet::new();
         for (command, _) in COMMAND_HELP {
             assert!(seen.insert(*command), "duplicate command: {command}");
@@ -311,6 +321,6 @@ mod tests {
     fn unknown_command_does_not_fall_back_to_any_implicit_action() {
         assert!(dispatch("publish", &[]).is_err());
         assert!(dispatch("missing-command", &[]).is_err());
-        assert!(dispatch("publish", &["--help".into()]).is_err());
+        assert!(dispatch("publish", &["--help".into()]).is_ok());
     }
 }
