@@ -141,8 +141,23 @@ if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$3" = github.com ]; then
       "$REAL_GIT" -C "$FIXTURE_ROOT/repo" show "$sha:$path"
       exit 0
       ;;
+    repos/chiploom/zed-wit/git/commits/*)
+      sha=${endpoint#repos/chiploom/zed-wit/git/commits/}
+      if [ "$("$REAL_GIT" -C "$FIXTURE_ROOT/repo" cat-file -t "$sha")" != commit ]; then
+        echo 'fixture refuses noncommit Git object' >&2
+        exit 78
+      fi
+      root_tree=$("$REAL_GIT" -C "$FIXTURE_ROOT/repo" rev-parse "$sha^{tree}")
+      jq -nc --arg sha "$sha" --arg root_tree "$root_tree" \
+        '{sha:$sha,tree:{sha:$root_tree}}'
+      exit 0
+      ;;
     repos/chiploom/zed-wit/git/trees/*)
       sha=$(printf '%s' "$endpoint" | sed 's#^repos/chiploom/zed-wit/git/trees/##;s#?recursive=.*##')
+      if [ "$("$REAL_GIT" -C "$FIXTURE_ROOT/repo" cat-file -t "$sha")" != tree ]; then
+        echo 'fixture requires a root Git tree object, not a commit' >&2
+        exit 78
+      fi
       "$REAL_GIT" -C "$FIXTURE_ROOT/repo" ls-tree -r "$sha" |
         jq -Rsc --arg sha "$sha" '
           split("\n") | map(select(length > 0)) |
