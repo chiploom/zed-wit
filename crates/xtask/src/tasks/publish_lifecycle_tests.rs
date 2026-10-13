@@ -190,7 +190,15 @@ fn exercise_lifecycle(scope: Scope) {
             .unwrap(),
         PreparationPush::ExistingExactCommit
     );
-    // A competing second creation cannot move the reviewed branch.
+    // A same-SHA push is a no-op and may legitimately succeed. Advance
+    // this disposable checkout so the second push actually tries to update
+    // an already-allocated ref; the expected-absent lease must reject it.
+    git(
+        &["commit", "--allow-empty", "--no-verify", "-qm", "competing commit"],
+        repo,
+    )
+    .unwrap();
+    assert_ne!(git(&["rev-parse", "HEAD"], repo).unwrap(), reviewed_sha);
     assert!(
         git(
             &[
@@ -204,6 +212,12 @@ fn exercise_lifecycle(scope: Scope) {
         )
         .is_err()
     );
+    assert_eq!(
+        classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha)
+            .unwrap(),
+        PreparationPush::ExistingExactCommit
+    );
+    git(&["reset", "--hard", &reviewed_sha], repo).unwrap();
 
     let mut records = Vec::new();
     for name in delta.lines() {
