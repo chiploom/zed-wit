@@ -4,7 +4,15 @@
 
 ### v-extension-0.5.0 (extension)
 
-- TODO: Replace with reviewed release details
+- Prepare the first Chiploom-maintained WIT extension release, succeeding the original Zed registry implementation with the original author's permission.
+- Introduce updated WIT syntax highlighting, editor configuration, snippets, outlines, and Vim text objects using the pinned Bytecode Alliance Tree-sitter grammar.
+- Integrate a native WIT language server providing diagnostics, scope-aware completion, hover, definition navigation, references, and unresolved-type quick fixes.
+- Add multi-file WIT package analysis with unsaved-buffer support and local dependency resolution.
+- Provide Topiary-based document formatting with comment preservation and idempotence checks.
+- Automatically download and verify the pinned WIT Language Server `v0.1.2`, with caching and recovery from corrupted or incomplete downloads.
+- Support native language-server distribution on macOS ARM64/x86_64, Linux GNU ARM64/x86_64, and Windows x86_64.
+- Align the extension version with the existing Zed registry's version history while keeping native LSP releases independently versioned.
+- Document the maintainer transition and credit Valentine for the original extension.
 
 - Add an opt-in, version-aware Rust xtask publishing frontend with a read-only
   default plan, separate LSP/extension SemVer streams, human-reviewed
