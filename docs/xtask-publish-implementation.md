@@ -299,6 +299,27 @@ All mutation tests must run in disposable Git repositories and Cargo fixtures,
 with mocked GitHub responses. Never test these stages by dispatching the
 production workflow or creating production release branches.
 
+## Connected offline lifecycle integration tests
+
+Run `cargo xtask test-publish` for the dedicated LSP and extension
+release-lifecycle fixtures. Tests construct fresh local Git/Cargo workspaces
+and a disposable bare Git remote, apply real version/lockfile/note edits,
+enforce an expected-absent-ref push lease, synthesize a reviewed PR,
+create a real squash-merge history, and validate the shared provenance,
+branch/tag ruleset, deployment-policy, dispatch identity, run-state and
+immutable-publication helpers with synthetic GitHub records. They also
+assert relevant failure cases (unreviewed notes, duplicate pushes, mismatched
+release SHAs, duplicate dispatches and drafts/nonimmutable release responses).
+Fixture cleanup is automatic and no live GitHub APIs or credentials are used.
+
+These connected state transitions supplement the granular publishing tests
+and run under the standard workspace suite in CI. **They are not an emulator
+of all GitHub API transport behavior or the actual CD workflow executable**;
+specifically they do not invoke production `publish --submit`/`--resume`
+against a mock server, nor do they run the release artifact/attestation jobs.
+Those boundaries require a separate isolated orchestration qualification.
+Never substitute a live release for such tests.
+
 ## Implementation sequence and regression evidence
 
 - [ ] Add the `publish` command to the **existing**
