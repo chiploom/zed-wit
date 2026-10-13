@@ -14,8 +14,12 @@ The harness clones the current source into a temporary Git repository,
 compiles its actual `xtask` executable inside the clone, and invokes
 `cargo xtask publish`. It uses a disposable bare Git remote, a synthetic
 GitHub CLI, and a Git shim that redirects **only the exact lease-protected
-preparation-branch creation push** to that local remote. Unrelated Git pushes
-and unrecognized GitHub API operations are rejected. The fixture never
+preparation-branch creation push** to that local remote. Real Git also
+inherits `GIT_ALLOW_PROTOCOL=file`, so even shim fallthrough commands and Git
+subprocesses in secondary checkouts cannot use HTTPS, SSH or other network
+transports. Explicit negative probes confirm those transports are refused
+before any network access. Unrelated Git pushes from the fixture and
+unrecognized GitHub API operations are rejected. The fixture never
 writes to the real GitHub repository and never invokes protected CD.
 No test-only publish flags or production safeguard bypasses are introduced.
 
