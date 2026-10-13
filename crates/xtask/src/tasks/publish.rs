@@ -1556,6 +1556,9 @@ fn submit_preparation_pr(
 ) -> Result<(), String> {
     // The caller must have completed the manifest, review, policy, and
     // canonical remote/push-destination checks before entering this stage.
+    if !valid_sha(remote_sha) {
+        return Err("release submission lacks a valid verified remote main SHA".into());
+    }
     let tag = scope.tag(version);
     let branch = format!("release-prep/{}-{tag}", scope.name());
     let existing = request(&[
