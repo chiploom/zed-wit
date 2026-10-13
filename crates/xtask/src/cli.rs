@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn command_registry_is_unique_and_all_help_paths_work() {
-        assert_eq!(COMMAND_HELP.len(), 28);
+        assert_eq!(COMMAND_HELP.len(), 29);
         let mut seen = BTreeSet::new();
         for (command, _) in COMMAND_HELP {
             assert!(seen.insert(*command), "duplicate command: {command}");
