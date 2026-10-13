@@ -30,7 +30,7 @@ Native binary lookup and local release packaging read the effective output direc
 | `test` | Native tests; supports `--package <name>`, `--filter <substring>`, `--runner <auto|cargo|nextest>`. Auto prefers installed nextest unless a substring filter is given. |
 | `verify` | Repository policy + dependency checks, `check` and `test-all`. |
 | `test-all` | Native workspace tests, doctests and a Wasm extension build; optional `--with-zed true` for real Zed smoke. GUI/hosted tests remain separate. |
-| `test-publish` | Offline connected release lifecycle integration tests (LSP and extension), using disposable Git/Cargo repositories and mocked GitHub policy, PR, dispatch, and immutable-release responses. Never publishes anything. |
+| `test-publish` | Offline LSP/extension release lifecycle tests plus the protected-CD asset SHA-256 verifier exercised against mocked GitHub API responses (23 LSP assets and extension zero-assets). Never publishes anything. |
 | `test-lsp` | Test syntax, analysis and language-server packages. |
 | `test-extension` | Test extension and syntax packages, build `wasm32-wasip2` adapter. |
 | `build` | Build `--kind server` (default) or `--kind extension`. Supports `--release true` and server `--target <triple>`. |
@@ -201,7 +201,9 @@ responses; and validate mock CD dispatch, run identity, and immutable publicatio
 
 No production GitHub credentials, network calls, release tags, or protected CD
 dispatches are involved. Tests clean up their temporary fixtures automatically.
-The same tests are included in `cargo xtask verify` and CI. These scenarios
+The Rust scenarios are also included in `cargo xtask verify` and CI; the
+standalone mocked asset verifier is run by `cargo xtask test-publish` and the CI
+quality job. These scenarios
 exercise real Git operations and the production `submit` PR-creation and
 `resume` CD-dispatch helpers through deterministic mocked GitHub requests.
 The submission fixture tests atomic branch creation, PR identity verification,
@@ -210,6 +212,12 @@ conflicting remote refs. The resume fixture checks protected workflow state,
 global run history, exact dispatch response, run identity, polling, and immutable
 release finalization. Negative cases cover concurrent CD runs, ambiguous
 dispatches, unexpected SHA, stalled runs, mutable releases, and controlled retries.
+
+The asset integrity fixture executes `scripts/release-asset-integrity.sh`, the
+same shell code used by protected CD, against 23 synthetic LSP assets and a
+stubbed GitHub CLI. It verifies exact SHA-256, asset state, size, name, and
+pagination, including incomplete uploads, swapped assets, recovery, and
+extension releases with no assets.
 
 **Qualification boundary:** the complete `publish --prepare`/`--submit`/`--resume`
 CLI commands are not yet invoked as separate child processes against a
