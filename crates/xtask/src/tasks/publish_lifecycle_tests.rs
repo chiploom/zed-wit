@@ -362,17 +362,28 @@ fn exercise_lifecycle(scope: Scope) {
         |args| {
             requests.push(args.join(" "));
             match args {
-                ["api", endpoint] if *endpoint == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}") => {
+                ["api", endpoint]
+                    if *endpoint
+                        == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}") =>
+                {
                     Ok(json!({"state":"active"}).to_string())
                 }
-                ["api", "--paginate", "--jq", _, endpoint] if *endpoint == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100") => {
+                ["api", "--paginate", "--jq", _, endpoint]
+                    if *endpoint
+                        == format!(
+                            "repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100"
+                        ) =>
+                {
                     Ok(String::new())
                 }
                 ["api", "-X", "POST", ..] => {
                     assert!(args.contains(&"return_run_details=true"));
                     assert!(args.contains(&"ref=main"));
                     assert!(args.iter().any(|v| *v == format!("inputs[tag]={tag}")));
-                    assert!(args.iter().any(|v| *v == format!("inputs[expected_sha]={merged_sha}")));
+                    assert!(
+                        args.iter()
+                            .any(|v| *v == format!("inputs[expected_sha]={merged_sha}"))
+                    );
                     assert!(args.contains(&"inputs[operation]=publish"));
                     Ok(json!({"workflow_run_id":42,"html_url":run_url}).to_string())
                 }
@@ -385,7 +396,8 @@ fn exercise_lifecycle(scope: Scope) {
                         "display_title":title,
                         "status":if polls == 1 {"queued"} else {"completed"},
                         "conclusion":if polls == 1 {Value::Null} else {json!("success")}
-                    }).to_string())
+                    })
+                    .to_string())
                 }
                 ["api", endpoint] if *endpoint == format!("repos/{REPO}/releases/tags/{tag}") => {
                     Ok(json!({"draft":false,"tag_name":tag,"immutable":true}).to_string())
@@ -417,7 +429,6 @@ fn lsp_prepare_submit_squash_resume_mocked_cd_lifecycle() {
 fn extension_prepare_submit_squash_resume_mocked_cd_lifecycle() {
     exercise_lifecycle(Scope::Extension);
 }
-
 
 #[test]
 fn protected_cd_transport_failures_do_not_qualify_publication() {
@@ -518,11 +529,18 @@ fn protected_cd_transport_failures_do_not_qualify_publication() {
                 | Failure::ConcurrentRun
                 | Failure::MissingRetryHistory
         ) {
-            assert!(!posted, "{scenario:?} dispatched despite unsafe precondition");
+            assert!(
+                !posted,
+                "{scenario:?} dispatched despite unsafe precondition"
+            );
         }
         assert_eq!(
             sleeps,
-            if scenario == Failure::PendingTimeout { 2 } else { 0 },
+            if scenario == Failure::PendingTimeout {
+                2
+            } else {
+                0
+            },
             "unexpected polling side effects in {scenario:?}"
         );
     }
