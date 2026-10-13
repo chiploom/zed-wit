@@ -138,6 +138,11 @@ and [Topiary](https://github.com/topiary/topiary). The
 informed expected editor behavior; its editor-specific implementation was not
 ported.
 
+Special thanks to [Valentine](https://github.com/valentinegb) for the original
+[Zed WIT extension](https://github.com/valentinegb/zed-wit), which inspired this
+project, and for agreeing to let Chiploom take over the `wit` extension ID in
+the Zed registry.
+
 Project-owned code is MIT OR Apache-2.0. See [LICENSE-MIT](LICENSE-MIT),
 [LICENSE-APACHE](LICENSE-APACHE), and
 [third-party notices](THIRD_PARTY_NOTICES.md). Report vulnerabilities through
