@@ -399,6 +399,62 @@ fn historical_predecessor_version(
     }
     Ok(immediate)
 }
+fn verify_reviewed_merge_tree(
+    root: &Path,
+    scope: Scope,
+    candidate: Version,
+    merge_sha: &str,
+    pr_commits: u64,
+    mut reviewed_blob: impl FnMut(&str) -> Result<String, String>,
+) -> Result<(), String> {
+    if !valid_sha(merge_sha) || !(1..=250).contains(&pr_commits) {
+        return Err("merged release tree lacks valid commit provenance".into());
+    }
+    // A squash or normal merge changes the version against the first parent.
+    // A rebase merge can spread the change over the PR's N rebased commits.
+    let first_parent = git(&["rev-parse", &format!("{merge_sha}^")], root)?;
+    let immediately_before = git_manifest_version(root, &first_parent, scope, false)?;
+    let predecessor = if valid_version_transition(immediately_before, candidate) {
+        first_parent
+    } else if pr_commits > 1 {
+        git(&["rev-parse", &format!("{merge_sha}~{pr_commits}")], root)?
+    } else {
+        first_parent
+    };
+    let changed = git(
+        &["diff", "--no-ext-diff", "--name-only", &predecessor, merge_sha, "--"],
+        root,
+    )?;
+    // The actual merged source, not just GitHub's reviewed PR-file listing,
+    // must contain exactly the expected release-only paths.
+    validate_changed_files(&changed, scope, candidate)?;
+
+    let files = [
+        Some(scope.manifest()),
+        Some("Cargo.lock"),
+        Some("CHANGELOG.md"),
+        Some(format!("docs/releases/{}/v{}.md", scope.name(), candidate.value()).as_str()),
+    ];
+    for path in files.into_iter().flatten() {
+        let merged = git(&["rev-parse", &format!("{merge_sha}:{path}")], root)?;
+        let approved = reviewed_blob(path)?;
+        if !valid_sha(&merged) || !valid_sha(&approved) || merged != approved {
+            return Err(format!(
+                "merged release content differs from the reviewed PR head: {path}"
+            ));
+        }
+    }
+    if scope == Scope::Extension {
+        let path = "extension.toml";
+        let merged = git(&["rev-parse", &format!("{merge_sha}:{path}")], root)?;
+        let approved = reviewed_blob(path)?;
+        if !valid_sha(&merged) || !valid_sha(&approved) || merged != approved {
+            return Err("merged extension manifest differs from reviewed PR head".into());
+        }
+    }
+    Ok(())
+}
+
 fn require_exact_release_source(main_sha: &str, merged_pr_sha: &str) -> Result<(), String> {
     if !valid_sha(main_sha) || !valid_sha(merged_pr_sha) {
         return Err("release source identity must consist of two valid Git SHAs".into());
@@ -2009,6 +2065,18 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         pr_commits,
     )?;
     require_exact_release_source(&main_sha, &merge_sha)?;
+    verify_reviewed_merge_tree(root, scope, version, &merge_sha, pr_commits, |file| {
+        let response: Value = serde_json::from_str(&gh(
+            &["api", &format!("repos/{REPO}/contents/{file}?ref={head_sha}")],
+            root,
+        )?)
+        .map_err(|_| format!("cannot verify reviewed Git blob identity: {file}"))?;
+        response["sha"]
+            .as_str()
+            .filter(|sha| valid_sha(sha))
+            .map(str::to_owned)
+            .ok_or_else(|| format!("reviewed PR file has no valid Git blob SHA: {file}"))
+    })?;
 
     // Serialize this checkout's entire history-check -> dispatch transition.
     // A separate checkout can still issue a concurrent request; protected CD
