@@ -174,8 +174,17 @@ fn exercise_lifecycle(scope: Scope) {
     // Two-commit PRs can be squash merged into a repository with too little
     // history for merge_sha~2. No rebase ancestor should be required.
     let pr_commits = if scope == Scope::Extension {
-        git(&["commit", "--allow-empty", "--no-verify", "-qm", "reviewed follow-up"], repo)
-            .unwrap();
+        git(
+            &[
+                "commit",
+                "--allow-empty",
+                "--no-verify",
+                "-qm",
+                "reviewed follow-up",
+            ],
+            repo,
+        )
+        .unwrap();
         reviewed_sha = git(&["rev-parse", "HEAD"], repo).unwrap();
         2
     } else {
@@ -668,7 +677,6 @@ fn failed_cd_run_allows_explicit_retry_without_claiming_publication() {
     assert!(endpoints[2].contains(" POST "));
 }
 
-
 #[test]
 fn merged_release_tree_rejects_unreviewed_source_and_release_file_edits() {
     for scope in [Scope::Lsp, Scope::Extension] {
@@ -685,11 +693,7 @@ fn merged_release_tree_rejects_unreviewed_source_and_release_file_edits() {
                 candidate,
                 tag,
                 branch: branch.clone(),
-                notes: format!(
-                    "docs/releases/{}/v{}.md",
-                    scope.name(),
-                    candidate.value()
-                ),
+                notes: format!("docs/releases/{}/v{}.md", scope.name(), candidate.value()),
                 main_sha: initial,
             };
             git(&["switch", "-q", "-c", &branch], root).unwrap();
@@ -710,14 +714,9 @@ fn merged_release_tree_rejects_unreviewed_source_and_release_file_edits() {
             assert!(require_exact_release_source(&merged_sha, &merged_sha).is_ok());
             let merged_version = git_manifest_version(root, &merged_sha, scope, false).unwrap();
             assert_eq!(merged_version, candidate);
-            let err = verify_reviewed_merge_tree(
-                root,
-                scope,
-                candidate,
-                &merged_sha,
-                1,
-                |file| git(&["rev-parse", &format!("{reviewed_sha}:{file}")], root),
-            )
+            let err = verify_reviewed_merge_tree(root, scope, candidate, &merged_sha, 1, |file| {
+                git(&["rev-parse", &format!("{reviewed_sha}:{file}")], root)
+            })
             .expect_err("merged tree must be identical to the reviewed release content");
             assert!(
                 err.contains("unreviewed paths")
