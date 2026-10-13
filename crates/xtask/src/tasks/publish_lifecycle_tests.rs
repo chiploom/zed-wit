@@ -367,7 +367,7 @@ fn exercise_lifecycle(scope: Scope) {
         verify_merged_preparation_pr(&pr, scope, candidate).unwrap();
     assert_eq!(merged, merged_sha);
     assert_eq!(reviewed_head, reviewed_sha);
-    assert_eq!(commits, 1);
+    assert_eq!(commits, pr_commits);
     let historical =
         historical_predecessor_version(repo, scope, &merged, commits, false, candidate).unwrap();
     assert_eq!(historical, reviewed_prior);
