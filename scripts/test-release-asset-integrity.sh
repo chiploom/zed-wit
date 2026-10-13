@@ -80,6 +80,12 @@ mutate_asset() {
 }
 
 pass draft
+if GH_HOST=enterprise.example.invalid verify draft 2>/dev/null; then
+  echo "enterprise host was accepted for GitHub.com publishing" >&2; exit 1
+fi
+if GH_REPO=other/repository verify draft 2>/dev/null; then
+  echo "noncanonical repository was accepted" >&2; exit 1
+fi
 for item in \
   wit-language-server-aarch64-apple-darwin \
   wit-language-server-aarch64-apple-darwin.sha256 \
