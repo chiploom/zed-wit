@@ -924,4 +924,3 @@ jobs:
             "$RELEASE_SCOPE" \
             "$RUNNER_TEMP/expected-release-assets.json" \
             dist release-source "$RELEASE_TAG" "$RELEASE_TITLE" published
-
