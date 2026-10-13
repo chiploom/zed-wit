@@ -12,6 +12,11 @@ export GITHUB_ACTIONS=false MOCK_FAIL_PR_CREATE=0
 cat >"$tmp/bin/git" <<'GIT'
 #!/usr/bin/env bash
 set -euo pipefail
+# Tests spawned by cargo verify use their own disposable repositories. Only
+# simulate the canonical remote for commands originating in this CLI fixture.
+if [ "$(pwd -P)" != "$FIXTURE_ROOT/repo" ]; then
+  exec "$REAL_GIT" "$@"
+fi
 if [ "$1" = remote ] && [ "$2" = get-url ]; then
   echo 'https://github.com/chiploom/zed-wit.git'
   exit 0
