@@ -727,7 +727,6 @@ fn merged_release_tree_rejects_unreviewed_source_and_release_file_edits() {
     }
 }
 
-
 #[test]
 fn reviewed_git_tree_rejects_unsafe_file_modes_and_incomplete_responses() {
     let commit = "0123456789abcdef0123456789abcdef01234567";
@@ -737,7 +736,10 @@ fn reviewed_git_tree_rejects_unsafe_file_modes_and_incomplete_responses() {
         "sha":commit, "truncated":false,
         "tree":[{"path":path, "mode":"100644", "type":"blob", "sha":blob}]
     });
-    assert_eq!(verified_reviewed_git_blob(&normal, commit, path).unwrap(), blob);
+    assert_eq!(
+        verified_reviewed_git_blob(&normal, commit, path).unwrap(),
+        blob
+    );
     for mode in ["120000", "100755", "160000", "040000"] {
         let mut changed = normal.clone();
         changed["tree"][0]["mode"] = mode.into();
@@ -783,20 +785,42 @@ fn merged_mode_change_is_rejected_even_with_identical_blob_sha() {
         git(&["switch", "-q", "main"], repo).unwrap();
         git(&["merge", "--squash", &branch], repo).unwrap();
 
-        let approved = git(&["rev-parse", &format!("{reviewed_sha}:CHANGELOG.md")], repo).unwrap();
-        git(
-            &["update-index", "--cacheinfo", &format!("120000,{approved},CHANGELOG.md")],
+        let approved = git(
+            &["rev-parse", &format!("{reviewed_sha}:CHANGELOG.md")],
             repo,
-        ).unwrap();
-        git(&["commit", "--no-verify", "-qm", "changed mode after review"], repo).unwrap();
+        )
+        .unwrap();
+        git(
+            &[
+                "update-index",
+                "--cacheinfo",
+                &format!("120000,{approved},CHANGELOG.md"),
+            ],
+            repo,
+        )
+        .unwrap();
+        git(
+            &["commit", "--no-verify", "-qm", "changed mode after review"],
+            repo,
+        )
+        .unwrap();
         let merged_sha = git(&["rev-parse", "HEAD"], repo).unwrap();
         let merged_blob = git(&["rev-parse", &format!("{merged_sha}:CHANGELOG.md")], repo).unwrap();
-        assert_eq!(approved, merged_blob, "a file-mode change leaves blob SHA unchanged");
-        assert!(git(&["ls-tree", &merged_sha, "--", "CHANGELOG.md"], repo).unwrap().starts_with("120000 blob "));
-        let result = verify_reviewed_merge_tree(
-            repo, scope, candidate, &merged_sha, 1,
-            |file| git(&["rev-parse", &format!("{reviewed_sha}:{file}")], repo),
+        assert_eq!(
+            approved, merged_blob,
+            "a file-mode change leaves blob SHA unchanged"
         );
-        assert!(result.is_err(), "merged symlink must never qualify despite matching blob SHA");
+        assert!(
+            git(&["ls-tree", &merged_sha, "--", "CHANGELOG.md"], repo)
+                .unwrap()
+                .starts_with("120000 blob ")
+        );
+        let result = verify_reviewed_merge_tree(repo, scope, candidate, &merged_sha, 1, |file| {
+            git(&["rev-parse", &format!("{reviewed_sha}:{file}")], repo)
+        });
+        assert!(
+            result.is_err(),
+            "merged symlink must never qualify despite matching blob SHA"
+        );
     }
 }
