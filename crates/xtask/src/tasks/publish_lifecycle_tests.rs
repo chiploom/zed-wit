@@ -272,7 +272,37 @@ fn exercise_lifecycle(scope: Scope) {
         classify_preparation_branch(&fixture.remote_ref(&branch), &branch, &reviewed_sha).unwrap(),
         PreparationPush::ExistingExactCommit
     );
+    // The production submission function must also refuse an advanced
+    // local candidate when the remote already has the reviewed branch.
+    let conflict = submit_preparation_pr(
+        repo,
+        scope,
+        candidate,
+        &base,
+        push_url,
+        |args| match args {
+            ["pr", "list", ..] => Ok("[]".into()),
+            _ => panic!("conflicting branch must not reach PR creation"),
+        },
+        || panic!("conflicting branch must not enter the push path"),
+    );
+    assert!(conflict.is_err());
     git(&["reset", "--hard", &reviewed_sha], repo).unwrap();
+
+    // Existing GitHub PRs block duplicate creation before branch mutation.
+    let duplicate = submit_preparation_pr(
+        repo,
+        scope,
+        candidate,
+        &base,
+        push_url,
+        |args| match args {
+            ["pr", "list", ..] => Ok(json!([{"number":123}]).to_string()),
+            _ => panic!("duplicate PR may not trigger writes"),
+        },
+        || panic!("duplicate PR may not trigger Git pushes"),
+    );
+    assert!(duplicate.is_err());
 
     let mut records = Vec::new();
     for name in delta.lines() {
