@@ -2315,9 +2315,11 @@ fn remove_disposable_fixture_with_retry(
 
 #[cfg(test)]
 fn cleanup_disposable_fixture(root: &Path) {
-    if let Err(error) =
-        remove_disposable_fixture_with_retry(root, |path| fs::remove_dir_all(path), std::thread::yield_now)
-    {
+    if let Err(error) = remove_disposable_fixture_with_retry(
+        root,
+        |path| fs::remove_dir_all(path),
+        std::thread::yield_now,
+    ) {
         // Never panic in Drop: that can abort the process during another
         // test assertion failure. Still surface a persistent cleanup issue.
         eprintln!(
@@ -2386,15 +2388,17 @@ mod tests {
         assert_eq!(attempts, 1);
 
         let mut attempts = 0;
-        assert!(remove_disposable_fixture_with_retry(
-            path,
-            |_| {
-                attempts += 1;
-                Err(Error::from(ErrorKind::NotFound))
-            },
-            || panic!("already-removed fixture must not retry"),
-        )
-        .is_ok());
+        assert!(
+            remove_disposable_fixture_with_retry(
+                path,
+                |_| {
+                    attempts += 1;
+                    Err(Error::from(ErrorKind::NotFound))
+                },
+                || panic!("already-removed fixture must not retry"),
+            )
+            .is_ok()
+        );
         assert_eq!(attempts, 1);
     }
 
