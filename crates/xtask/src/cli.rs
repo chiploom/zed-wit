@@ -52,6 +52,7 @@ pub(crate) const COMMAND_HELP: &[(&str, &str)] = &[
     ),
     ("test-lsp", ""),
     ("test-extension", ""),
+    ("test-publish", ""),
     (
         "install-dev",
         "--destination <binary-path> [--target <release-target>]",
@@ -279,6 +280,7 @@ pub(crate) fn dispatch(command: &str, rest: &[String]) -> Result<(), String> {
         "clean" => tasks::maintenance::clean(rest),
         "test-lsp" => tasks::validation::test_lsp(rest),
         "test-extension" => tasks::validation::test_extension(rest),
+        "test-publish" => tasks::validation::test_publish(rest),
         "install-dev" => tasks::build::install_dev(rest),
         "bench" => tasks::performance::bench(rest),
         "coverage" => tasks::performance::coverage(rest),
