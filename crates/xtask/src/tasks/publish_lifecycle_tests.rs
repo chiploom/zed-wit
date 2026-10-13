@@ -743,7 +743,7 @@ fn reviewed_git_tree_rejects_unsafe_file_modes_and_incomplete_responses() {
         changed["tree"][0]["mode"] = mode.into();
         assert!(verified_reviewed_git_blob(&changed, commit, path).is_err());
     }
-    for mut changed in [
+    for changed in [
         json!({"sha":commit,"truncated":true,"tree":normal["tree"]}),
         json!({"sha":"ffffffffffffffffffffffffffffffffffffffff","truncated":false,"tree":normal["tree"]}),
         json!({"sha":commit,"tree":normal["tree"]}),
@@ -753,7 +753,6 @@ fn reviewed_git_tree_rejects_unsafe_file_modes_and_incomplete_responses() {
         ]}),
     ] {
         assert!(verified_reviewed_git_blob(&changed, commit, path).is_err());
-        changed["tree"] = json!([]);
     }
     let mut not_blob = normal;
     not_blob["tree"][0]["type"] = "tree".into();
