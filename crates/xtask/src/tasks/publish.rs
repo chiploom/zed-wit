@@ -2322,7 +2322,10 @@ fn cleanup_disposable_fixture(root: &Path) {
     ) {
         // Never panic in Drop: that can abort the process during another
         // test assertion failure. Still surface a persistent cleanup issue.
-        eprintln!(
+        // Write directly to stderr: libtest captures eprintln! from tests
+        // that otherwise pass, which would conceal persistent cleanup errors.
+        let _ = writeln!(
+            std::io::stderr().lock(),
             "WARNING: disposable Git fixture cleanup failed for {}: {error}",
             root.display()
         );
