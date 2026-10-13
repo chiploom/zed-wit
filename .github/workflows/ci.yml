@@ -61,6 +61,8 @@ jobs:
           done
       - name: Exercise protected-CD asset integrity with offline mocked GitHub
         run: cargo xtask test-publish
+      - name: Exercise real publishing CLI in a disposable Git and Cargo checkout
+        run: bash scripts/test-publish-cli-process.sh
       - name: Run 2,000-iteration benchmark
         run: cargo xtask bench --iterations 2000
       - run: cargo fmt --all -- --check
