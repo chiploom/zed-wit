@@ -608,6 +608,14 @@ jobs:
         working-directory: release-source
         run: cargo xtask verify-release-assets --input ../dist
 
+      - name: Capture exact local release asset digests
+        run: |
+          set -euo pipefail
+          bash release-source/scripts/release-asset-integrity.sh capture \
+            "${{ needs.validate.outputs.scope }}" \
+            "$RUNNER_TEMP/expected-release-assets.json" \
+            dist release-source
+
       - name: Create or resume draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -767,6 +775,20 @@ jobs:
               ;;
           esac
 
+      - name: Verify uploaded draft asset digests and state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_TITLE: ${{ needs.validate.outputs.title }}
+          RELEASE_SCOPE: ${{ needs.validate.outputs.scope }}
+        run: |
+          set -euo pipefail
+          bash release-source/scripts/release-asset-integrity.sh verify \
+            "$RELEASE_SCOPE" \
+            "$RUNNER_TEMP/expected-release-assets.json" \
+            dist release-source "$RELEASE_TAG" "$RELEASE_TITLE" draft
+
       - name: Require unchanged unpublished draft immediately before promotion
         env:
           GH_TOKEN: ${{ github.token }}
@@ -823,6 +845,20 @@ jobs:
             exit 1
           fi
 
+      - name: Reverify exact draft asset digests immediately before promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_TITLE: ${{ needs.validate.outputs.title }}
+          RELEASE_SCOPE: ${{ needs.validate.outputs.scope }}
+        run: |
+          set -euo pipefail
+          bash release-source/scripts/release-asset-integrity.sh verify \
+            "$RELEASE_SCOPE" \
+            "$RUNNER_TEMP/expected-release-assets.json" \
+            dist release-source "$RELEASE_TAG" "$RELEASE_TITLE" draft
+
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -874,3 +910,18 @@ jobs:
             extension) test "$(jq '.assets | length' <<<"$published_json")" -eq 0 ;;
             lsp) test "$(jq '.assets | length' <<<"$published_json")" -eq 23 ;;
           esac
+
+      - name: Verify immutable published asset digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_TITLE: ${{ needs.validate.outputs.title }}
+          RELEASE_SCOPE: ${{ needs.validate.outputs.scope }}
+        run: |
+          set -euo pipefail
+          bash release-source/scripts/release-asset-integrity.sh verify \
+            "$RELEASE_SCOPE" \
+            "$RUNNER_TEMP/expected-release-assets.json" \
+            dist release-source "$RELEASE_TAG" "$RELEASE_TITLE" published
+
