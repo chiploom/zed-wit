@@ -431,7 +431,11 @@ fn reviewed_commit_root_tree_sha(commit: &Value, head_sha: &str) -> Result<Strin
     Ok(tree_sha.to_owned())
 }
 
-fn verified_reviewed_git_blob(tree: &Value, root_tree_sha: &str, path: &str) -> Result<String, String> {
+fn verified_reviewed_git_blob(
+    tree: &Value,
+    root_tree_sha: &str,
+    path: &str,
+) -> Result<String, String> {
     if !valid_sha(root_tree_sha)
         || tree["sha"].as_str() != Some(root_tree_sha)
         || tree["truncated"].as_bool() != Some(false)
