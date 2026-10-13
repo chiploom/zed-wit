@@ -2282,7 +2282,6 @@ fn dispatch_protected_cd(
     ))
 }
 
-
 #[cfg(test)]
 fn remove_disposable_fixture_with_retry(
     root: &Path,
@@ -2317,7 +2316,7 @@ fn remove_disposable_fixture_with_retry(
 #[cfg(test)]
 fn cleanup_disposable_fixture(root: &Path) {
     if let Err(error) =
-        remove_disposable_fixture_with_retry(root, fs::remove_dir_all, std::thread::yield_now)
+        remove_disposable_fixture_with_retry(root, |path| fs::remove_dir_all(path), std::thread::yield_now)
     {
         // Never panic in Drop: that can abort the process during another
         // test assertion failure. Still surface a persistent cleanup issue.
