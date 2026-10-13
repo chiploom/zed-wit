@@ -268,6 +268,46 @@ incomplete protection data, or missing required branch/CI safeguards fails
 closed, including on direct/manual workflow dispatch. GitHub-native reviewer
 gates, if subsequently configured, remain honored.
 
+## Protected-CD release asset digest integrity
+
+The release workflow first qualifies the complete five-target native
+artifact set and then records SHA-256 digests and exact byte sizes for all
+**23** uploaded LSP files: five binaries, five checksum sidecars, five
+provenance files, five notice bundles, and three repository license/notice
+files. Extension releases record an empty manifest and must attach **zero**
+assets. `scripts/release-asset-integrity.sh` is the shared capture/verification
+implementation invoked by protected CD, not a detached test-only verifier.
+
+The verifier re-hashes the current local files against its initial manifest
+and reads GitHub REST release metadata and the complete paginated
+`GET /repos/{owner}/{repo}/releases/{release_id}/assets` listing. It rejects
+missing, duplicate, unknown, incomplete, non-uploaded, zero-sized, invalid
+SHA-256, wrong-sized, or mismatched files. It compares the paginated listing
+with the release object's asset snapshot, including IDs, names, digests,
+sizes, and states. An API or pagination failure fails closed.
+
+Protected CD verifies the draft **after upload**, again **after the final
+release-identity/tag/immutable-policy preflights and immediately before
+promotion**, and again **after the published release becomes immutable**.
+The same checks apply to partial draft-upload recovery: `--clobber`
+reuploads expected local bytes, but promotion is blocked until the entire
+remote asset set is identical to the captured local bytes. The offline
+`scripts/test-release-asset-integrity.sh` mocks the exact CLI verifier and
+covers 23 valid assets, replacements under unchanged names, malformed
+digests, duplicate/missing/extra assets, incomplete pages, API failures,
+local mutation, recovery, and extension zero-assets. It is included in
+`cargo xtask test-publish` and in the CI quality job.
+
+This **reduces but does not eliminate the upload-to-publish TOCTOU risk**:
+GitHub does not expose a transactional conditional publish operation that
+atomically binds the entire asset set to the digest manifest. A concurrent
+authorized mutation between the last REST read and draft publication can
+still evade prepublication checking. The postpublication check detects a
+mismatch but cannot safely undo an immutable publication. Such a mismatch
+must stop the workflow and trigger human incident response; do not retry
+or replace the immutable release. This does not replace the existing
+protected environment, CI, provenance and native attestation requirements.
+
 ## Reviewed PR provenance and guarded recovery
 
 Before dispatching a publication, `--resume` fetches the merged preparation
