@@ -42,6 +42,23 @@ jobs:
       - run: cargo xtask check-no-python
       - run: cargo xtask check-dependencies
       - run: cargo test -p xtask --locked
+      - name: Stress disposable Git cleanup across concurrent test processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          pids=()
+          for worker in {1..4}; do
+            (
+              for iteration in {1..12}; do
+                cargo test -p xtask --locked --quiet \
+                  disposable_git_rejects_unreviewed_source_after_squash_release
+              done
+            ) &
+            pids+=("$!")
+          done
+          for pid in "${pids[@]}"; do
+            wait "$pid"
+          done
       - name: Exercise protected-CD asset integrity with offline mocked GitHub
         run: cargo xtask test-publish
       - name: Run 2,000-iteration benchmark
