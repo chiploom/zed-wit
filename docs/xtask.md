@@ -202,10 +202,17 @@ responses; and validate mock CD dispatch, run identity, and immutable publicatio
 No production GitHub credentials, network calls, release tags, or protected CD
 dispatches are involved. Tests clean up their temporary fixtures automatically.
 The same tests are included in `cargo xtask verify` and CI. These scenarios
-exercise real Git operations and production validation helpers but **do not
-execute the actual GitHub `--submit`/`--resume` CLI against a mocked
-transport or interpret the entire protected CD workflow**. A fully simulated
-external GitHub API/CD execution remains a separate qualification boundary.
+exercise real Git operations and the production `resume` helper that checks the
+protected workflow, run history, exact dispatch response, run identity, polling,
+and immutable-release finalization through a deterministic mocked request
+transport. Negative cases cover concurrent CD runs, ambiguous dispatches,
+unexpected SHA, stalled runs, immutable-release failures, and controlled retries.
+
+**Qualification boundary:** the complete `publish --prepare`/`--submit`/`--resume`
+CLI commands are not yet invoked as separate child processes against a
+fully simulated GitHub transport, and the actual protected CD workflow,
+artifact production, and attestations are not executed. Those require a
+separate fully isolated external-transport/CD qualification.
 
 ```sh
 cargo xtask test-publish
