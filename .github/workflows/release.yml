@@ -525,29 +525,49 @@ jobs:
             details=$(jq -c --argjson rule "$rule" '. + [$rule]' <<<"$details")
           done <<<"$summaries"
 
+          # The workflow token can read effective rules but GitHub redacts
+          # bypass_actors without ruleset-write access. Never treat an absent
+          # field as proof of no bypass. This exact repository ruleset revision
+          # was independently audited on 2026-10-13 with bypass_actors == [].
+          # Any ruleset change requires a new privileged audit and reviewed pin
+          # update; do not grant Administration:write to the CD token.
           if ! jq -e '
-            [
-              .[]
-              | select(
-                  .target == "tag"
-                  and .enforcement == "active"
-                  and (.conditions.ref_name.include | type) == "array"
-                  and any(.conditions.ref_name.include[]; . == "refs/tags/v*" or . == "~ALL")
-                  and .conditions.ref_name.exclude == []
-                  and (.rules | type) == "array"
-                )
-            ] as $matching
+            . as $details
             | (
-                all($matching[];
+                [
+                  $details[]
+                  | select(
+                      .target == "tag"
+                      and .enforcement == "active"
+                      and (.conditions.ref_name.include | type) == "array"
+                      and any(.conditions.ref_name.include[]; . == "refs/tags/v*" or . == "~ALL")
+                      and .conditions.ref_name.exclude == []
+                      and (.rules | type) == "array"
+                    )
+                ]
+              ) as $matching
+            | (
+                ($matching | length) > 0
+                and all($matching[];
                   ([.rules[].type] | index("creation")) == null)
-                and (
-                  [$matching[] | select(.bypass_actors == []) | .rules[].type] as $types
-                  | all(["update", "deletion", "non_fast_forward"][];
-                    . as $required | ($types | index($required)) != null)
+                and any($matching[];
+                  .id == 24620024
+                  and .source_type == "Repository"
+                  and .source == "chiploom/zed-wit"
+                  and .updated_at == "2026-10-06T21:11:44.860-04:00"
+                  and (
+                    (has("bypass_actors") | not)
+                    or .bypass_actors == []
+                  )
+                  and (
+                    [.rules[].type] as $types
+                    | all(["update", "deletion", "non_fast_forward"][];
+                        . as $required | ($types | index($required)) != null)
+                  )
                 )
               )
           ' <<<"$details" >/dev/null; then
-            echo "::error::Release tags require active unbypassed v* update/deletion/non-fast-forward protection with creation allowed"
+            echo "::error::Release tag protection differs from audited unbypassed ruleset revision 24620024; verify ruleset and re-audit before updating the pin"
             exit 1
           fi
 
