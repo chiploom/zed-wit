@@ -2057,8 +2057,17 @@ fn classify_workflow_run(
     tag: &str,
 ) -> Result<WorkflowProgress, String> {
     let title = format!("CD / publish / {} / {tag}", scope.name());
-    if run["id"].as_u64() != Some(id)
-        || run["head_sha"].as_str() != Some(main_sha)
+    // An explicit wrong run ID or commit is never a metadata propagation delay.
+    if run["id"].as_u64() != Some(id) {
+        return Err("CD run ID differs from confirmed dispatch".into());
+    }
+    if run["head_sha"]
+        .as_str()
+        .is_some_and(|actual| actual != main_sha)
+    {
+        return Err("CD run commit differs from confirmed dispatch".into());
+    }
+    if run["head_sha"].as_str() != Some(main_sha)
         || run["head_branch"].as_str() != Some("main")
         || run["event"].as_str() != Some("workflow_dispatch")
         || !matches!(
@@ -2280,13 +2289,35 @@ fn dispatch_protected_cd(
         println!("Status: requested/pending. This is not a published release.");
         return Ok(());
     }
+    // GitHub may briefly return an incomplete display title or other run
+    // metadata immediately after workflow_dispatch. Recheck only the exact ID
+    // returned by dispatch, and never publish on unverified identity.
+    const MAX_IDENTITY_RECHECKS: usize = 6;
+    let mut identity_rechecks = 0;
+    let mut identity_confirmed = false;
     for _ in 0..max_polls {
         let run: Value = serde_json::from_str(&request(&[
             "api",
             &format!("repos/{REPO}/actions/runs/{id}"),
         ])?)
         .map_err(|e| format!("parse exact workflow run {id}: {e}"))?;
-        match classify_workflow_run(&run, id, main_sha, scope, tag)? {
+        let progress = match classify_workflow_run(&run, id, main_sha, scope, tag) {
+            Ok(progress) => {
+                identity_confirmed = true;
+                progress
+            }
+            Err(error)
+                if !identity_confirmed
+                    && error == "exact CD run identity differs from confirmed dispatch"
+                    && identity_rechecks < MAX_IDENTITY_RECHECKS =>
+            {
+                identity_rechecks += 1;
+                sleep(Duration::from_secs(2));
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        match progress {
             WorkflowProgress::Pending => {}
             WorkflowProgress::Succeeded => {
                 let release: Value = serde_json::from_str(&request(&[
@@ -4112,6 +4143,93 @@ mod tests {
         ] {
             assert!(verify_published_release(&invalid, tag).is_err());
         }
+    }
+
+    #[test]
+    fn confirmed_cd_identity_reconciles_only_bounded_metadata_delay() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let tag = "v-extension-0.5.0";
+        let mut polls = 0usize;
+        let mut sleeps = Vec::new();
+        let result = dispatch_protected_cd(
+            Scope::Extension,
+            tag,
+            sha,
+            false,
+            10,
+            |args| {
+                let path = args.last().copied().unwrap_or_default();
+                if path.contains("/runs?") {
+                    return Ok(String::new());
+                }
+                if path.ends_with("/actions/workflows/release.yml") {
+                    return Ok(json!({"state": "active"}).to_string());
+                }
+                if args.iter().any(|arg| arg.contains("return_run_details=true")) {
+                    return Ok(json!({
+                        "workflow_run_id": 1234,
+                        "html_url": "https://github.com/chiploom/zed-wit/actions/runs/1234"
+                    })
+                    .to_string());
+                }
+                if path.ends_with("/actions/runs/1234") {
+                    polls += 1;
+                    return Ok(json!({
+                        "id": 1234,
+                        "head_sha": sha,
+                        "head_branch": "main",
+                        "event": "workflow_dispatch",
+                        "path": ".github/workflows/release.yml",
+                        "display_title": if polls == 1 {
+                            "CD"
+                        } else {
+                            "CD / publish / extension / v-extension-0.5.0"
+                        },
+                        "status": if polls == 1 {"in_progress"} else {"completed"},
+                        "conclusion": if polls == 1 {Value::Null} else {json!("success")}
+                    })
+                    .to_string());
+                }
+                if path.ends_with("/releases/tags/v-extension-0.5.0") {
+                    return Ok(json!({
+                        "tag_name": tag,
+                        "draft": false,
+                        "immutable": true
+                    })
+                    .to_string());
+                }
+                Err(format!("unexpected mocked GitHub API call: {args:?}"))
+            },
+            |duration| sleeps.push(duration),
+        );
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(polls, 2);
+        assert_eq!(sleeps, [Duration::from_secs(2)]);
+    }
+
+    #[test]
+    fn confirmed_cd_identity_never_accepts_a_different_run_or_commit() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let tag = "v-extension-0.5.0";
+        let mut run = json!({
+            "id": 1234,
+            "head_sha": sha,
+            "head_branch": "main",
+            "event": "workflow_dispatch",
+            "path": ".github/workflows/release.yml",
+            "display_title": "CD / publish / extension / v-extension-0.5.0",
+            "status": "completed",
+            "conclusion": "success"
+        });
+        run["id"] = json!(1235);
+        assert!(classify_workflow_run(&run, 1234, sha, Scope::Extension, tag)
+            .unwrap_err()
+            .contains("run ID"));
+        run["id"] = json!(1234);
+        run["head_sha"] = json!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert!(classify_workflow_run(&run, 1234, sha, Scope::Extension, tag)
+            .unwrap_err()
+            .contains("commit"));
     }
 
     #[test]
