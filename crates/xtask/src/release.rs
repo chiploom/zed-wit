@@ -205,18 +205,64 @@ fn json_string<'a>(value: &'a Value, key: &str, path: &Path) -> Result<&'a str, 
         .ok_or_else(|| format!("{} omitted string field {key:?}", path.display()))
 }
 
+/// Claim the artifact pathname atomically. std::fs::copy can overwrite
+/// an existing file even when an earlier existence check appeared clear.
+fn copy_release_binary_new(source: &Path, artifact: &Path) -> Result<(), String> {
+    let mut input =
+        fs::File::open(source).map_err(|error| format!("open {}: {error}", source.display()))?;
+    let meta = input
+        .metadata()
+        .map_err(|error| format!("stat {}: {error}", source.display()))?;
+    if !meta.is_file() || meta.len() == 0 {
+        return Err(format!(
+            "expected a nonempty regular file: {}",
+            source.display()
+        ));
+    }
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(artifact)
+        .map_err(|error| {
+            format!(
+                "create {} (will not overwrite): {error}",
+                artifact.display()
+            )
+        })?;
+    std::io::copy(&mut input, &mut output).map_err(|error| {
+        format!(
+            "copy {} to {}: {error}; incomplete artifact may remain",
+            source.display(),
+            artifact.display()
+        )
+    })?;
+    output
+        .flush()
+        .and_then(|()| output.sync_all())
+        .map_err(|error| {
+            format!(
+                "write {}: {error}; incomplete artifact may remain",
+                artifact.display()
+            )
+        })?;
+    output.set_permissions(meta.permissions()).map_err(|error| {
+        format!(
+            "set permissions {}: {error}; artifact may remain",
+            artifact.display()
+        )
+    })
+}
+
 pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let root = util::repo_root();
     let name = asset_name(target);
-    let source =
-        root.join("target")
-            .join(target)
-            .join("release")
-            .join(if target.contains("windows") {
-                "wit-language-server.exe"
-            } else {
-                "wit-language-server"
-            });
+    let source = util::cargo_target_dir()?.join(target).join("release").join(
+        if target.contains("windows") {
+            "wit-language-server.exe"
+        } else {
+            "wit-language-server"
+        },
+    );
     ensure_regular_nonempty(&source)?;
     let metadata =
         fs::metadata(&source).map_err(|error| format!("stat {}: {error}", source.display()))?;
@@ -231,7 +277,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
     let provenance = output.join(format!("{name}.provenance.json"));
     if [&artifact, &checksum, &provenance]
         .iter()
-        .any(|path| path.exists())
+        .any(|path| fs::symlink_metadata(path).is_ok())
     {
         return Err(format!(
             "refusing to overwrite release artifacts for {target}"
@@ -244,13 +290,7 @@ pub fn package_release(target: &str, output: &Path) -> Result<(), String> {
         return Err("release CI checkout must be clean and committed".into());
     }
 
-    fs::copy(&source, &artifact).map_err(|error| {
-        format!(
-            "copy {} to {}: {error}",
-            source.display(),
-            artifact.display()
-        )
-    })?;
+    copy_release_binary_new(&source, &artifact)?;
     let digest = util::sha256_file(&artifact)?;
     util::write_new(&checksum, &format!("{digest}  {name}\n"))?;
 
@@ -537,9 +577,131 @@ pub fn verify_release_assets(input: &Path) -> Result<(), String> {
     verify_release_assets_against(input, &root, expected_workflow_run.as_deref())
 }
 
+/// Verify a locally prepared single-target release bundle. This is not a
+/// substitute for the five-target verification and attestations in protected CD.
+pub fn verify_release_target(target: &str, input: &Path) -> Result<(), String> {
+    crate::dependency_policy::ensure_target(target)?;
+    let root = util::repo_root();
+    let name = asset_name(target);
+    let asset = input.join(&name);
+    ensure_regular_nonempty(&asset)?;
+    if fs::metadata(&asset)
+        .map_err(|error| format!("stat {}: {error}", asset.display()))?
+        .len()
+        > MAX_BINARY_BYTES
+    {
+        return Err(format!(
+            "{} exceeds the release binary size limit",
+            asset.display()
+        ));
+    }
+    let digest = util::sha256_file(&asset)?;
+    let sidecar = input.join(format!("{name}.sha256"));
+    ensure_regular_nonempty(&sidecar)?;
+    let actual_checksum = fs::read_to_string(&sidecar)
+        .map_err(|error| format!("read {}: {error}", sidecar.display()))?;
+    if actual_checksum != format!("{digest}  {name}\n") {
+        return Err(format!("invalid checksum: {name}"));
+    }
+    let lock_digest = util::sha256_file(&root.join("Cargo.lock"))?;
+    let version = server_version()?;
+    let revision = git_revision(&root)?;
+    let workflow_run = env::var("GITHUB_RUN_ID").ok();
+    verify_provenance(
+        &input.join(format!("{name}.provenance.json")),
+        &name,
+        target,
+        &digest,
+        &ProvenanceExpectation {
+            version: &version,
+            lock_digest: &lock_digest,
+            revision: revision.as_deref(),
+            workflow_run: workflow_run.as_deref(),
+        },
+    )?;
+    verify_license_notices(
+        &input.join(format!("{name}.licenses.txt")),
+        target,
+        &lock_digest,
+    )?;
+    println!("verified local release bundle for {target}");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    struct ArtifactDir(PathBuf);
+
+    impl ArtifactDir {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            loop {
+                let path = std::env::temp_dir().join(format!(
+                    "zed-wit-release-artifact-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => panic!("create artifact test directory: {error}"),
+                }
+            }
+        }
+    }
+
+    impl Drop for ArtifactDir {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).expect("remove artifact test directory");
+        }
+    }
+
+    #[test]
+    fn artifact_copy_refuses_existing_files_and_source_aliases() {
+        let dir = ArtifactDir::new();
+        let source = dir.0.join("source");
+        let artifact = dir.0.join("artifact");
+        fs::write(&source, b"release-binary").unwrap();
+        fs::write(&artifact, b"existing").unwrap();
+        assert!(copy_release_binary_new(&source, &artifact).is_err());
+        assert_eq!(fs::read(&artifact).unwrap(), b"existing");
+        assert!(copy_release_binary_new(&source, &source).is_err());
+        assert_eq!(fs::read(&source).unwrap(), b"release-binary");
+
+        fs::remove_file(&artifact).unwrap();
+        copy_release_binary_new(&source, &artifact).unwrap();
+        assert_eq!(fs::read(&artifact).unwrap(), b"release-binary");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn artifact_copy_refuses_dangling_symlink_without_creating_target() {
+        use std::os::unix::fs::symlink;
+        let dir = ArtifactDir::new();
+        let source = dir.0.join("source");
+        let victim = dir.0.join("victim");
+        let artifact = dir.0.join("artifact");
+        fs::write(&source, b"release-binary").unwrap();
+        symlink(&victim, &artifact).unwrap();
+        assert!(
+            !artifact.exists(),
+            "dangling symlink follows nonexistent target"
+        );
+        assert!(copy_release_binary_new(&source, &artifact).is_err());
+        assert!(!victim.exists(), "symlink target must remain absent");
+        assert!(
+            fs::symlink_metadata(&artifact)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
 
     #[test]
     fn stable_release_versions_are_strict() {
