@@ -12,26 +12,32 @@ machine or CI runner with Rust 1.99.0 and an offline Cargo dependency cache.
 
 The harness clones the current source into a temporary Git repository,
 compiles its actual `xtask` executable inside the clone, and invokes
-`cargo xtask publish`. It uses a local bare origin, synthetic GitHub CLI
-responses, and a Git shim that **rejects every production CLI push**.
-Unknown GitHub API operations fail closed. It does not reuse a production
-checkout for writes, inject a test-only publish flag, or invoke protected CD.
+`cargo xtask publish`. It uses a disposable bare Git remote, a synthetic
+GitHub CLI, and a Git shim that redirects **only the exact lease-protected
+preparation-branch creation push** to that local remote. Unrelated Git pushes
+and unrecognized GitHub API operations are rejected. The fixture never
+writes to the real GitHub repository and never invokes protected CD.
+No test-only publish flags or production safeguard bypasses are introduced.
 
-It covers both LSP and extension streams: real planning and preparation,
-confirmation and option parsing, unprepared submission rejection, missing PR
-identifier rejection, clean/dirty worktree enforcement, and proof that
-preparation does not commit or push the candidate. The existing connected
-Rust lifecycle tests separately exercise shared production submit and resume
-transport helpers, post-review provenance, merged-tree integrity,
-incomplete submission and recovery, failed/pending CD outcomes, and an
-ambiguous dispatch response.
+Both LSP and extension subprocesses exercise real planning, preparation,
+confirmation and option parsing, dirty-worktree enforcement, human-reviewed
+synthetic notes, complete `--submit` preflight (including locked Cargo
+metadata and workspace verification), exact-commit branch creation, an
+interrupted PR-create response, and an identical-ref retry. Each then
+simulates a squash merge in the disposable repo, rejects stale main and
+malformed PR metadata, and executes the actual `--resume` through reviewed
+source/merged Git-tree provenance and run-history preflight. The mocked
+workflow dispatch **deliberately fails**; reaching that explicit denial
+demonstrates the source checks succeeded without publishing. The existing
+seven connected Rust lifecycle scenarios additionally cover successful
+and failed mocked CD run states, exact run identity, replay/transport
+failures, and immutable final-state assertions.
 
-**Not yet executed as an entire production process:** human-reviewed
-`--submit` after its full dependency/security preflight, post-merge
-`--resume` through its complete live policy/PR-file/remote checks, and
-exact protected-CD dispatch. A mock GH CLI can exercise those paths only
-after the full request/response surface is emulated. Do not claim a complete
-real-GitHub E2E test on the strength of the helper tests.
+**Qualification boundary:** no real GitHub service, protected environment,
+workflow dispatch, native release job or live production credential is
+used. The subprocesses qualify the actual production CLI and fail-closed
+mocked transport; they cannot establish live GitHub permission behavior,
+real-time concurrency semantics, or hosted release publication.
 
 ## Protected CD qualification boundary
 
