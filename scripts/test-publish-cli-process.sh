@@ -4,6 +4,9 @@ root=$(git rev-parse --show-toplevel)
 real_git=$(command -v git)
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
+# macOS may give /var/... from mktemp while pwd -P resolves /private/var/....
+# Compare physical paths so the fixture Git shim cannot miss its own checkout.
+tmp=$(cd "$tmp" && pwd -P)
 mkdir -p "$tmp/bin"
 export REAL_GIT="$real_git" FIXTURE_ROOT="$tmp"
 # Even Git commands outside the fixture shim must never reach network transports.
@@ -174,6 +177,10 @@ chmod +x "$tmp/bin/git" "$tmp/bin/gh"
 base=$("$real_git" -C "$tmp/repo" rev-parse main)
 export PATH="$tmp/bin:$PATH" CARGO_TARGET_DIR="$tmp/build"
 cd "$tmp/repo"
+if [ "$(pwd -P)" != "$FIXTURE_ROOT/repo" ]; then
+  echo "fixture root is not the canonical physical checkout path" >&2
+  exit 1
+fi
 # Exercise the fallthrough path in the Git shim: a future publishing refactor
 # must not silently make real Git network transport available to the fixture.
 for denied_remote in \
