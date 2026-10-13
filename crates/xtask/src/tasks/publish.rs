@@ -429,13 +429,8 @@ fn verify_reviewed_merge_tree(
     // must contain exactly the expected release-only paths.
     validate_changed_files(&changed, scope, candidate)?;
 
-    let files = [
-        Some(scope.manifest()),
-        Some("Cargo.lock"),
-        Some("CHANGELOG.md"),
-        Some(format!("docs/releases/{}/v{}.md", scope.name(), candidate.value()).as_str()),
-    ];
-    for path in files.into_iter().flatten() {
+    let notes = format!("docs/releases/{}/v{}.md", scope.name(), candidate.value());
+    for path in [scope.manifest(), "Cargo.lock", "CHANGELOG.md", notes.as_str()] {
         let merged = git(&["rev-parse", &format!("{merge_sha}:{path}")], root)?;
         let approved = reviewed_blob(path)?;
         if !valid_sha(&merged) || !valid_sha(&approved) || merged != approved {
