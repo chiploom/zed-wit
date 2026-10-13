@@ -90,16 +90,17 @@ The issue #24 command verifies **live GitHub protection rules** before
 remote writes. **For now, zero required reviewers are permitted** for both
 release-preparation PRs and CD publication. Submission still requires a PR
 rule, six required CI checks and linear history. Resume additionally
-requires the `release` environment to restrict deployment to protected
-branches. Protected CD repeats these checks before release-related writes.
-Unreadable or missing rules still fail closed.
+requires the `release` environment to restrict deployment to either
+protected branches only or exactly one custom deployment policy that permits
+only branch `main`, with no tag patterns or wildcard branches. All policy
+pages and GitHub's reported count are validated; missing or unreadable data
+fails closed. Protected CD repeats these checks before release-related writes.
 
-At the 2026-10-09 audit, `main` required zero approving reviews and
-`release` had no required reviewers. Those settings now satisfy the
-temporary policy, but the environment's **custom deployment-branch policy**
-still does not satisfy the protected-branches-only requirement. An
-authorized administrator must review that separate setting before
-publication.
+The 2026-10-13 qualification confirmed the live environment has an exact
+`main` custom deployment branch policy, and this policy is now explicitly
+supported. Existing effective `main` ruleset protection remains mandatory.
+Zero required reviewers remain temporarily authorized; GitHub-native
+approval requirements remain effective if enabled later.
 
 Resume further requires the current `main` SHA to be **identical** to the
 reviewed preparation PR's merged commit. Any later commit, even one that
@@ -115,8 +116,9 @@ Administration-read-only `RELEASE_POLICY_READ_TOKEN`; the standard
 `GITHUB_TOKEN` cannot authenticate that API. Any missing/disabled policy
 fails before release-related writes, and the published release must report
 `immutable=true`. See [publishing](publishing.md) for operator setup.
-The current live immutable-release setting was not accessible through the
-connected GitHub app and must be checked by an authorized operator.
+An authorized operator confirmed immutable releases enabled on 2026-10-13.
+The scoped read-only token is provisioned, but its runtime authorization is
+not verified until protected CD performs the policy check.
 
 ## Version-aware release preparation and protected CD
 
