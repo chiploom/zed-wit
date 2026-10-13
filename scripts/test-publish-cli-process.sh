@@ -46,6 +46,7 @@ GH
 chmod +x "$tmp/bin/git" "$tmp/bin/gh"
 "$real_git" clone --local --no-hardlinks --quiet "$root" "$tmp/repo"
 "$real_git" init --bare --quiet "$tmp/remote.git"
+"$real_git" -C "$tmp/remote.git" config receive.shallowUpdate true
 "$real_git" -C "$tmp/repo" switch -C main >/dev/null
 "$real_git" -C "$tmp/repo" config user.name 'Offline CLI Fixture'
 "$real_git" -C "$tmp/repo" config user.email 'offline@example.invalid'
