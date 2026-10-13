@@ -313,12 +313,21 @@ release SHAs, duplicate dispatches and drafts/nonimmutable release responses).
 Fixture cleanup is automatic and no live GitHub APIs or credentials are used.
 
 These connected state transitions supplement the granular publishing tests
-and run under the standard workspace suite in CI. **They are not an emulator
-of all GitHub API transport behavior or the actual CD workflow executable**;
-specifically they do not invoke production `publish --submit`/`--resume`
-against a mock server, nor do they run the release artifact/attestation jobs.
-Those boundaries require a separate isolated orchestration qualification.
-Never substitute a live release for such tests.
+and run under the standard workspace suite in CI. They now invoke the
+**same extracted production `resume` post-provenance dispatch/wait function**
+with an injected deterministic GitHub transport. Synthetic API responses test
+enabled workflow state, complete prior-run history, exact dispatch identity,
+queued-then-successful workflow polling, and non-draft immutable release
+verification. Negative tests cover inactive workflows, concurrent activity,
+ambiguous/failed dispatch, mismatched run identity, missing retry evidence,
+timeouts, and mutable releases. All API writes are mock callbacks, not
+network requests.
+
+**These tests still do not invoke the complete `publish --prepare` /
+`--submit` / `--resume` CLI across an external mocked transport**, nor do they
+execute the actual protected CD workflow executable or its native
+release-artifact/attestation jobs. Those boundaries require further offline
+qualification. Never substitute a live release for such tests.
 
 ## Implementation sequence and regression evidence
 
