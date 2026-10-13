@@ -30,6 +30,7 @@ Native binary lookup and local release packaging read the effective output direc
 | `test` | Native tests; supports `--package <name>`, `--filter <substring>`, `--runner <auto|cargo|nextest>`. Auto prefers installed nextest unless a substring filter is given. |
 | `verify` | Repository policy + dependency checks, `check` and `test-all`. |
 | `test-all` | Native workspace tests, doctests and a Wasm extension build; optional `--with-zed true` for real Zed smoke. GUI/hosted tests remain separate. |
+| `test-publish` | Offline connected release lifecycle integration tests (LSP and extension), using disposable Git/Cargo repositories and mocked GitHub policy, PR, dispatch, and immutable-release responses. Never publishes anything. |
 | `test-lsp` | Test syntax, analysis and language-server packages. |
 | `test-extension` | Test extension and syntax packages, build `wasm32-wasip2` adapter. |
 | `build` | Build `--kind server` (default) or `--kind extension`. Supports `--release true` and server `--target <triple>`. |
@@ -188,6 +189,27 @@ remain separate. No automatic runtime-LSP pin changes occur.
 This command is being qualified on [PR #26](https://github.com/chiploom/zed-wit/pull/26).
 Treat remote publication as a high-risk operation and review exact scope,
 tag, PR and run URL before giving confirmation.
+
+## Isolated publishing lifecycle qualification
+
+Run `cargo xtask test-publish` to execute the dedicated offline connected
+LSP and extension publishing scenarios. They prepare scoped manifests,
+Cargo.lock, reviewed notes and a changelog in disposable Cargo/Git repositories;
+atomically submit a branch to a disposable bare remote; simulate a reviewed
+squash merge; check provenance and strict policy gates against synthetic GitHub
+responses; and validate mock CD dispatch, run identity, and immutable publication.
+
+No production GitHub credentials, network calls, release tags, or protected CD
+dispatches are involved. Tests clean up their temporary fixtures automatically.
+The same tests are included in `cargo xtask verify` and CI. These scenarios
+exercise real Git operations and production validation helpers but **do not
+execute the actual GitHub `--submit`/`--resume` CLI against a mocked
+transport or interpret the entire protected CD workflow**. A fully simulated
+external GitHub API/CD execution remains a separate qualification boundary.
+
+```sh
+cargo xtask test-publish
+```
 
 ## Suggested local validation
 
