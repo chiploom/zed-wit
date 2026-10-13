@@ -1000,7 +1000,9 @@ fn validate_release_deployment_branch_policies(pages: &str) -> Result<(), String
         let page: Value = serde_json::from_str(line)
             .map_err(|_| "malformed release deployment branch-policy page")?;
         if page["total_count"].as_u64() != Some(1) {
-            return Err("release environment must allow exactly one deployment branch policy".into());
+            return Err(
+                "release environment must allow exactly one deployment branch policy".into(),
+            );
         }
         let policies = page["branch_policies"]
             .as_array()
@@ -1008,8 +1010,7 @@ fn validate_release_deployment_branch_policies(pages: &str) -> Result<(), String
         page_count += 1;
         for policy in policies {
             policy_count += 1;
-            if policy["name"].as_str() != Some("main")
-                || policy["type"].as_str() != Some("branch")
+            if policy["name"].as_str() != Some("main") || policy["type"].as_str() != Some("branch")
             {
                 return Err("release deployment policy must be exactly the main branch".into());
             }
@@ -3508,12 +3509,15 @@ mod tests {
             serde_json::json!({"total_count":1}),
             serde_json::json!({"branch_policies":[{"name":"main","type":"branch"}]}),
         ] {
-            assert!(validate_release_environment_protection(&custom, Some(&invalid.to_string())).is_err());
+            assert!(
+                validate_release_environment_protection(&custom, Some(&invalid.to_string()))
+                    .is_err()
+            );
         }
-        assert!(validate_release_environment_protection(
-            &custom,
-            Some(&format!("{good}\n{good}")),
-        ).is_err());
+        assert!(
+            validate_release_environment_protection(&custom, Some(&format!("{good}\n{good}")),)
+                .is_err()
+        );
 
         modified = custom.clone();
         modified["deployment_branch_policy"]["protected_branches"] = true.into();
