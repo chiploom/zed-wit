@@ -9,6 +9,7 @@ export REAL_GIT="$real_git" FIXTURE_ROOT="$tmp"
 export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 export CARGO_NET_OFFLINE=true GH_TOKEN=offline-synthetic GH_REPO=chiploom/zed-wit
 export GITHUB_ACTIONS=false MOCK_FAIL_PR_CREATE=0 MOCK_BAD_PR=0 MOCK_MERGED=0 MOCK_FILE_COUNT=0
+unset GITHUB_OUTPUT GITHUB_SHA
 cat >"$tmp/bin/git" <<'GIT'
 #!/usr/bin/env bash
 set -euo pipefail
