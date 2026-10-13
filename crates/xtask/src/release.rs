@@ -663,6 +663,103 @@ mod tests {
     }
 
     #[test]
+    fn five_target_verifier_checks_real_checksum_provenance_and_notice_contract() {
+        let fixture = ArtifactDir::new();
+        let source = fixture.0.join("source");
+        let artifacts = fixture.0.join("artifacts");
+        fs::create_dir_all(source.join("crates/wit-language-server")).unwrap();
+        fs::create_dir_all(&artifacts).unwrap();
+        fs::write(
+            source.join("crates/wit-language-server/Cargo.toml"),
+            "[package]\nname = \"wit-language-server\"\nversion = \"9.8.7\"\n",
+        )
+        .unwrap();
+        fs::write(source.join("Cargo.lock"), "synthetic locked dependencies\n").unwrap();
+        let lock_digest = util::sha256_file(&source.join("Cargo.lock")).unwrap();
+
+        for target in TARGETS {
+            let name = asset_name(target);
+            let binary = artifacts.join(&name);
+            fs::write(&binary, format!("synthetic binary for {target}\n")).unwrap();
+            let digest = util::sha256_file(&binary).unwrap();
+            fs::write(
+                artifacts.join(format!("{name}.sha256")),
+                format!("{digest}  {name}\n"),
+            )
+            .unwrap();
+            let metadata = json!({
+                "artifact": name,
+                "sha256": digest,
+                "version": "9.8.7",
+                "target": target,
+                "source_dirty": false,
+                "rustc": "rustc synthetic fixture",
+                "cargo_lock_sha256": lock_digest,
+                "build_command": format!(
+                    "cargo build -p wit-language-server --release --locked --target {target}"
+                ),
+                "source_revision": null,
+                "workflow_run": null,
+            });
+            fs::write(
+                artifacts.join(format!("{name}.provenance.json")),
+                serde_json::to_string_pretty(&metadata).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                artifacts.join(format!("{name}.licenses.txt")),
+                format!(
+                    "WIT language server redistribution notices\nTarget: {target}\n\
+                     Cargo.lock SHA256: {lock_digest}\n\
+                     Scope: target-filtered native normal/build dependency closure; dev-only edges excluded.\n\
+                     PROJECT AND DIRECTLY COPIED MATERIAL\n\
+                     PACKAGE: synthetic fixture\n\
+                     RUST STANDARD LIBRARY: full notices from the pinned toolchain distribution\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        assert!(verify_release_assets_against(&artifacts, &source, None).is_ok());
+
+        let name = asset_name(TARGETS[0]);
+        let binary = artifacts.join(&name);
+        fs::write(&binary, b"tampered binary").unwrap();
+        assert!(verify_release_assets_against(&artifacts, &source, None).is_err());
+        fs::write(&binary, format!("synthetic binary for {}\n", TARGETS[0])).unwrap();
+
+        let sidecar = artifacts.join(format!("{name}.sha256"));
+        let valid_sidecar = fs::read(&sidecar).unwrap();
+        fs::write(&sidecar, b"bad-checksum").unwrap();
+        assert!(verify_release_assets_against(&artifacts, &source, None).is_err());
+        fs::write(&sidecar, valid_sidecar).unwrap();
+
+        let provenance = artifacts.join(format!("{name}.provenance.json"));
+        let valid_provenance = fs::read(&provenance).unwrap();
+        fs::write(&provenance, b"{\"source_dirty\":true}").unwrap();
+        assert!(verify_release_assets_against(&artifacts, &source, None).is_err());
+        fs::write(&provenance, valid_provenance).unwrap();
+
+        let notices = artifacts.join(format!("{name}.licenses.txt"));
+        let valid_notices = fs::read(&notices).unwrap();
+        fs::write(&notices, b"unexpected redistribution notices").unwrap();
+        assert!(verify_release_assets_against(&artifacts, &source, None).is_err());
+        fs::write(&notices, valid_notices).unwrap();
+
+        let last = artifacts.join(format!("{}.licenses.txt", asset_name(TARGETS[4])));
+        let valid_last = fs::read(&last).unwrap();
+        fs::remove_file(&last).unwrap();
+        assert!(verify_release_assets_against(&artifacts, &source, None).is_err());
+        fs::write(&last, valid_last).unwrap();
+
+        fs::write(artifacts.join("unexpected-extra"), b"not a release asset").unwrap();
+        assert!(verify_release_assets_against(&artifacts, &source, None).is_err());
+        fs::remove_file(artifacts.join("unexpected-extra")).unwrap();
+
+        assert!(verify_release_assets_against(&artifacts, &source, None).is_ok());
+    }
+
+    #[test]
     fn artifact_copy_refuses_existing_files_and_source_aliases() {
         let dir = ArtifactDir::new();
         let source = dir.0.join("source");
