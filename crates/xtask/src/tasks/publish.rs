@@ -2384,7 +2384,10 @@ mod tests {
         let path = "CHANGELOG.md";
         let entry = json!({"path":path,"mode":"100644","type":"blob","sha":blob});
         let expected = json!({"sha":root,"truncated":false,"tree":[entry]});
-        assert_eq!(verified_reviewed_git_blob(&expected, &root, path).unwrap(), blob);
+        assert_eq!(
+            verified_reviewed_git_blob(&expected, &root, path).unwrap(),
+            blob
+        );
 
         let mut invalid = expected.clone();
         invalid["sha"] = json!("d".repeat(40));
