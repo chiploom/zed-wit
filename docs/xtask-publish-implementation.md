@@ -207,8 +207,9 @@ gh api --hostname github.com -H 'X-GitHub-Api-Version: 2026-03-10' \
 An HTTP 404 means immutability is not enabled, according to GitHub's REST
 contract; HTTP 403, missing credentials or malformed JSON require separate
 operator investigation. The connected GitHub app cannot query this
-Administration-read endpoint, so its current live state is **not verified**
-by this audit. Do not enable immutability or install credentials automatically.
+Administration-read endpoint, but an authorized operator independently
+verified `enabled=true` on 2026-10-13. Do not change repository settings
+or install credentials automatically.
 
 ## Mandatory protection qualification (fail closed)
 
@@ -218,8 +219,14 @@ checks, but its approving-review count may be **zero**. The protected
 `release` environment may likewise have **zero** required reviewers;
 self-review prevention is not required when no approval is configured.
 The environment must still exist, expose readable protection metadata, and
-restrict deployment to **protected branches only**. Reviewer requirements
-can be restored later without changing the publishing protocol.
+restrict deployment to either **protected branches only** or an exact
+`main`-only custom branch allowlist. For the custom alternative, both
+preflights read all deployment policy pages, require `total_count=1`, and
+verify the sole rule has `name=main` and `type=branch`. Missing or extra
+entries, tag restrictions, wildcard branches and unreadable responses fail
+closed. In both cases effective `main` PR, linear history and trusted strict
+six-check rules remain mandatory. Reviewer requirements can be restored
+later without changing the publishing protocol.
 
 `--submit --confirm` reads the effective main-branch rules using
 `GET /repos/chiploom/zed-wit/rules/branches/main`; `--resume --confirm`
@@ -237,11 +244,13 @@ CI gating, and linear history, but `required_approving_review_count=0`.
 An active `Protect release tags` ruleset (ID `24620024`) blocks
 tag deletion/update and non-fast-forward modifications. No inherited
 organization ruleset was returned by the current ruleset listing.
-An authenticated environment inspection subsequently confirmed **zero**
-required reviewers, no self-review prevention and custom deployment-branch
-policies instead of protected branches. The zero-reviewer configuration is
-now permitted; the **deployment-branch policy remains noncompliant** and
-continues to block CD resume/publication. No repository settings were changed.
+An authenticated environment inspection on 2026-10-13 confirmed **zero**
+required reviewers and a custom deployment branch policy permitting only
+`main`. The exact-`main` alternative is now supported, subject to the same
+effective `main` ruleset authorization. No repository settings were changed.
+A read-only operator check also confirmed immutable releases are enabled,
+and `RELEASE_POLICY_READ_TOKEN` is present in the `release` environment;
+runtime token permissions must still be qualified safely.
 
 Read-only qualification commands using an appropriately authorized local
 GitHub CLI login:
