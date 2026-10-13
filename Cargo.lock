@@ -2939,6 +2939,8 @@ dependencies = [
  "enigo",
 ]
 
+[[package]]
+name = "zed-wit"
 version = "0.5.1"
 dependencies = [
  "sha2",
