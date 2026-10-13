@@ -991,20 +991,60 @@ fn check_release_tag_protection_preflight(root: &Path) -> Result<(), String> {
     })
 }
 
-fn validate_release_environment_protection(env: &Value) -> Result<(), String> {
+fn validate_release_deployment_branch_policies(pages: &str) -> Result<(), String> {
+    // --paginate emits one JSON object per page. Count the entire result;
+    // merely finding one matching policy is unsafe if other pages exist.
+    let mut page_count = 0_usize;
+    let mut policy_count = 0_usize;
+    for line in pages.lines() {
+        let page: Value = serde_json::from_str(line)
+            .map_err(|_| "malformed release deployment branch-policy page")?;
+        if page["total_count"].as_u64() != Some(1) {
+            return Err("release environment must allow exactly one deployment branch policy".into());
+        }
+        let policies = page["branch_policies"]
+            .as_array()
+            .ok_or("release deployment branch-policy page omitted policies")?;
+        page_count += 1;
+        for policy in policies {
+            policy_count += 1;
+            if policy["name"].as_str() != Some("main")
+                || policy["type"].as_str() != Some("branch")
+            {
+                return Err("release deployment policy must be exactly the main branch".into());
+            }
+        }
+    }
+    if page_count == 0 || policy_count != 1 {
+        return Err("release deployment branch policies are missing or ambiguous".into());
+    }
+    Ok(())
+}
+
+fn validate_release_environment_protection(
+    env: &Value,
+    custom_policies: Option<&str>,
+) -> Result<(), String> {
     if env["name"].as_str() != Some("release") {
         return Err("GitHub returned an unexpected release environment".into());
     }
-    // An environment with zero required reviewers is explicitly allowed
-    // for now. Still require readable protection metadata and a protected
-    // deployment branch; do not silently accept a missing environment.
+    // Zero required reviewers are temporarily permitted. Always demand
+    // readable environment and deployment protection metadata.
     env["protection_rules"]
         .as_array()
         .ok_or("release environment protection rules are unavailable")?;
-    if env["deployment_branch_policy"]["protected_branches"].as_bool() != Some(true) {
-        return Err("release environment must restrict deployment to protected branches".into());
+    let config = &env["deployment_branch_policy"];
+    match (
+        config["protected_branches"].as_bool(),
+        config["custom_branch_policies"].as_bool(),
+        custom_policies,
+    ) {
+        (Some(true), Some(false), None) => Ok(()),
+        (Some(false), Some(true), Some(pages)) => {
+            validate_release_deployment_branch_policies(pages)
+        }
+        _ => Err("release environment requires protected branches or a verified exact-main branch policy".into()),
     }
-    Ok(())
 }
 fn check_release_protection_preflight(root: &Path, check_environment: bool) -> Result<(), String> {
     // GitHub returns the effective active branch rules across both repository
@@ -1032,7 +1072,27 @@ fn check_release_protection_preflight(root: &Path, check_environment: bool) -> R
             "api", &format!("repos/{REPO}/environments/release")
         ], root).map_err(|_| "cannot verify release environment protection; request an authorized operator qualification".to_owned())?)
             .map_err(|_| "malformed release environment protection response")?;
-        validate_release_environment_protection(&value)?;
+        let custom_policies = if value["deployment_branch_policy"]["protected_branches"].as_bool()
+            == Some(false)
+            && value["deployment_branch_policy"]["custom_branch_policies"].as_bool() == Some(true)
+        {
+            // GitHub's list is paginated and exposes total_count. Do not
+            // authorize merely because one page contains a matching main.
+            Some(gh(
+                &[
+                    "api",
+                    "--paginate",
+                    "--jq",
+                    ". | @json",
+                    &format!("repos/{REPO}/environments/release/deployment-branch-policies?per_page=100"),
+                ],
+                root,
+            )
+            .map_err(|_| "cannot verify complete release deployment branch policies")?)
+        } else {
+            None
+        };
+        validate_release_environment_protection(&value, custom_policies.as_deref())?;
     }
     Ok(())
 }
@@ -3406,28 +3466,65 @@ mod tests {
                 "protected_branches":true, "custom_branch_policies":false
             }
         });
-        assert!(validate_release_environment_protection(&protected).is_ok());
-        let mut unprotected = protected.clone();
-        unprotected["protection_rules"][0]["prevent_self_review"] = false.into();
-        assert!(validate_release_environment_protection(&unprotected).is_ok());
-        unprotected = protected.clone();
-        unprotected["protection_rules"][0]["reviewers"] = serde_json::json!([]);
-        assert!(validate_release_environment_protection(&unprotected).is_ok());
-        unprotected = protected.clone();
-        unprotected["protection_rules"][0]["type"] = "wait_timer".into();
-        assert!(validate_release_environment_protection(&unprotected).is_ok());
-        // A standard unreviewed release environment remains acceptable
-        // only when its deployment branch policy is protected-branches-only.
-        unprotected = protected.clone();
-        unprotected["protection_rules"] = serde_json::json!([]);
-        assert!(validate_release_environment_protection(&unprotected).is_ok());
-        unprotected = protected.clone();
-        unprotected["protection_rules"] = serde_json::Value::Null;
-        assert!(validate_release_environment_protection(&unprotected).is_err());
-        unprotected = protected.clone();
-        unprotected["deployment_branch_policy"]["protected_branches"] = false.into();
-        assert!(validate_release_environment_protection(&unprotected).is_err());
-        assert!(validate_release_environment_protection(&serde_json::json!({})).is_err());
+        assert!(validate_release_environment_protection(&protected, None).is_ok());
+        let mut modified = protected.clone();
+        modified["protection_rules"][0]["prevent_self_review"] = false.into();
+        assert!(validate_release_environment_protection(&modified, None).is_ok());
+        modified = protected.clone();
+        modified["protection_rules"][0]["reviewers"] = serde_json::json!([]);
+        assert!(validate_release_environment_protection(&modified, None).is_ok());
+        modified = protected.clone();
+        modified["protection_rules"] = serde_json::json!([]);
+        assert!(validate_release_environment_protection(&modified, None).is_ok());
+        modified = protected.clone();
+        modified["protection_rules"] = serde_json::Value::Null;
+        assert!(validate_release_environment_protection(&modified, None).is_err());
+        assert!(validate_release_environment_protection(&serde_json::json!({}), None).is_err());
+        assert!(validate_release_environment_protection(&protected, Some("")).is_err());
+
+        let mut custom = protected.clone();
+        custom["deployment_branch_policy"] = serde_json::json!({
+            "protected_branches":false, "custom_branch_policies":true
+        });
+        let page = serde_json::json!({
+            "total_count":1,
+            "branch_policies":[{"id":7, "name":"main", "type":"branch"}]
+        });
+        let good = page.to_string();
+        assert!(validate_release_environment_protection(&custom, Some(&good)).is_ok());
+        assert!(validate_release_environment_protection(&custom, None).is_err());
+        assert!(validate_release_environment_protection(&custom, Some("")).is_err());
+        assert!(validate_release_environment_protection(&custom, Some("not-json")).is_err());
+
+        for invalid in [
+            serde_json::json!({"total_count":0,"branch_policies":[]}),
+            serde_json::json!({"total_count":2,"branch_policies":[{"name":"main","type":"branch"}]}),
+            serde_json::json!({"total_count":1,"branch_policies":[]}),
+            serde_json::json!({"total_count":1,"branch_policies":[{"name":"main"}]}),
+            serde_json::json!({"total_count":1,"branch_policies":[{"name":"main","type":"tag"}]}),
+            serde_json::json!({"total_count":1,"branch_policies":[{"name":"main*","type":"branch"}]}),
+            serde_json::json!({"total_count":1,"branch_policies":[{"name":"release","type":"branch"}]}),
+            serde_json::json!({"total_count":1,"branch_policies":[{"name":"main","type":"branch"},{"name":"other","type":"branch"}]}),
+            serde_json::json!({"total_count":1}),
+            serde_json::json!({"branch_policies":[{"name":"main","type":"branch"}]}),
+        ] {
+            assert!(validate_release_environment_protection(&custom, Some(&invalid.to_string())).is_err());
+        }
+        assert!(validate_release_environment_protection(
+            &custom,
+            Some(&format!("{good}\n{good}")),
+        ).is_err());
+
+        modified = custom.clone();
+        modified["deployment_branch_policy"]["protected_branches"] = true.into();
+        assert!(validate_release_environment_protection(&modified, Some(&good)).is_err());
+        assert!(validate_release_environment_protection(&modified, None).is_err());
+        modified = custom.clone();
+        modified["deployment_branch_policy"]["custom_branch_policies"] = false.into();
+        assert!(validate_release_environment_protection(&modified, Some(&good)).is_err());
+        modified = custom;
+        modified["name"] = "other".into();
+        assert!(validate_release_environment_protection(&modified, Some(&good)).is_err());
     }
 
     #[test]
