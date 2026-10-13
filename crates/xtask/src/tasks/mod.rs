@@ -20,7 +20,7 @@ mod tests {
     use std::collections::BTreeMap;
     #[test]
     fn all_approved_commands_are_registered() {
-        const APPROVED: [&str; 18] = [
+        const APPROVED: [&str; 19] = [
             "release-build",
             "release",
             "verify",
@@ -34,13 +34,14 @@ mod tests {
             "clean",
             "test-lsp",
             "test-extension",
+            "test-publish",
             "install-dev",
             "bench",
             "coverage",
             "changelog-check",
             "update-grammar",
         ];
-        assert_eq!(crate::cli::COMMAND_HELP.len(), 28);
+        assert_eq!(crate::cli::COMMAND_HELP.len(), 29);
         for cmd in APPROVED {
             assert!(
                 crate::cli::COMMAND_HELP
