@@ -2282,6 +2282,52 @@ fn dispatch_protected_cd(
     ))
 }
 
+
+#[cfg(test)]
+fn remove_disposable_fixture_with_retry(
+    root: &Path,
+    mut remove: impl FnMut(&Path) -> std::io::Result<()>,
+    mut yield_now: impl FnMut(),
+) -> std::io::Result<()> {
+    // Git subprocesses are joined before teardown, but a background Git
+    // maintenance process or filesystem bookkeeping can briefly recreate an
+    // entry while remove_dir_all walks the directory. Keep retries bounded.
+    const MAX_ATTEMPTS: usize = 5;
+    for attempt in 0..MAX_ATTEMPTS {
+        match remove(root) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error)
+                if attempt + 1 < MAX_ATTEMPTS
+                    && matches!(
+                        error.kind(),
+                        std::io::ErrorKind::DirectoryNotEmpty
+                            | std::io::ErrorKind::Interrupted
+                            | std::io::ErrorKind::WouldBlock
+                    ) =>
+            {
+                yield_now();
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("the bounded cleanup loop must return")
+}
+
+#[cfg(test)]
+fn cleanup_disposable_fixture(root: &Path) {
+    if let Err(error) =
+        remove_disposable_fixture_with_retry(root, fs::remove_dir_all, std::thread::yield_now)
+    {
+        // Never panic in Drop: that can abort the process during another
+        // test assertion failure. Still surface a persistent cleanup issue.
+        eprintln!(
+            "WARNING: disposable Git fixture cleanup failed for {}: {error}",
+            root.display()
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2327,7 +2373,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove lock fixture");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
@@ -2597,7 +2643,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove mocked gh repo");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
@@ -2684,11 +2730,13 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove git fixture");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(dir.clone());
         git(&["init", "-q", "-b", "main"], &dir).unwrap();
+        git(&["config", "gc.auto", "0"], &dir).unwrap();
+        git(&["config", "maintenance.auto", "false"], &dir).unwrap();
         fs::write(
             dir.join("Cargo.toml"),
             "[package]\nname = \"fixture\"\nversion = \"0.1.2\"\n",
@@ -2786,7 +2834,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove temporary Git history");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
@@ -2892,7 +2940,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove release file fixture");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
@@ -2938,7 +2986,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove temporary Git tag fixture");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
@@ -3018,7 +3066,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove temporary preparation repo");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
@@ -3117,7 +3165,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove disposable Git repo");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
@@ -3947,7 +3995,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove URL fixture");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
@@ -4107,7 +4155,7 @@ mod tests {
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                fs::remove_dir_all(&self.0).expect("remove bare Git fixture");
+                cleanup_disposable_fixture(&self.0);
             }
         }
         let _cleanup = Cleanup(root.clone());
