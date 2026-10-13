@@ -84,7 +84,11 @@ tag=$6
 title=$7
 phase=$8
 case "$phase" in draft|published) ;; *) echo "invalid release phase" >&2; exit 2 ;; esac
-if [ -z "$GH_REPO" ] || [ -z "$GH_TOKEN" ]; then echo "missing GitHub API context" >&2; exit 1; fi
+if [ "${GH_REPO:-}" != "chiploom/zed-wit" ] || [ -z "${GH_TOKEN:-}" ] ||
+   { [ -n "${GH_HOST:-}" ] && [ "$GH_HOST" != github.com ]; }; then
+  echo "release asset verification requires authenticated canonical github.com/chiploom/zed-wit context" >&2
+  exit 1
+fi
 case "$scope" in
   lsp) tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+$' ;;
   extension) tag_pattern='^v-extension-[0-9]+\.[0-9]+\.[0-9]+$' ;;
@@ -101,10 +105,10 @@ if ! jq -ne --argjson a "$captured" --argjson b "$current" '$a == $b'; then
   exit 1
 fi
 
-release_json=$(gh api "repos/$GH_REPO/releases/tags/$tag")
+release_json=$(gh api --hostname github.com "repos/$GH_REPO/releases/tags/$tag")
 release_id=$(jq -er '.id | select(type=="number" and . > 0 and floor == .)' <<<"$release_json")
 # --slurp retains all API pages as nested arrays; incomplete pages fail closed.
-pages_json=$(gh api --paginate --slurp "repos/$GH_REPO/releases/$release_id/assets?per_page=100")
+pages_json=$(gh api --hostname github.com --paginate --slurp "repos/$GH_REPO/releases/$release_id/assets?per_page=100")
 
 if ! jq -ne \
   --argjson release "$release_json" \
