@@ -313,9 +313,12 @@ release SHAs, duplicate dispatches and drafts/nonimmutable release responses).
 Fixture cleanup is automatic and no live GitHub APIs or credentials are used.
 
 These connected state transitions supplement the granular publishing tests
-and run under the standard workspace suite in CI. They now invoke the
-**same extracted production `resume` post-provenance dispatch/wait function**
-with an injected deterministic GitHub transport. Synthetic API responses test
+and run under the standard workspace suite in CI. They invoke the **same
+production `submit` post-review PR submission and `resume` post-provenance
+CD dispatch/wait functions** with injected deterministic GitHub transports.
+Submission tests use a disposable bare remote and exercise failed PR creation
+after push, safe identical-commit retry, PR identity proof, conflicting-commit
+rejection, and duplicate-PR refusal. Synthetic API responses test
 enabled workflow state, complete prior-run history, exact dispatch identity,
 queued-then-successful workflow polling, and non-draft immutable release
 verification. Negative tests cover inactive workflows, concurrent activity,
