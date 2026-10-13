@@ -306,10 +306,14 @@ not only GitHub's reviewed PR file list and scoped SemVer transition. Across
 supported merge, squash, and rebase layouts, the merged commit's aggregate
 change set must contain only the expected release preparation files.
 For each scoped manifest, `Cargo.lock`, changelog, and release notes,
-the merged Git blob SHA must equal the blob SHA at the reviewed PR head.
-The extension scope additionally compares `extension.toml`. Immutable
-GitHub content API responses identify the reviewed blobs by the exact PR
-head SHA. Missing or inconsistent blob metadata blocks publication.
+the merged Git blob SHA must equal the blob SHA at the reviewed PR head,
+**and both tree entries must be regular, non-executable Git blobs (100644)**.
+The extension scope additionally compares `extension.toml`.
+A recursive Git Trees API read by immutable reviewed head SHA supplies
+authoritative reviewed file modes and blobs. Truncated, mismatched,
+ambiguous, or malformed Git trees fail closed. The Contents API is not
+sufficient for mode verification because it can dereference symlinks.
+Local `git ls-tree` checks the merged mode.
 
 This addresses a provenance gap in which extra source changes or altered
 release metadata could otherwise be included in a merged commit while
