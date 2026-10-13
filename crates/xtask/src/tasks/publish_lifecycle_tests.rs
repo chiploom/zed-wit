@@ -170,7 +170,17 @@ fn exercise_lifecycle(scope: Scope) {
     // Exercise the actual post-review submit implementation against a
     // disposable Git remote and fake PR API. Its first attempt intentionally
     // loses the PR-create response after the branch was pushed.
-    let reviewed_sha = fixture.commit("reviewed release preparation");
+    let mut reviewed_sha = fixture.commit("reviewed release preparation");
+    // Two-commit PRs can be squash merged into a repository with too little
+    // history for merge_sha~2. No rebase ancestor should be required.
+    let pr_commits = if scope == Scope::Extension {
+        git(&["commit", "--allow-empty", "--no-verify", "-qm", "reviewed follow-up"], repo)
+            .unwrap();
+        reviewed_sha = git(&["rev-parse", "HEAD"], repo).unwrap();
+        2
+    } else {
+        1
+    };
     let delta = git(&["diff", "--name-only", &base, &reviewed_sha], repo).unwrap();
     validate_changed_files(&delta, scope, candidate).unwrap();
     let ref_name = format!("refs/heads/{branch}");
@@ -350,7 +360,7 @@ fn exercise_lifecycle(scope: Scope) {
         "base":{"ref":"main"},
         "head":{"ref":branch, "sha":reviewed_sha, "repo":{"full_name":REPO}},
         "merge_commit_sha":merged_sha,
-        "commits":1,
+        "commits":pr_commits,
         "changed_files":records.len()
     });
     let (merged, reviewed_head, commits) =
@@ -383,7 +393,7 @@ fn exercise_lifecycle(scope: Scope) {
         ensure_release_transition(predecessor, on_head, on_merged, current).unwrap();
     }
     require_exact_release_source(&merged_sha, &merged).unwrap();
-    verify_reviewed_merge_tree(repo, scope, candidate, &merged_sha, 1, |file| {
+    verify_reviewed_merge_tree(repo, scope, candidate, &merged_sha, pr_commits, |file| {
         git(&["rev-parse", &format!("{reviewed_sha}:{file}")], repo)
     })
     .unwrap();
