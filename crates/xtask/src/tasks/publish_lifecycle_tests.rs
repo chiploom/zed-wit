@@ -346,52 +346,64 @@ fn exercise_lifecycle(scope: Scope) {
     let dispatch_lock =
         try_acquire_dispatch_lock(&repo.join(".git/lifecycle-dispatch.lock")).unwrap();
     assert!(try_acquire_dispatch_lock(&repo.join(".git/lifecycle-dispatch.lock")).is_err());
-    validate_prior_cd_runs("", &merged_sha, scope, &tag, false).unwrap();
-    let inputs = protected_dispatch_args(scope, &tag, &merged_sha);
-    assert!(inputs.iter().any(|v| v == "inputs[operation]=publish"));
-    assert!(inputs.iter().any(|v| v == &format!("inputs[tag]={tag}")));
-    assert!(
-        inputs
-            .iter()
-            .any(|v| v == &format!("inputs[expected_sha]={merged_sha}"))
-    );
-    let (run_id, _) = parse_dispatch_identity(
-        r#"{"workflow_run_id":42,"html_url":"https://github.com/chiploom/zed-wit/actions/runs/42"}"#,
+    // Drive the *same* request/dispatch/poll/finalize function used by
+    // resume(), with a strict local transport that refuses unknown calls.
+    let mut requests = Vec::new();
+    let mut polls = 0;
+    let mut sleep_count = 0;
+    let title = format!("CD / publish / {} / {tag}", scope.name());
+    let run_url = "https://github.com/chiploom/zed-wit/actions/runs/42";
+    dispatch_protected_cd(
+        scope,
+        &tag,
+        &merged_sha,
+        false,
+        true,
+        3,
+        |args| {
+            requests.push(args.join(" "));
+            match args {
+                ["api", endpoint] if *endpoint == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}") => {
+                    Ok(json!({"state":"active"}).to_string())
+                }
+                ["api", "--paginate", "--jq", _, endpoint] if *endpoint == format!("repos/{REPO}/actions/workflows/{RELEASE_WORKFLOW}/runs?per_page=100") => {
+                    Ok(String::new())
+                }
+                ["api", "-X", "POST", ..] => {
+                    assert!(args.contains(&"return_run_details=true"));
+                    assert!(args.contains(&"ref=main"));
+                    assert!(args.iter().any(|v| *v == format!("inputs[tag]={tag}")));
+                    assert!(args.iter().any(|v| *v == format!("inputs[expected_sha]={merged_sha}")));
+                    assert!(args.contains(&"inputs[operation]=publish"));
+                    Ok(json!({"workflow_run_id":42,"html_url":run_url}).to_string())
+                }
+                ["api", endpoint] if *endpoint == format!("repos/{REPO}/actions/runs/42") => {
+                    polls += 1;
+                    Ok(json!({
+                        "id":42,"head_sha":merged_sha,"head_branch":"main",
+                        "event":"workflow_dispatch",
+                        "path":".github/workflows/release.yml@main",
+                        "display_title":title,
+                        "status":if polls == 1 {"queued"} else {"completed"},
+                        "conclusion":if polls == 1 {Value::Null} else {json!("success")}
+                    }).to_string())
+                }
+                ["api", endpoint] if *endpoint == format!("repos/{REPO}/releases/tags/{tag}") => {
+                    Ok(json!({"draft":false,"tag_name":tag,"immutable":true}).to_string())
+                }
+                _ => Err(format!("unexpected fixture GitHub request: {args:?}")),
+            }
+        },
+        |_| sleep_count += 1,
     )
     .unwrap();
-    let title = format!("CD / publish / {} / {tag}", scope.name());
-    let run = json!({
-        "id":run_id,"head_sha":merged_sha,"head_branch":"main",
-        "event":"workflow_dispatch","path":".github/workflows/release.yml@main",
-        "display_title":title,"status":"completed","conclusion":"success"
-    });
-    assert_eq!(
-        classify_workflow_run(&run, run_id, &merged, scope, &tag).unwrap(),
-        WorkflowProgress::Succeeded
-    );
-    let published = json!({"draft":false,"tag_name":tag,"immutable":true});
-    verify_published_release(&published, &tag).unwrap();
-    assert!(
-        verify_published_release(&json!({"draft":true,"tag_name":tag,"immutable":true}), &tag,)
-            .is_err()
-    );
-    assert!(
-        verify_published_release(
-            &json!({"draft":false,"tag_name":tag,"immutable":false}),
-            &tag,
-        )
-        .is_err()
-    );
-    assert!(
-        validate_prior_cd_runs(
-            &format!("42\t{merged}\tworkflow_dispatch\tcompleted\tsuccess\t{title}"),
-            &merged,
-            scope,
-            &tag,
-            false,
-        )
-        .is_err()
-    );
+    assert_eq!(polls, 2);
+    assert_eq!(sleep_count, 1);
+    assert_eq!(requests.len(), 6);
+    assert!(requests[2].contains("POST"));
+    assert!(requests[5].contains(&format!("releases/tags/{tag}")));
+    let completed_run = format!("42\t{merged_sha}\tworkflow_dispatch\tcompleted\tsuccess\t{title}");
+    assert!(validate_prior_cd_runs(&completed_run, &merged_sha, scope, &tag, false).is_err());
     drop(dispatch_lock);
     assert!(try_acquire_dispatch_lock(&repo.join(".git/lifecycle-dispatch.lock")).is_ok());
     assert!(git(&["status", "--porcelain"], repo).unwrap().is_empty());
