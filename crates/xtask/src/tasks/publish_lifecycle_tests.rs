@@ -383,6 +383,10 @@ fn exercise_lifecycle(scope: Scope) {
         ensure_release_transition(predecessor, on_head, on_merged, current).unwrap();
     }
     require_exact_release_source(&merged_sha, &merged).unwrap();
+    verify_reviewed_merge_tree(repo, scope, candidate, &merged_sha, 1, |file| {
+        git(&["rev-parse", &format!("{reviewed_sha}:{file}")], repo)
+    })
+    .unwrap();
     assert!(require_exact_release_source(&reviewed_sha, &merged).is_err());
 
     // Mock all GitHub authorization gates before a simulated dispatch.
@@ -652,4 +656,64 @@ fn failed_cd_run_allows_explicit_retry_without_claiming_publication() {
     .unwrap();
     assert_eq!(endpoints.len(), 3);
     assert!(endpoints[2].contains(" POST "));
+}
+
+
+#[test]
+fn merged_release_tree_rejects_unreviewed_source_and_release_file_edits() {
+    for scope in [Scope::Lsp, Scope::Extension] {
+        for tampered in ["src/lib.rs", "CHANGELOG.md", "Cargo.lock"] {
+            let fixture = Fixture::new();
+            let root = &fixture.repo;
+            let initial = git(&["rev-parse", "HEAD"], root).unwrap();
+            let before = manifest_version(root, scope).unwrap();
+            let candidate = before.bump(Bump::Patch).unwrap();
+            let tag = scope.tag(candidate);
+            let branch = format!("release-prep/{}-{tag}", scope.name());
+            let plan = Plan {
+                current: before,
+                candidate,
+                tag,
+                branch: branch.clone(),
+                notes: format!(
+                    "docs/releases/{}/v{}.md",
+                    scope.name(),
+                    candidate.value()
+                ),
+                main_sha: initial,
+            };
+            git(&["switch", "-q", "-c", &branch], root).unwrap();
+            apply_local_release_files(root, scope, &plan).unwrap();
+            let reviewed_sha = fixture.commit("reviewed release proposal");
+            git(&["switch", "-q", "main"], root).unwrap();
+            git(&["merge", "--squash", &branch], root).unwrap();
+            let original = fs::read_to_string(root.join(tampered)).unwrap();
+            fs::write(
+                root.join(tampered),
+                format!("{original}\nUnreviewed release-tree modification\n"),
+            )
+            .unwrap();
+            let merged_sha = fixture.commit("squash merge with altered result");
+
+            // A correctly versioned merge SHA must not authorize an
+            // unreviewed source file or altered reviewed release bytes.
+            assert!(require_exact_release_source(&merged_sha, &merged_sha).is_ok());
+            let merged_version = git_manifest_version(root, &merged_sha, scope, false).unwrap();
+            assert_eq!(merged_version, candidate);
+            let err = verify_reviewed_merge_tree(
+                root,
+                scope,
+                candidate,
+                &merged_sha,
+                1,
+                |file| git(&["rev-parse", &format!("{reviewed_sha}:{file}")], root),
+            )
+            .expect_err("merged tree must be identical to the reviewed release content");
+            assert!(
+                err.contains("unexpected change")
+                    || err.contains("differs from the reviewed PR head"),
+                "unexpected provenance error for {tampered}: {err}"
+            );
+        }
+    }
 }
