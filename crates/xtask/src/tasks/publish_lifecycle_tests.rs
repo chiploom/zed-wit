@@ -402,8 +402,37 @@ fn exercise_lifecycle(scope: Scope) {
         ensure_release_transition(predecessor, on_head, on_merged, current).unwrap();
     }
     require_exact_release_source(&merged_sha, &merged).unwrap();
+    // The reviewed Git commit and its root tree are different immutable
+    // objects. Reproduce their real relationship and validate the recursive
+    // tree entries, including each file's mode and SHA, before comparing them
+    // with the independently merged Git tree.
+    let root_tree_sha = git(&["rev-parse", &format!("{reviewed_sha}^{{tree}}")], repo).unwrap();
+    assert_ne!(reviewed_sha, root_tree_sha);
+    let reviewed_commit = json!({
+        "sha":reviewed_sha,
+        "tree":{"sha":root_tree_sha}
+    });
+    assert_eq!(
+        reviewed_commit_root_tree_sha(&reviewed_commit, &reviewed_sha).unwrap(),
+        root_tree_sha
+    );
+    let entries = git(&["ls-tree", "-r", &root_tree_sha], repo)
+        .unwrap()
+        .lines()
+        .map(|record| {
+            let (metadata, path) = record.split_once('\t').unwrap();
+            let parts = metadata.split_whitespace().collect::<Vec<_>>();
+            assert_eq!(parts.len(), 3);
+            json!({"path":path,"mode":parts[0],"type":parts[1],"sha":parts[2]})
+        })
+        .collect::<Vec<_>>();
+    let reviewed_tree = json!({
+        "sha":root_tree_sha,
+        "truncated":false,
+        "tree":entries
+    });
     verify_reviewed_merge_tree(repo, scope, candidate, &merged_sha, pr_commits, |file| {
-        git(&["rev-parse", &format!("{reviewed_sha}:{file}")], repo)
+        verified_reviewed_git_blob(&reviewed_tree, &root_tree_sha, file)
     })
     .unwrap();
     assert!(require_exact_release_source(&reviewed_sha, &merged).is_err());
