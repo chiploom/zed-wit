@@ -415,18 +415,34 @@ fn verify_reviewed_merge_tree(
     // that layout from the version in the immediate parent alone.
     let first_parent = git(&["rev-parse", &format!("{merge_sha}^")], root)?;
     let first_parent_diff = git(
-        &["diff", "--no-ext-diff", "--name-only", &first_parent, merge_sha, "--"],
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--name-only",
+            &first_parent,
+            merge_sha,
+            "--",
+        ],
         root,
     )?;
     // Try a squash or two-parent merge first. Resolving merge~N is only
     // appropriate for a rebase and may not exist for a short-history squash.
     if validate_changed_files(&first_parent_diff, scope, candidate).is_err() {
         if pr_commits == 1 {
-            return Err("merged release tree contains unreviewed paths or misses release files".into());
+            return Err(
+                "merged release tree contains unreviewed paths or misses release files".into(),
+            );
         }
         let rebase_parent = git(&["rev-parse", &format!("{merge_sha}~{pr_commits}")], root)?;
         let rebase_diff = git(
-            &["diff", "--no-ext-diff", "--name-only", &rebase_parent, merge_sha, "--"],
+            &[
+                "diff",
+                "--no-ext-diff",
+                "--name-only",
+                &rebase_parent,
+                merge_sha,
+                "--",
+            ],
             root,
         )?;
         validate_changed_files(&rebase_diff, scope, candidate)
@@ -434,7 +450,12 @@ fn verify_reviewed_merge_tree(
     }
 
     let notes = format!("docs/releases/{}/v{}.md", scope.name(), candidate.value());
-    for path in [scope.manifest(), "Cargo.lock", "CHANGELOG.md", notes.as_str()] {
+    for path in [
+        scope.manifest(),
+        "Cargo.lock",
+        "CHANGELOG.md",
+        notes.as_str(),
+    ] {
         let merged = git(&["rev-parse", &format!("{merge_sha}:{path}")], root)?;
         let approved = reviewed_blob(path)?;
         if !valid_sha(&merged) || !valid_sha(&approved) || merged != approved {
@@ -2066,7 +2087,10 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
     require_exact_release_source(&main_sha, &merge_sha)?;
     verify_reviewed_merge_tree(root, scope, version, &merge_sha, pr_commits, |file| {
         let response: Value = serde_json::from_str(&gh(
-            &["api", &format!("repos/{REPO}/contents/{file}?ref={head_sha}")],
+            &[
+                "api",
+                &format!("repos/{REPO}/contents/{file}?ref={head_sha}"),
+            ],
             root,
         )?)
         .map_err(|_| format!("cannot verify reviewed Git blob identity: {file}"))?;
