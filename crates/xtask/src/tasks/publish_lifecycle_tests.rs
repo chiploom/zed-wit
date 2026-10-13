@@ -726,3 +726,78 @@ fn merged_release_tree_rejects_unreviewed_source_and_release_file_edits() {
         }
     }
 }
+
+
+#[test]
+fn reviewed_git_tree_rejects_unsafe_file_modes_and_incomplete_responses() {
+    let commit = "0123456789abcdef0123456789abcdef01234567";
+    let blob = "abcdef0123456789abcdef0123456789abcdef01";
+    let path = "CHANGELOG.md";
+    let normal = json!({
+        "sha":commit, "truncated":false,
+        "tree":[{"path":path, "mode":"100644", "type":"blob", "sha":blob}]
+    });
+    assert_eq!(verified_reviewed_git_blob(&normal, commit, path).unwrap(), blob);
+    for mode in ["120000", "100755", "160000", "040000"] {
+        let mut changed = normal.clone();
+        changed["tree"][0]["mode"] = mode.into();
+        assert!(verified_reviewed_git_blob(&changed, commit, path).is_err());
+    }
+    for mut changed in [
+        json!({"sha":commit,"truncated":true,"tree":normal["tree"]}),
+        json!({"sha":"ffffffffffffffffffffffffffffffffffffffff","truncated":false,"tree":normal["tree"]}),
+        json!({"sha":commit,"tree":normal["tree"]}),
+        json!({"sha":commit,"truncated":false,"tree":[]}),
+        json!({"sha":commit,"truncated":false,"tree":[
+            normal["tree"][0].clone(),normal["tree"][0].clone()
+        ]}),
+    ] {
+        assert!(verified_reviewed_git_blob(&changed, commit, path).is_err());
+        changed["tree"] = json!([]);
+    }
+    let mut not_blob = normal;
+    not_blob["tree"][0]["type"] = "tree".into();
+    assert!(verified_reviewed_git_blob(&not_blob, commit, path).is_err());
+}
+
+#[test]
+fn merged_mode_change_is_rejected_even_with_identical_blob_sha() {
+    for scope in [Scope::Lsp, Scope::Extension] {
+        let fixture = Fixture::new();
+        let repo = &fixture.repo;
+        let original = git(&["rev-parse", "HEAD"], repo).unwrap();
+        let before = manifest_version(repo, scope).unwrap();
+        let candidate = before.bump(Bump::Patch).unwrap();
+        let tag = scope.tag(candidate);
+        let branch = format!("release-prep/{}-{tag}", scope.name());
+        let plan = Plan {
+            current: before,
+            candidate,
+            tag,
+            branch: branch.clone(),
+            notes: format!("docs/releases/{}/v{}.md", scope.name(), candidate.value()),
+            main_sha: original,
+        };
+        git(&["switch", "-q", "-c", &branch], repo).unwrap();
+        apply_local_release_files(repo, scope, &plan).unwrap();
+        let reviewed_sha = fixture.commit("reviewed");
+        git(&["switch", "-q", "main"], repo).unwrap();
+        git(&["merge", "--squash", &branch], repo).unwrap();
+
+        let approved = git(&["rev-parse", &format!("{reviewed_sha}:CHANGELOG.md")], repo).unwrap();
+        git(
+            &["update-index", "--cacheinfo", &format!("120000,{approved},CHANGELOG.md")],
+            repo,
+        ).unwrap();
+        git(&["commit", "--no-verify", "-qm", "changed mode after review"], repo).unwrap();
+        let merged_sha = git(&["rev-parse", "HEAD"], repo).unwrap();
+        let merged_blob = git(&["rev-parse", &format!("{merged_sha}:CHANGELOG.md")], repo).unwrap();
+        assert_eq!(approved, merged_blob, "a file-mode change leaves blob SHA unchanged");
+        assert!(git(&["ls-tree", &merged_sha, "--", "CHANGELOG.md"], repo).unwrap().starts_with("120000 blob "));
+        let result = verify_reviewed_merge_tree(
+            repo, scope, candidate, &merged_sha, 1,
+            |file| git(&["rev-parse", &format!("{reviewed_sha}:{file}")], repo),
+        );
+        assert!(result.is_err(), "merged symlink must never qualify despite matching blob SHA");
+    }
+}
