@@ -2044,8 +2044,7 @@ fn resume(root: &Path, scope: Scope, pr: u64, wait: bool) -> Result<(), String> 
         &tag,
         &main_sha,
         matching_draft,
-        wait,
-        180,
+        if wait { 180 } else { 0 },
         |args| gh(args, root),
         thread::sleep,
     )
@@ -2056,7 +2055,6 @@ fn dispatch_protected_cd(
     tag: &str,
     main_sha: &str,
     matching_draft: bool,
-    wait: bool,
     max_polls: usize,
     mut request: impl FnMut(&[&str]) -> Result<String, String>,
     mut sleep: impl FnMut(Duration),
@@ -2093,7 +2091,7 @@ fn dispatch_protected_cd(
     })?;
     let (id, run_url) = parse_dispatch_identity(&response)?;
     println!("Protected CD dispatch requested for {tag}: {run_url} (run {id}).");
-    if !wait {
+    if max_polls == 0 {
         println!("Status: requested/pending. This is not a published release.");
         return Ok(());
     }
