@@ -194,9 +194,7 @@ fn exercise_lifecycle(scope: Scope) {
                 _ => Err(format!("unexpected mock PR API request: {args:?}")),
             }
         },
-        || {
-            Ok(fixture.remote_ref("main").split_whitespace().next() == Some(base.as_str()))
-        },
+        || Ok(fixture.remote_ref("main").split_whitespace().next() == Some(base.as_str())),
     );
     assert!(failed.is_err());
     assert_eq!(first_calls.len(), 2);
@@ -223,12 +221,11 @@ fn exercise_lifecycle(scope: Scope) {
                     assert!(args.contains(&branch.as_str()));
                     Ok("https://github.com/chiploom/zed-wit/pull/123".into())
                 }
-                ["api", endpoint] if *endpoint == format!("repos/{REPO}/pulls/123") => {
-                    Ok(json!({
-                        "base":{"ref":"main"},
-                        "head":{"ref":branch,"repo":{"full_name":REPO},"sha":reviewed_sha},
-                    }).to_string())
-                }
+                ["api", endpoint] if *endpoint == format!("repos/{REPO}/pulls/123") => Ok(json!({
+                    "base":{"ref":"main"},
+                    "head":{"ref":branch,"repo":{"full_name":REPO},"sha":reviewed_sha},
+                })
+                .to_string()),
                 _ => Err(format!("unexpected mock PR API request: {args:?}")),
             }
         },
