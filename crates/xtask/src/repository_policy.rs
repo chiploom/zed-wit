@@ -280,6 +280,76 @@ mod tests {
         assert!(workflow[positions[10]..].contains(" published"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn release_tag_ruleset_policy_accepts_only_the_audited_revision() {
+        use std::{io::Write, process::{Command, Stdio}};
+        let workflow = fs::read_to_string(util::repo_root().join(".github/workflows/release.yml"))
+            .unwrap();
+        let marker = "          if ! jq -e '\n            . as $details\n";
+        let start = workflow.find(marker).expect("missing release tag policy filter")
+            + "          if ! jq -e '\n".len();
+        let end = workflow[start..].find("' <<<\"$details\" >/dev/null; then")
+            .map(|offset| start + offset)
+            .expect("missing release tag policy filter terminator");
+        let filter = &workflow[start..end];
+        let valid = serde_json::json!([{
+            "id": 24620024,
+            "source_type": "Repository",
+            "source": "chiploom/zed-wit",
+            "target": "tag",
+            "enforcement": "active",
+            "updated_at": "2026-10-06T21:11:44.860-04:00",
+            "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+            "rules": [
+                {"type": "update"},
+                {"type": "deletion"},
+                {"type": "non_fast_forward"}
+            ]
+        }]);
+        let passes = |fixture: &serde_json::Value| -> bool {
+            let mut child = Command::new("jq")
+                .arg("-e")
+                .arg(filter)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("jq is required by protected CD and release policy testing");
+            child.stdin.take().unwrap().write_all(fixture.to_string().as_bytes()).unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.code() != Some(3),
+                "invalid production jq policy: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.status.success()
+        };
+
+        assert!(passes(&valid), "redacted bypass field must use the audited pin");
+        let mut changed = valid.clone();
+        changed[0]["bypass_actors"] = serde_json::json!([]);
+        assert!(passes(&changed), "visible empty bypass list must pass");
+        changed[0]["bypass_actors"] =
+            serde_json::json!([{"actor_id": 1, "actor_type": "User", "bypass_mode": "always"}]);
+        assert!(!passes(&changed), "a visible bypass actor must fail");
+        changed = valid.clone();
+        changed[0]["updated_at"] = serde_json::json!("2026-10-13T23:00:00Z");
+        assert!(!passes(&changed), "any unreviewed ruleset revision must fail");
+        changed = valid.clone();
+        changed[0]["id"] = serde_json::json!(24620025);
+        assert!(!passes(&changed), "an unreviewed ruleset ID must fail");
+        changed = valid.clone();
+        changed[0]["conditions"]["ref_name"]["exclude"] = serde_json::json!(["refs/tags/v-bad"]);
+        assert!(!passes(&changed));
+        changed = valid.clone();
+        changed[0]["rules"][2]["type"] = serde_json::json!("creation");
+        assert!(!passes(&changed), "tag creation must remain possible");
+        changed = valid.clone();
+        changed[0]["rules"] = serde_json::json!([{"type":"update"}, {"type":"deletion"}]);
+        assert!(!passes(&changed), "all three tag protections are required");
+    }
+
     #[test]
     fn draft_asset_scope_uses_draft_capable_release_lookup() {
         let root = util::repo_root();
