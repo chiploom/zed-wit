@@ -72,9 +72,9 @@ reject() {
   fi
 }
 for scope in lsp extension; do
-  "$real_git" switch -C main "$base" >/dev/null
-  "$real_git" clean -fdq
   "$real_git" reset --hard -q "$base"
+  "$real_git" clean -fdq
+  "$real_git" switch -C main "$base" >/dev/null
   reject "confirmation $scope" 'require --confirm' cargo xtask publish --scope "$scope" --prepare
   reject "argument $scope" 'unknown or duplicate publish option' cargo xtask publish --scope "$scope" --nonexistent
   reject "unprepared submit $scope" 'expected release-preparation branch' cargo xtask publish --scope "$scope" --submit --confirm
