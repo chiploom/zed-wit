@@ -120,6 +120,16 @@ mv "$tmp/next.json" "$MOCK_RELEASE"
 jq '[.assets]' "$MOCK_RELEASE" >"$MOCK_PAGES"
 fail draft
 make_fixture
+jq '.assets[1].name = .assets[0].name' "$MOCK_RELEASE" >"$tmp/next.json"
+mv "$tmp/next.json" "$MOCK_RELEASE"
+jq '[.assets]' "$MOCK_RELEASE" >"$MOCK_PAGES"
+fail draft
+make_fixture
+jq '.assets[1].name = "unexpected"' "$MOCK_RELEASE" >"$tmp/next.json"
+mv "$tmp/next.json" "$MOCK_RELEASE"
+jq '[.assets]' "$MOCK_RELEASE" >"$MOCK_PAGES"
+fail draft
+make_fixture
 jq '.assets += [{id:100,name:"unexpected",size:1,state:"uploaded",digest:("sha256:"+("a"*64))}]' "$MOCK_RELEASE" >"$tmp/next.json"
 mv "$tmp/next.json" "$MOCK_RELEASE"
 jq '[.assets]' "$MOCK_RELEASE" >"$MOCK_PAGES"
