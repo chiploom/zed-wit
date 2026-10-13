@@ -349,10 +349,16 @@ For each scoped manifest, `Cargo.lock`, changelog, and release notes,
 the merged Git blob SHA must equal the blob SHA at the reviewed PR head,
 **and both tree entries must be regular, non-executable Git blobs (100644)**.
 The extension scope additionally compares `extension.toml`.
-A recursive Git Trees API read by immutable reviewed head SHA supplies
-authoritative reviewed file modes and blobs. Truncated, mismatched,
-ambiguous, or malformed Git trees fail closed. The Contents API is not
-sufficient for mode verification because it can dereference symlinks.
+The Git Commits API first resolves the exact immutable reviewed head commit
+to its distinct root Git tree SHA. A recursive Git Trees API read using that
+**explicit tree object SHA** supplies authoritative reviewed file modes and
+blobs. Both the commit-to-root-tree binding and returned root-tree identity
+are validated; mismatched, truncated, ambiguous, or malformed responses fail
+closed. GitHub may also resolve a commit SHA through the Trees endpoint, but
+its returned SHA then identifies the requested commit instead of the root
+tree, so the publishing contract does not depend on that behavior.
+The Contents API is not sufficient for mode verification because it can
+dereference symlinks.
 Local `git ls-tree` checks the merged mode.
 
 This addresses a provenance gap in which extra source changes or altered
