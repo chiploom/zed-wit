@@ -4208,6 +4208,58 @@ mod tests {
     }
 
     #[test]
+    fn confirmed_cd_identity_reconciliation_fails_closed_after_six_rechecks() {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let tag = "v-extension-0.5.0";
+        let mut polls = 0usize;
+        let mut rechecks = 0usize;
+        let result = dispatch_protected_cd(
+            Scope::Extension,
+            tag,
+            sha,
+            false,
+            20,
+            |args| {
+                let path = args.last().copied().unwrap_or_default();
+                if path.contains("/runs?") {
+                    return Ok(String::new());
+                }
+                if path.ends_with("/actions/workflows/release.yml") {
+                    return Ok(json!({"state": "active"}).to_string());
+                }
+                if args.iter().any(|arg| arg.contains("return_run_details=true")) {
+                    return Ok(json!({
+                        "workflow_run_id": 1234,
+                        "html_url": "https://github.com/chiploom/zed-wit/actions/runs/1234"
+                    })
+                    .to_string());
+                }
+                if path.ends_with("/actions/runs/1234") {
+                    polls += 1;
+                    return Ok(json!({
+                        "id": 1234,
+                        "head_sha": sha,
+                        "head_branch": "main",
+                        "event": "workflow_dispatch",
+                        "path": ".github/workflows/release.yml",
+                        "display_title": "CD",
+                        "status": "in_progress"
+                    })
+                    .to_string());
+                }
+                Err(format!("unexpected mocked GitHub API call: {args:?}"))
+            },
+            |duration| {
+                assert_eq!(duration, Duration::from_secs(2));
+                rechecks += 1;
+            },
+        );
+        assert!(result.unwrap_err().contains("identity"));
+        assert_eq!(polls, 7);
+        assert_eq!(rechecks, 6);
+    }
+
+    #[test]
     fn confirmed_cd_identity_never_accepts_a_different_run_or_commit() {
         let sha = "0123456789abcdef0123456789abcdef01234567";
         let tag = "v-extension-0.5.0";
