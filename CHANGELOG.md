@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### v-extension-0.5.2 (extension)
+
+- Prepare Chiploom's first published Zed WIT extension release, succeeding the original implementation with the previous maintainer's permission.
+- Supersede the unpublished `v-extension-0.5.0` and `v-extension-0.5.1` release candidates after their protected CD workflows stopped during tag-policy validation, before creating Git tags or GitHub Releases.
+- Provide modern WIT syntax highlighting, editor configuration, snippets, code outlines, and Vim text objects using the pinned Bytecode Alliance Tree-sitter grammar.
+- Integrate a native WIT language server providing parser-backed diagnostics, scope-aware completion, hover, definition navigation, references, and safe unresolved-type quick fixes.
+- Support multi-file WIT package analysis, unsaved-buffer overlays, and local dependency resolution.
+- Provide Topiary-based document formatting with comment preservation, configurable indentation, and idempotence checks.
+- Automatically download and verify the published immutable WIT Language Server `v0.1.2`, with SHA-256 integrity checks, executable caching, and recovery from corrupted or incomplete downloads.
+- Support native language-server distribution on macOS ARM64/x86_64, Linux GNU ARM64/x86_64, and Windows x86_64.
+- Preserve independent extension and native LSP version streams, with the extension runtime pinned to `v0.1.2`.
+- Maintain protected, human-reviewed release preparation and publication with exact source-commit verification, immutable-release enforcement, and strict repository policy validation.
+- Correct tag-ruleset validation to handle permission-dependent redaction of bypass-actor metadata without weakening the independently audited protection requirements.
+- Accept the two verified, equivalent local-offset and UTC representations of the audited ruleset update timestamp while rejecting changed revisions.
+- Preserve fail-closed behavior for missing protections, unexpected bypass actors, unauthorized configuration changes, and incomplete release metadata.
+- Reconcile temporarily incomplete GitHub Actions run metadata through bounded retries while strictly validating run identity and source commits.
+- Expand publishing regression coverage for ruleset timestamp normalization, policy changes, workflow identity mismatches, and retry exhaustion.
+- Retain the original extension feature set and document the maintainer transition, supported platforms, known limitations, and acknowledgements to Valentine.
+
 ### v-extension-0.5.1 (extension)
 
 - Prepare Chiploom's first published Zed WIT extension release, succeeding the original implementation with the previous maintainer's permission.
