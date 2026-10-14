@@ -2,7 +2,7 @@
 name = "zed-wit"
 version = "0.5.3"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 publish = false
 repository = "https://github.com/chiploom/zed-wit"
@@ -14,7 +14,13 @@ runtime-lsp-version = "0.1.2"
 crate-type = ["cdylib", "rlib"]
 
 [workspace]
-members = ["crates/wit-syntax", "crates/wit-analysis", "crates/wit-language-server", "crates/xtask", "crates/zed-gui-input"]
+members = [
+  "crates/wit-syntax",
+  "crates/wit-analysis",
+  "crates/wit-language-server",
+  "crates/xtask",
+  "crates/zed-gui-input",
+]
 default-members = ["."]
 resolver = "3"
 
