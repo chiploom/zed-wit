@@ -1382,9 +1382,7 @@ fn verify_lockfile_version_only(
         if package.get("name").and_then(toml::Value::as_str) != Some(target) {
             continue;
         }
-        if package.get("version").and_then(toml::Value::as_str)
-            != Some(previous.value().as_str())
-        {
+        if package.get("version").and_then(toml::Value::as_str) != Some(previous.value().as_str()) {
             return Err(format!(
                 "Cargo.lock has an unexpected previous version for {target}"
             ));
@@ -1396,7 +1394,9 @@ fn verify_lockfile_version_only(
         count += 1;
     }
     if count != 1 {
-        return Err(format!("Cargo.lock must contain exactly one {target} package"));
+        return Err(format!(
+            "Cargo.lock must contain exactly one {target} package"
+        ));
     }
     if expected != actual {
         return Err(
@@ -2837,14 +2837,8 @@ mod tests {
 
         let missing_identity = "version = 4\n\n[[package]]\nversion = \"0.5.2\"\n";
         assert!(
-            verify_lockfile_version_only(
-                lock,
-                missing_identity,
-                Scope::Extension,
-                previous,
-                next
-            )
-            .is_err()
+            verify_lockfile_version_only(lock, missing_identity, Scope::Extension, previous, next)
+                .is_err()
         );
         let altered_dependency = prepared.replace(
             "dependencies = [\"example\"]",
@@ -2860,14 +2854,9 @@ mod tests {
             )
             .is_err()
         );
-        assert!(verify_lockfile_version_only(
-            lock,
-            lock,
-            Scope::Extension,
-            previous,
-            next
-        )
-        .is_err());
+        assert!(
+            verify_lockfile_version_only(lock, lock, Scope::Extension, previous, next).is_err()
+        );
     }
 
     #[test]
