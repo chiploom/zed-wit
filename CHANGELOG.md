@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### v-extension-0.5.4 (extension)
+
+- Fix the Rust toolchain compatibility issue preventing Zed's extension registry from packaging the WIT extension.
+- Lower the root `zed-wit` WebAssembly adapter's minimum supported Rust version from `1.99` to `1.90`, matching Zed's extension packaging toolchain.
+- Preserve Rust 1.99 as the project's primary development toolchain without changing the native language server or auxiliary development tooling.
+- Add a dedicated `Zed registry compatibility` GitHub Actions job that explicitly installs and verifies Rust 1.90.0.
+- Run the adapter's unit tests with Rust 1.90.0 and locked dependencies, independently of the existing Rust 1.99 workspace validation.
+- Build the adapter for `wasm32-wasip2` in release mode using Rust 1.90.0 to prevent future toolchain compatibility regressions.
+- Validate the compatibility fix on macOS ARM64 and Linux, including six passing adapter unit tests and successful release-mode WebAssembly builds.
+- Preserve the existing `wit` extension identity, language features, pinned Tree-sitter grammar, and WIT Language Server `v0.1.2` runtime dependency.
+- Retain protected release publication, immutable release requirements, and independent extension and native LSP version streams.
+- Prepare the corrected extension for the existing Zed registry maintainership migration in [zed-industries/extensions#7984](https://github.com/zed-industries/extensions/pull/7984), with upstream packaging validation required before registry publication.
+
 ### v-extension-0.5.3 (extension)
 
 - Prepare Chiploom's first published Zed WIT extension release, succeeding the original implementation with the previous maintainer's permission.
