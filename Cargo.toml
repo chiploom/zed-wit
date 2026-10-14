@@ -2,7 +2,7 @@
 name = "zed-wit"
 version = "0.5.3"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 publish = false
 repository = "https://github.com/chiploom/zed-wit"
