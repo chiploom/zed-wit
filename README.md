@@ -113,6 +113,23 @@ Read [CONTRIBUTING](CONTRIBUTING.md) for setup, fixtures, queries, and validatio
 workflows; [architecture](docs/architecture.md) for component boundaries; and
 [manual testing](docs/manual-testing.md) for real-editor qualification.
 
+## AI-Assisted Development
+
+AI tools, including OpenAI's ChatGPT, have assisted with architecture research
+and planning, implementation and refactoring, debugging, test development,
+code and security reviews, and documentation and development workflows.
+Their suggestions are not treated as proof of correctness.
+
+AI-assisted changes are evaluated using checks appropriate to the work,
+including automated tests, static analysis, builds, and manual Zed
+qualification where performed. These checks do not guarantee correctness
+or complete platform coverage; see [validation](docs/validation.md) for
+recorded evidence and limitations.
+
+The human maintainer remains responsible for technical decisions,
+correctness, security, licensing and attribution, release approval,
+and ongoing maintenance.
+
 ## Publication status
 
 The Zed registry already contains a `wit` extension. Publishing this
