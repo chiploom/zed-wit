@@ -93,6 +93,8 @@ jobs:
         run: |
           rustc --version
           rustc --version | grep -E '^rustc 1\.90\.0 '
+      - name: Test Zed extension adapter with Rust 1.90
+        run: cargo test --locked --package zed-wit
       - name: Build Zed extension adapter with Rust 1.90
         run: cargo build --release --locked --package zed-wit --target wasm32-wasip2
 
