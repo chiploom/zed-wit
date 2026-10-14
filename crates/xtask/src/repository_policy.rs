@@ -344,6 +344,18 @@ mod tests {
         let mut changed = valid.clone();
         changed[0]["bypass_actors"] = serde_json::json!([]);
         assert!(passes(&changed), "visible empty bypass list must pass");
+        let mut normalized_utc = valid.clone();
+        normalized_utc[0]["updated_at"] = serde_json::json!("2026-10-07T01:11:44.860Z");
+        assert!(
+            passes(&normalized_utc),
+            "GitHub Actions returns the same audited timestamp normalized to UTC"
+        );
+        normalized_utc[0]["updated_at"] = serde_json::json!("2026-10-07T01:11:44.861Z");
+        assert!(
+            !passes(&normalized_utc),
+            "a genuinely different UTC timestamp must fail"
+        );
+
         changed[0]["bypass_actors"] =
             serde_json::json!([{"actor_id": 1, "actor_type": "User", "bypass_mode": "always"}]);
         assert!(!passes(&changed), "a visible bypass actor must fail");
