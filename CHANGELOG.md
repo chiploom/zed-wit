@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### v-extension-0.5.3 (extension)
+
+- Prepare Chiploom's first published Zed WIT extension release, succeeding the original implementation with the previous maintainer's permission.
+- Supersede the unpublished `v-extension-0.5.0`, `v-extension-0.5.1`, and `v-extension-0.5.2` release candidates. The first two stopped before tag creation; `v-extension-0.5.2` created a protected tag and unpublished draft but failed during draft asset-integrity verification before publication.
+- Provide modern WIT syntax highlighting, editor configuration, snippets, code outlines, and Vim text objects using the pinned Bytecode Alliance Tree-sitter grammar.
+- Integrate a native WIT language server providing parser-backed diagnostics, scope-aware completion, hover, definition navigation, references, and safe unresolved-type quick fixes.
+- Support multi-file WIT package analysis, unsaved-buffer overlays, and local dependency resolution.
+- Provide Topiary-based document formatting with comment preservation, configurable indentation, and idempotence checks.
+- Automatically download and verify the published immutable WIT Language Server `v0.1.2`, with SHA-256 integrity checks, executable caching, and recovery from corrupted or incomplete downloads.
+- Support native language-server distribution on macOS ARM64/x86_64, Linux GNU ARM64/x86_64, and Windows x86_64.
+- Preserve independent extension and native LSP version streams, with the extension runtime pinned to `v0.1.2`.
+- Maintain protected, human-reviewed release preparation and publication with exact source-commit verification, immutable-release enforcement, and strict repository policy validation.
+- Verify release preparation preserves the complete Cargo manifest structure and changes only the intended package version in `Cargo.lock`, rejecting missing package identities, malformed records, and unrelated dependency changes.
+- Preserve strict tag-ruleset validation while accommodating independently audited bypass-actor field redaction and the two verified equivalent timestamp representations.
+- Reconcile temporarily incomplete GitHub Actions metadata through bounded retries while strictly validating workflow run identity and source commits.
+- Correct draft release verification to resolve GitHub's numeric release ID before retrieving release metadata, avoiding the HTTP 404 returned by the published-release-by-tag REST endpoint for unpublished drafts.
+- Use the verified numeric-ID lookup during both draft asset-integrity verification and the final pre-promotion release check.
+- Preserve fail-closed behavior for malformed release IDs, mismatched tags, unexpected release metadata, invalid asset digests, and unauthorized release-state changes.
+- Expand offline release-integrity regression coverage for draft-only lookup failures, malformed or inconsistent release identities, and existing asset verification requirements.
+- Retain the original extension feature set and document the maintainer transition, supported platforms, known limitations, and acknowledgements to Valentine.
+
 ### v-extension-0.5.2 (extension)
 
 - Prepare Chiploom's first published Zed WIT extension release, succeeding the original implementation with the previous maintainer's permission.
