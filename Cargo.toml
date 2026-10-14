@@ -1,6 +1,6 @@
 [package]
 name = "zed-wit"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT OR Apache-2.0"
