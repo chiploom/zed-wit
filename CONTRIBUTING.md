@@ -61,6 +61,21 @@ On Windows, change the project-local binary path to
 it is intentionally ignored so platform- or developer-specific Zed settings do
 not leak into the shared repository configuration.
 
+## AI-assisted contributions
+
+AI assistance is welcome for research, implementation, testing, and
+documentation. Contributors must understand and be able to explain
+their changes, verify AI suggestions against relevant source material,
+preserve licensing and attribution, and run applicable checks or
+clearly state which validation they did not perform. AI assistance
+does not replace contributor accountability or maintainer review.
+
+Changes submitted to [Zed's extension registry](https://github.com/zed-industries/extensions)
+must also follow its [AI policy](https://github.com/zed-industries/extensions/blob/main/AI_POLICY.md),
+including human-written communication with maintainers and its restriction
+on autonomous agents. This repository's disclosure does not override
+upstream contribution requirements.
+
 ## Changes and updates
 
 Keep changes focused, add regression coverage for behavior, and update the
