@@ -9,8 +9,8 @@ if [ "$#" -ne 1 ]; then
   exit 2
 fi
 tag=$1
-if [ "\${GH_REPO:-}" != "chiploom/zed-wit" ] || [ -z "\${GH_TOKEN:-}" ] ||
-   { [ -n "\${GH_HOST:-}" ] && [ "$GH_HOST" != github.com ]; }; then
+if [ "${GH_REPO:-}" != "chiploom/zed-wit" ] || [ -z "${GH_TOKEN:-}" ] ||
+   { [ -n "${GH_HOST:-}" ] && [ "$GH_HOST" != github.com ]; }; then
   echo "release lookup requires authenticated canonical github.com/chiploom/zed-wit context" >&2
   exit 1
 fi
