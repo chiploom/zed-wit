@@ -826,7 +826,7 @@ jobs:
           set -euo pipefail
           # Executed within the existing serialized, protected release job.
           # A competing dispatch must not promote an already published release.
-          release_json=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+          release_json=$(bash release-source/scripts/release-by-tag.sh "$RELEASE_TAG")
           if [ "$(jq -r '.draft' <<<"$release_json")" != "true" ] ||
              [ "$(jq -r '.tag_name' <<<"$release_json")" != "$RELEASE_TAG" ] ||
              [ "$(jq -r '.name' <<<"$release_json")" != "$RELEASE_TITLE" ]; then
