@@ -94,7 +94,11 @@ coverage, and `update`, `deletion`, and `non_fast_forward` restrictions
 without a `creation` restriction. CD pins the ID and exact update revision,
 checks these structural rules again on every publication, and rejects any
 visible nonempty bypass list. An omitted bypass field is accepted **only for
-that already-audited revision**.
+that already-audited revision**. The GitHub Actions token normalizes the
+same `updated_at` instant to `2026-10-07T01:11:44.860Z`, whereas
+the privileged audit returned `2026-10-06T21:11:44.860-04:00`. CD accepts
+exactly those two verified equivalent representations; a different timestamp
+still fails closed.
 
 If the ruleset is changed, removed, replaced or its update timestamp changes,
 publication fails closed. A repository administrator must independently inspect
