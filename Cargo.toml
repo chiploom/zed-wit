@@ -14,13 +14,7 @@ runtime-lsp-version = "0.1.2"
 crate-type = ["cdylib", "rlib"]
 
 [workspace]
-members = [
-  "crates/wit-syntax",
-  "crates/wit-analysis",
-  "crates/wit-language-server",
-  "crates/xtask",
-  "crates/zed-gui-input",
-]
+members = ["crates/wit-syntax", "crates/wit-analysis", "crates/wit-language-server", "crates/xtask", "crates/zed-gui-input"]
 default-members = ["."]
 resolver = "3"
 
