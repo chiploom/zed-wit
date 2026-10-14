@@ -3395,7 +3395,11 @@ mod tests {
             "[package]\nname = \"wit-language-server\"\nversion = \"0.1.2\"\nedition = \"2024\"\n",
         )
         .unwrap();
-        fs::write(root.join("extension.toml"), "version = \"0.1.0\"\n").unwrap();
+        fs::write(
+            root.join("extension.toml"),
+            "id = \"wit\"\nname = \"WIT\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
         fs::write(
             root.join("CHANGELOG.md"),
             "# Changelog\n\n## Unreleased\n\n- fixture\n",
@@ -3453,6 +3457,35 @@ mod tests {
         assert!(!git(&["status", "--porcelain"], &root).unwrap().is_empty());
         assert_eq!(git(&["rev-parse", &before], &root).unwrap(), before);
         assert!(check_prepare_paths(&root, Scope::Lsp, &plan.notes).is_err());
+
+        // Run the extension path against a real disposable Cargo workspace
+        // after restoring its initial commit.
+        git(&["reset", "--hard", "-q", &before], &root).unwrap();
+        git(&["clean", "-fdq"], &root).unwrap();
+        git(&["switch", "-q", "-C", "main", &before], &root).unwrap();
+        let extension_previous = Version::parse("0.1.0").unwrap();
+        let extension_next = extension_previous.bump(Bump::Patch).unwrap();
+        let extension_tag = Scope::Extension.tag(extension_next);
+        let extension_plan = Plan {
+            current: extension_previous,
+            candidate: extension_next,
+            tag: extension_tag.clone(),
+            branch: format!("release-prep/extension-{extension_tag}"),
+            notes: "docs/releases/extension/v0.1.1.md".into(),
+            main_sha: before.clone(),
+        };
+        check_prepare_paths(&root, Scope::Extension, &extension_plan.notes).unwrap();
+        git(&["switch", "-q", "-c", &extension_plan.branch], &root).unwrap();
+        apply_local_release_files(&root, Scope::Extension, &extension_plan).unwrap();
+        let cargo = util::read_nonempty(&root.join("Cargo.toml")).unwrap();
+        assert!(cargo.starts_with(
+            "[package]\nname = \"zed-wit\"\nversion = \"0.1.1\"\nedition = \"2024\"\n"
+        ));
+        assert!(cargo.contains("[workspace]\nmembers = ["));
+        let extension = util::read_nonempty(&root.join("extension.toml")).unwrap();
+        assert!(extension.starts_with("id = \"wit\"\nname = \"WIT\"\nversion = \"0.1.1\"\n"));
+        let lock = util::read_nonempty(&root.join("Cargo.lock")).unwrap();
+        assert!(lock.contains("[[package]]\nname = \"zed-wit\"\nversion = \"0.1.1\""));
     }
 
     #[test]
