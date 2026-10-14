@@ -1385,7 +1385,9 @@ fn verify_lockfile_version_only(
         if package.get("version").and_then(toml::Value::as_str)
             != Some(previous.value().as_str())
         {
-            return Err(format!("Cargo.lock has an unexpected previous version for {target}"));
+            return Err(format!(
+                "Cargo.lock has an unexpected previous version for {target}"
+            ));
         }
         package
             .as_table_mut()
@@ -1397,7 +1399,9 @@ fn verify_lockfile_version_only(
         return Err(format!("Cargo.lock must contain exactly one {target} package"));
     }
     if expected != actual {
-        return Err("release preparation changed Cargo.lock beyond the selected package version".into());
+        return Err(
+            "release preparation changed Cargo.lock beyond the selected package version".into(),
+        );
     }
     Ok(())
 }
@@ -1554,8 +1558,8 @@ fn apply_local_release_files(root: &Path, scope: Scope, plan: &Plan) -> Result<(
         })
         .collect::<Result<Vec<_>, String>>()?;
     let previous_lock = util::read_nonempty(&root.join("Cargo.lock"))?;
-    for (path, table) in paths {
-        update_manifest(&path, plan.current, plan.candidate, table)?;
+    for (path, table) in &paths {
+        update_manifest(path, plan.current, plan.candidate, *table)?;
     }
 
     let notes = root.join(&plan.notes);
