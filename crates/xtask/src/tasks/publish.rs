@@ -2842,7 +2842,10 @@ mod tests {
             )
             .is_err()
         );
-        let altered_dependency = prepared.replace("example\\\"]", "modified\\\"]");
+        let altered_dependency = prepared.replace(
+            "dependencies = [\"example\"]",
+            "dependencies = [\"modified\"]",
+        );
         assert!(
             verify_lockfile_version_only(
                 lock,
