@@ -1355,6 +1355,53 @@ fn replace_manifest_version(
     }
     Ok(output)
 }
+// Cargo updates the workspace package version in Cargo.lock. Verify that this
+// is its only semantic change; a missing [[package]]/name or any unrelated
+// dependency mutation must never qualify as a release preparation.
+fn verify_lockfile_version_only(
+    before: &str,
+    after: &str,
+    scope: Scope,
+    previous: Version,
+    next: Version,
+) -> Result<(), String> {
+    let mut expected: toml::Value =
+        toml::from_str(before).map_err(|e| format!("parse previous Cargo.lock: {e}"))?;
+    let actual: toml::Value =
+        toml::from_str(after).map_err(|e| format!("parse prepared Cargo.lock: {e}"))?;
+    let packages = expected
+        .get_mut("package")
+        .and_then(toml::Value::as_array_mut)
+        .ok_or("previous Cargo.lock lacks package entries")?;
+    let target = match scope {
+        Scope::Lsp => "wit-language-server",
+        Scope::Extension => "zed-wit",
+    };
+    let mut count = 0;
+    for package in packages {
+        if package.get("name").and_then(toml::Value::as_str) != Some(target) {
+            continue;
+        }
+        if package.get("version").and_then(toml::Value::as_str)
+            != Some(previous.value().as_str())
+        {
+            return Err(format!("Cargo.lock has an unexpected previous version for {target}"));
+        }
+        package
+            .as_table_mut()
+            .ok_or("Cargo.lock package must be a table")?
+            .insert("version".into(), toml::Value::String(next.value()));
+        count += 1;
+    }
+    if count != 1 {
+        return Err(format!("Cargo.lock must contain exactly one {target} package"));
+    }
+    if expected != actual {
+        return Err("release preparation changed Cargo.lock beyond the selected package version".into());
+    }
+    Ok(())
+}
+
 fn checked_release_path(root: &Path, file: &Path, existing_file: bool) -> Result<(), String> {
     let relative = file
         .strip_prefix(root)
@@ -1497,6 +1544,16 @@ fn apply_local_release_files(root: &Path, scope: Scope, plan: &Plan) -> Result<(
             (root.join("extension.toml"), None),
         ]
     };
+    let originals = paths
+        .iter()
+        .map(|(path, table)| {
+            let original = util::read_nonempty(path)?;
+            let expected =
+                replace_manifest_version(&original, plan.current, plan.candidate, *table)?;
+            Ok((path, expected))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let previous_lock = util::read_nonempty(&root.join("Cargo.lock"))?;
     for (path, table) in paths {
         update_manifest(&path, plan.current, plan.candidate, table)?;
     }
@@ -1535,6 +1592,21 @@ fn apply_local_release_files(root: &Path, scope: Scope, plan: &Plan) -> Result<(
     // Cargo updates the workspace package version in Cargo.lock. This is
     // deliberately the non-locked invocation; submit later verifies --locked.
     command("cargo", &["check", "--workspace", "--offline"], root)?;
+    for (path, expected) in originals {
+        if util::read_nonempty(path)? != expected {
+            return Err(format!(
+                "release preparation changed unexpected manifest content: {}",
+                path.display()
+            ));
+        }
+    }
+    verify_lockfile_version_only(
+        &previous_lock,
+        &util::read_nonempty(&root.join("Cargo.lock"))?,
+        scope,
+        plan.current,
+        plan.candidate,
+    )?;
     Ok(())
 }
 
@@ -2738,6 +2810,57 @@ mod tests {
         assert!(edited.starts_with("id = \"wit\"\nversion = \"0.1.3\""));
         assert!(edited.contains("[grammars.wit]\nversion = \"other\""));
         assert!(replace_manifest_version(input, next, old, Some("[package]")).is_err());
+    }
+
+    #[test]
+    fn extension_prepare_preserves_full_manifest_preamble_and_lock_package_identity() {
+        let previous = Version::parse("0.5.1").unwrap();
+        let next = Version::parse("0.5.2").unwrap();
+        let manifest = "[package]\nname = \"zed-wit\"\nversion = \"0.5.1\"\nedition = \"2024\"\nrust-version = \"1.99\"\nlicense = \"MIT OR Apache-2.0\"\n\n[workspace]\nmembers = []\n";
+        let updated =
+            replace_manifest_version(manifest, previous, next, Some("[package]")).unwrap();
+        assert_eq!(
+            updated,
+            manifest.replacen("version = \"0.5.1\"", "version = \"0.5.2\"", 1)
+        );
+        assert!(updated.starts_with("[package]\nname = \"zed-wit\"\n"));
+        let lock = "version = 4\n\n[[package]]\nname = \"example\"\nversion = \"1.2.3\"\n\n[[package]]\nname = \"zed-wit\"\nversion = \"0.5.1\"\ndependencies = [\"example\"]\n";
+        let prepared = lock.replace(
+            "name = \"zed-wit\"\nversion = \"0.5.1\"",
+            "name = \"zed-wit\"\nversion = \"0.5.2\"",
+        );
+        verify_lockfile_version_only(lock, &prepared, Scope::Extension, previous, next).unwrap();
+
+        let missing_identity = "version = 4\n\n[[package]]\nversion = \"0.5.2\"\n";
+        assert!(
+            verify_lockfile_version_only(
+                lock,
+                missing_identity,
+                Scope::Extension,
+                previous,
+                next
+            )
+            .is_err()
+        );
+        let altered_dependency = prepared.replace("example\\\"]", "modified\\\"]");
+        assert!(
+            verify_lockfile_version_only(
+                lock,
+                &altered_dependency,
+                Scope::Extension,
+                previous,
+                next
+            )
+            .is_err()
+        );
+        assert!(verify_lockfile_version_only(
+            lock,
+            lock,
+            Scope::Extension,
+            previous,
+            next
+        )
+        .is_err());
     }
 
     #[test]
