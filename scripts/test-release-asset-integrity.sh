@@ -10,16 +10,27 @@ trap 'rm -rf -- "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/dist" "$tmp/source"
 export GH_REPO=chiploom/zed-wit GH_TOKEN=synthetic-offline-test-token
 export MOCK_RELEASE="$tmp/release.json" MOCK_PAGES="$tmp/pages.json"
+export MOCK_LOOKUP="$tmp/release-lookup.json"
 export MOCK_API_FAILURE=0
 cat >"$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[ "$1" = api ] || exit 12
 if [ "$MOCK_API_FAILURE" = 1 ]; then exit 33; fi
-case "$*" in
-  *"/releases/tags/"*) cat "$MOCK_RELEASE" ;;
-  *"/releases/42/assets?per_page=100"*) cat "$MOCK_PAGES" ;;
-  *) exit 22 ;;
+case "$1" in
+  release)
+    [ "$2" = view ] || exit 12
+    [[ " $* " == *" --repo chiploom/zed-wit --json databaseId,tagName "* ]] || exit 13
+    cat "$MOCK_LOOKUP"
+    ;;
+  api)
+    case "$*" in
+      *"/releases/tags/"*) echo "mock: draft tag endpoint unavailable (HTTP 404)" >&2; exit 44 ;;
+      *"/releases/42/assets?per_page=100"*) cat "$MOCK_PAGES" ;;
+      *"/releases/42"*) cat "$MOCK_RELEASE" ;;
+      *) exit 22 ;;
+    esac
+    ;;
+  *) exit 12 ;;
 esac
 EOF
 chmod +x "$tmp/bin/gh"
@@ -55,6 +66,7 @@ make_fixture() {
       assets:[range(0;($wanted[0]|length)) as $i |
         $wanted[0][$i] + {id:($i+1),state:"uploaded"}]}' >"$MOCK_RELEASE"
   jq '[.assets]' "$MOCK_RELEASE" >"$MOCK_PAGES"
+  jq '{databaseId:.id,tagName:.tag_name}' "$MOCK_RELEASE" >"$MOCK_LOOKUP"
 }
 make_fixture
 
@@ -80,6 +92,29 @@ mutate_asset() {
 }
 
 pass draft
+# A draft can return HTTP 404 from releases/tags/{tag}. The mock requires
+# resolution through the numeric release ID instead.
+make_fixture
+jq '.databaseId = 43' "$MOCK_LOOKUP" >"$tmp/next.json"
+mv "$tmp/next.json" "$MOCK_LOOKUP"
+fail draft
+make_fixture
+jq '.tagName = "v0.1.999"' "$MOCK_LOOKUP" >"$tmp/next.json"
+mv "$tmp/next.json" "$MOCK_LOOKUP"
+fail draft
+make_fixture
+jq '.databaseId = "42"' "$MOCK_LOOKUP" >"$tmp/next.json"
+mv "$tmp/next.json" "$MOCK_LOOKUP"
+fail draft
+make_fixture
+jq '.id = 43' "$MOCK_RELEASE" >"$tmp/next.json"
+mv "$tmp/next.json" "$MOCK_RELEASE"
+fail draft
+make_fixture
+jq '.tag_name = "v0.1.999"' "$MOCK_RELEASE" >"$tmp/next.json"
+mv "$tmp/next.json" "$MOCK_RELEASE"
+fail draft
+make_fixture
 if GH_HOST=enterprise.example.invalid verify draft 2>/dev/null; then
   echo "enterprise host was accepted for GitHub.com publishing" >&2; exit 1
 fi
@@ -181,6 +216,7 @@ jq -e 'length == 0' "$tmp/extension-manifest.json" >/dev/null
 jq -n '{id:42,tag_name:"v-extension-0.1.3",name:"WIT for Zed Extension v0.1.3",
   draft:true,immutable:false,assets:[]}' >"$MOCK_RELEASE"
 printf '[[]]\n' >"$MOCK_PAGES"
+jq '{databaseId:.id,tagName:.tag_name}' "$MOCK_RELEASE" >"$MOCK_LOOKUP"
 verify_extension() {
   bash "$verifier" verify extension "$tmp/extension-manifest.json" "$tmp/dist" "$tmp/source" \
     v-extension-0.1.3 "WIT for Zed Extension v0.1.3" draft >/dev/null

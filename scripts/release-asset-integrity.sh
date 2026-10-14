@@ -105,7 +105,7 @@ if ! jq -ne --argjson a "$captured" --argjson b "$current" '$a == $b'; then
   exit 1
 fi
 
-release_json=$(gh api --hostname github.com "repos/$GH_REPO/releases/tags/$tag")
+release_json=$(bash "$(dirname "$0")/release-by-tag.sh" "$tag")
 release_id=$(jq -er '.id | select(type=="number" and . > 0 and floor == .)' <<<"$release_json")
 # --slurp retains all API pages as nested arrays; incomplete pages fail closed.
 pages_json=$(gh api --hostname github.com --paginate --slurp "repos/$GH_REPO/releases/$release_id/assets?per_page=100")
