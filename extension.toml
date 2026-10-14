@@ -1,6 +1,6 @@
 id = "wit"
 name = "WIT"
-version = "0.5.3"
+version = "0.5.4"
 schema_version = 1
 authors = ["Chiploom"]
 description = "Modern WebAssembly Interface Types: syntax, package diagnostics, and formatting."
