@@ -554,7 +554,13 @@ jobs:
                   .id == 24620024
                   and .source_type == "Repository"
                   and .source == "chiploom/zed-wit"
-                  and .updated_at == "2026-10-06T21:11:44.860-04:00"
+                  # GitHub serializes the same audited instant in local
+                  # offset or UTC depending on the API authorization context.
+                  # Both literals are verified representations of one revision.
+                  and (
+                    .updated_at == "2026-10-06T21:11:44.860-04:00"
+                    or .updated_at == "2026-10-07T01:11:44.860Z"
+                  )
                   and (
                     (has("bypass_actors") | not)
                     or .bypass_actors == []
