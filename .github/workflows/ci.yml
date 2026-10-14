@@ -77,7 +77,6 @@ jobs:
           git diff --check
           test -z "$(git status --short)"
 
-
   registry-compatibility:
     name: Zed registry compatibility
     runs-on: ubuntu-24.04
@@ -93,7 +92,7 @@ jobs:
       - name: Verify Zed registry Rust toolchain
         run: |
           rustc --version
-          rustc --version | grep -E '^rustc 1\\.90\\.0 '
+          rustc --version | grep -E '^rustc 1\.90\.0 '
       - name: Build Zed extension adapter with Rust 1.90
         run: cargo build --release --locked --package zed-wit --target wasm32-wasip2
 
