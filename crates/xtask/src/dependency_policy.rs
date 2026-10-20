@@ -10,7 +10,82 @@ pub const TARGETS: [&str; 5] = [
     "x86_64-pc-windows-msvc",
 ];
 
-const GRAMMAR_REV: &str = "f777cdbe11281ccc68ffa30bd7ea34cdf4ddbec6";
+const GRAMMAR_REPOSITORY: &str = "https://github.com/bytecodealliance/tree-sitter-wit";
+
+fn grammar_revision(syntax_manifest: &str, extension_manifest: &str) -> Result<String, String> {
+    let syntax: toml::Value = toml::from_str(syntax_manifest)
+        .map_err(|error| format!("parse wit-syntax Cargo.toml: {error}"))?;
+    let extension: toml::Value = toml::from_str(extension_manifest)
+        .map_err(|error| format!("parse extension.toml: {error}"))?;
+
+    let grammar = extension
+        .get("grammars")
+        .and_then(|grammars| grammars.get("wit"))
+        .ok_or_else(|| "extension.toml has no grammars.wit table".to_owned())?;
+    let extension_repo = grammar
+        .get("repository")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| "extension.toml has no grammars.wit.repository".to_owned())?;
+    let extension_rev = grammar
+        .get("rev")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| "extension.toml has no grammars.wit.rev".to_owned())?;
+
+    let syntax_grammar = syntax
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.get("tree-sitter-wit"))
+        .ok_or_else(|| "wit-syntax Cargo.toml has no tree-sitter-wit dependency".to_owned())?;
+    let syntax_repo = syntax_grammar
+        .get("git")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| "wit-syntax Cargo.toml has no tree-sitter-wit.git".to_owned())?;
+    let syntax_rev = syntax_grammar
+        .get("rev")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| "wit-syntax Cargo.toml has no tree-sitter-wit.rev".to_owned())?;
+
+    if extension_repo != GRAMMAR_REPOSITORY || syntax_repo != GRAMMAR_REPOSITORY {
+        return Err(format!(
+            "unreviewed tree-sitter-wit repository: extension={extension_repo:?}, syntax={syntax_repo:?}"
+        ));
+    }
+    if extension_rev != syntax_rev {
+        return Err(format!(
+            "grammar pin mismatch: extension={extension_rev}, syntax={syntax_rev}"
+        ));
+    }
+    if syntax_rev.len() != 40
+        || !syntax_rev
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(format!("invalid tree-sitter-wit commit revision: {syntax_rev:?}"));
+    }
+
+    Ok(syntax_rev.to_owned())
+}
+
+fn pinned_grammar_revision() -> Result<String, String> {
+    let root = util::repo_root();
+    grammar_revision(
+        &util::read_nonempty(&root.join("crates/wit-syntax/Cargo.toml"))?,
+        &util::read_nonempty(&root.join("extension.toml"))?,
+    )
+}
+
+fn single_version(packages: &[Value], name: &str, scope: &str) -> Result<String, String> {
+    let versions = packages
+        .iter()
+        .filter(|package| package.get("name").and_then(Value::as_str) == Some(name))
+        .map(|package| package_string(package, "version"))
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if versions.len() != 1 {
+        return Err(format!(
+            "{scope}: expected exactly one {name} version in resolved dependency graph, found {versions:?}"
+        ));
+    }
+    Ok(versions.into_iter().next().expect("one version").to_owned())
+}
 
 pub fn ensure_target(target: &str) -> Result<(), String> {
     if TARGETS.contains(&target) {
@@ -91,7 +166,7 @@ pub fn license_choice(package: &Value) -> Result<&'static str, String> {
     }
 }
 
-pub fn native_packages(data: &Value) -> Result<Vec<Value>, String> {
+fn closure_packages(data: &Value, root_name: &str) -> Result<Vec<Value>, String> {
     let package_list = packages(data)?;
     let packages_by_id: HashMap<String, Value> = package_list
         .iter()
@@ -126,14 +201,14 @@ pub fn native_packages(data: &Value) -> Result<Vec<Value>, String> {
         .iter()
         .filter_map(|package| {
             let id = package.get("id")?.as_str()?;
-            (package.get("name")?.as_str()? == "wit-language-server"
+            (package.get("name")?.as_str()? == root_name
                 && workspace_members.contains(id))
             .then(|| id.to_owned())
         })
         .collect();
     if roots.len() != 1 {
         return Err(format!(
-            "expected one workspace wit-language-server package, found {}",
+            "expected one workspace {root_name} package, found {}",
             roots.len()
         ));
     }
@@ -197,56 +272,47 @@ pub fn native_packages(data: &Value) -> Result<Vec<Value>, String> {
     Ok(native)
 }
 
+pub fn native_packages(data: &Value) -> Result<Vec<Value>, String> {
+    closure_packages(data, "wit-language-server")
+}
+
 pub fn check(data: &Value) -> Result<Vec<Value>, String> {
     let package_list = packages(data)?;
+    let grammar_revision = pinned_grammar_revision()?;
+    let expected_grammar_source =
+        format!("git+{GRAMMAR_REPOSITORY}?rev={grammar_revision}#{grammar_revision}");
+    let grammar_count = package_list
+        .iter()
+        .filter(|package| package.get("name").and_then(Value::as_str) == Some("tree-sitter-wit"))
+        .count();
+    if grammar_count != 1 {
+        return Err(format!(
+            "expected one tree-sitter-wit package in Cargo metadata, found {grammar_count}"
+        ));
+    }
 
     for package in package_list {
         license_choice(package)?;
-        if let Some(source) = package.get("source").and_then(Value::as_str)
+        let name = package_string(package, "name")?;
+        let source = package.get("source").and_then(Value::as_str);
+        if name == "tree-sitter-wit" {
+            if source != Some(expected_grammar_source.as_str()) {
+                return Err(format!(
+                    "unreviewed tree-sitter-wit source: {source:?}; expected {expected_grammar_source:?}"
+                ));
+            }
+        } else if let Some(source) = source
             && !source.starts_with("registry+https://github.com/rust-lang/crates.io-index")
         {
-            let name = package_string(package, "name")?;
-            let expected_git = "git+https://github.com/bytecodealliance/tree-sitter-wit?";
-            let expected_revision = format!("#{GRAMMAR_REV}");
-            if name != "tree-sitter-wit"
-                || !source.starts_with(expected_git)
-                || !source.ends_with(&expected_revision)
-            {
-                return Err(format!("unreviewed dependency source: {source}"));
-            }
+            return Err(format!("unreviewed dependency source: {source}"));
         }
     }
 
     let native = native_packages(data)?;
-    let native_parsers: BTreeSet<&str> = native
-        .iter()
-        .filter(|package| package.get("name").and_then(Value::as_str) == Some("wit-parser"))
-        .filter_map(|package| package.get("version").and_then(Value::as_str))
-        .collect();
-    if native_parsers != BTreeSet::from(["0.260.0"]) {
-        return Err(format!("native semantic parser drift: {native_parsers:?}"));
-    }
-
-    let tree_sitters: BTreeSet<&str> = package_list
-        .iter()
-        .filter(|package| package.get("name").and_then(Value::as_str) == Some("tree-sitter"))
-        .filter_map(|package| package.get("version").and_then(Value::as_str))
-        .collect();
-    if tree_sitters != BTreeSet::from(["0.26.11"]) {
-        return Err(format!("Tree-sitter runtime drift: {tree_sitters:?}"));
-    }
-
-    let parser_versions: BTreeSet<&str> = package_list
-        .iter()
-        .filter(|package| package.get("name").and_then(Value::as_str) == Some("wit-parser"))
-        .filter_map(|package| package.get("version").and_then(Value::as_str))
-        .collect();
-    if parser_versions != BTreeSet::from(["0.227.1", "0.260.0"]) {
-        return Err(format!(
-            "workspace parser versions changed; review adapter bindings: {parser_versions:?}"
-        ));
-    }
-
+    single_version(&native, "wit-parser", "native language server")?;
+    let adapter = closure_packages(data, "zed-wit")?;
+    single_version(&adapter, "wit-parser", "Zed extension adapter")?;
+    single_version(package_list, "tree-sitter", "workspace")?;
     Ok(native)
 }
 
@@ -254,6 +320,7 @@ pub fn run(target: Option<&str>) -> Result<(), String> {
     let data = metadata(target)?;
     let native = check(&data)?;
     let package_list = packages(&data)?;
+    let adapter = closure_packages(&data, "zed-wit")?;
     let licenses: BTreeSet<&str> = package_list
         .iter()
         .map(license_choice)
@@ -265,9 +332,9 @@ pub fn run(target: Option<&str>) -> Result<(), String> {
             "target": target.unwrap_or("all-platforms"),
             "workspace_packages": package_list.len(),
             "native_and_build_packages": native.len(),
-            "native_wit_parser": "0.260.0",
-            "adapter_binding_wit_parser": "0.227.1",
-            "tree_sitter": "0.26.11",
+            "native_wit_parser": single_version(&native, "wit-parser", "native language server")?,
+            "adapter_binding_wit_parser": single_version(&adapter, "wit-parser", "Zed extension adapter")?,
+            "tree_sitter": single_version(package_list, "tree-sitter", "workspace")?,
             "licenses": licenses,
             "result": "passed",
         }))
@@ -311,4 +378,155 @@ mod tests {
             assert_eq!(license_choice(&package).unwrap(), "MIT");
         }
     }
+    fn fake_package(id: &str, name: &str, version: &str) -> Value {
+        json!({
+            "id": id,
+            "name": name,
+            "version": version,
+            "license": "MIT",
+            "source": null,
+        })
+    }
+
+    fn graph_fixture(native_parser: &str, runtime: &str) -> Value {
+        let revision = pinned_grammar_revision().unwrap();
+        let mut grammar = fake_package("grammar", "tree-sitter-wit", "1.4.0");
+        grammar["source"] = json!(format!(
+            "git+{GRAMMAR_REPOSITORY}?rev={revision}#{revision}"
+        ));
+        json!({
+            "packages": [
+                fake_package("native", "wit-language-server", "0.1.2"),
+                fake_package("adapter", "zed-wit", "0.5.4"),
+                fake_package("syntax", "wit-syntax", "0.1.0"),
+                fake_package("native-parser", "wit-parser", native_parser),
+                fake_package("adapter-parser", "wit-parser", "0.227.1"),
+                fake_package("runtime", "tree-sitter", runtime),
+                grammar,
+                fake_package("dev", "unused-dev-dependency", "1.0.0"),
+            ],
+            "workspace_members": ["native", "adapter", "syntax"],
+            "resolve": {
+                "nodes": [
+                    {"id": "native", "deps": [
+                        {"pkg": "native-parser", "dep_kinds": [{"kind": null}]},
+                        {"pkg": "runtime", "dep_kinds": [{"kind": "build"}]},
+                        {"pkg": "syntax", "dep_kinds": [{"kind": null}]},
+                        {"pkg": "dev", "dep_kinds": [{"kind": "dev"}]},
+                    ]},
+                    {"id": "adapter", "deps": [
+                        {"pkg": "adapter-parser", "dep_kinds": [{"kind": null}]},
+                    ]},
+                    {"id": "syntax", "deps": [
+                        {"pkg": "grammar", "dep_kinds": [{"kind": null}]},
+                    ]},
+                    {"id": "native-parser", "deps": []},
+                    {"id": "adapter-parser", "deps": []},
+                    {"id": "runtime", "deps": []},
+                    {"id": "grammar", "deps": []},
+                    {"id": "dev", "deps": []},
+                ],
+            },
+        })
+    }
+
+    #[test]
+    fn normal_parser_and_runtime_upgrades_do_not_require_xtask_changes() {
+        let data = graph_fixture("0.261.0", "0.26.13");
+        let native = check(&data).unwrap();
+        assert_eq!(single_version(&native, "wit-parser", "native").unwrap(), "0.261.0");
+        let adapter = closure_packages(&data, "zed-wit").unwrap();
+        assert_eq!(
+            single_version(&adapter, "wit-parser", "adapter").unwrap(),
+            "0.227.1"
+        );
+    }
+
+    #[test]
+    fn native_graph_excludes_dev_only_edges_but_includes_build_dependencies() {
+        let data = graph_fixture("0.261.0", "0.26.13");
+        let native = native_packages(&data).unwrap();
+        assert!(native.iter().any(|p| p["name"] == "tree-sitter"));
+        assert!(!native.iter().any(|p| p["name"] == "unused-dev-dependency"));
+    }
+
+    #[test]
+    fn duplicate_native_semantic_parsers_are_rejected() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"]
+            .as_array_mut()
+            .unwrap()
+            .push(fake_package("other-parser", "wit-parser", "0.262.0"));
+        data["resolve"]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": "other-parser", "deps": []}));
+        data["resolve"]["nodes"][0]["deps"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"pkg": "other-parser", "dep_kinds": [{"kind": null}]}));
+        assert!(check(&data).unwrap_err().contains("native language server"));
+    }
+
+    #[test]
+    fn duplicate_tree_sitter_runtime_versions_are_rejected() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"]
+            .as_array_mut()
+            .unwrap()
+            .push(fake_package("other-runtime", "tree-sitter", "0.27.0"));
+        assert!(check(&data).unwrap_err().contains("workspace"));
+    }
+
+    #[test]
+    fn unreviewed_registry_or_git_sources_are_rejected() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"][3]["source"] = json!("git+https://example.com/unreviewed#123");
+        assert!(check(&data).unwrap_err().contains("unreviewed dependency source"));
+    }
+
+    #[test]
+    fn resolved_grammar_git_commit_must_match_manifest_pin() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"][6]["source"] = json!(
+            "git+https://github.com/bytecodealliance/tree-sitter-wit?rev=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert!(check(&data).unwrap_err().contains("unreviewed tree-sitter-wit source"));
+    }
+
+    #[test]
+    fn mismatched_or_invalid_grammar_manifest_pins_are_rejected() {
+        let root = util::repo_root();
+        let syntax = util::read_nonempty(&root.join("crates/wit-syntax/Cargo.toml")).unwrap();
+        let extension = util::read_nonempty(&root.join("extension.toml")).unwrap();
+        let revision = grammar_revision(&syntax, &extension).unwrap();
+        assert!(grammar_revision(&syntax, &extension.replace(
+            &revision,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ))
+        .unwrap_err()
+        .contains("grammar pin mismatch"));
+        assert!(grammar_revision(
+            &syntax.replace(&revision, "not-a-git-revision"),
+            &extension.replace(&revision, "not-a-git-revision")
+        )
+        .unwrap_err()
+        .contains("invalid tree-sitter-wit commit revision"));
+    }
+
+    #[test]
+    fn unreviewed_licenses_are_rejected_even_for_valid_dependency_versions() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"][3]["license"] = json!("GPL-3.0-only");
+        assert!(check(&data).unwrap_err().contains("unreviewed license"));
+    }
+
+    #[test]
+    fn release_target_allowlist_is_preserved() {
+        for target in TARGETS {
+            assert!(ensure_target(target).is_ok());
+        }
+        assert!(ensure_target("aarch64-pc-windows-msvc").is_err());
+    }
+
 }
