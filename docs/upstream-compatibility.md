@@ -18,6 +18,8 @@ the other table rows.
 | Registry extension            | Registry `wit` 0.4.0 points to the existing repository                                                                                                                     | Registry tree points at [`7a0c864b748c0a4931c68beaad10236eda74983f`](https://github.com/valentinegb/zed-wit/tree/7a0c864b748c0a4931c68beaad10236eda74983f)    | Replacement is a separate policy gate.                                                         |
 | Existing extension repository | No dependency pin; last observed commit [`b4f20086b45da2edaed9e56965d9583410b468c4`](https://github.com/valentinegb/zed-wit/tree/b4f20086b45da2edaed9e56965d9583410b468c4) | Current main remains at the same October 2024 commit                                                                                                          | Age alone grants no transfer rights.                                                           |
 
+The version numbers in the table above record the compatibility baseline audited at that time; they are **not** additional version gates maintained by xtask. A dependency upgrade changes its Cargo manifest and lockfile, followed by focused compatibility/fixture review. `cargo xtask check-dependencies` checks resolved graph invariants and source/license policy without duplicating parser or runtime version pins. The grammar revision remains explicitly pinned in both the Zed and Cargo manifests and must agree with the resolved Git source.
+
 ## Syntax and capability boundaries
 
 Tree-sitter supplies highlighting, brackets, outline and editing structure.
