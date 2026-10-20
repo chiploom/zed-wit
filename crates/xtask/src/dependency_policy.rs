@@ -119,7 +119,10 @@ fn approve_local_package(
         )
     })?;
     if !canonical_manifest.starts_with(trusted_root)
-        || canonical_manifest.file_name().and_then(|name| name.to_str()) != Some("Cargo.toml")
+        || canonical_manifest
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some("Cargo.toml")
         || !canonical_manifest.is_file()
     {
         return Err(format!(
@@ -341,7 +344,11 @@ pub fn check(data: &Value) -> Result<Vec<Value>, String> {
         .and_then(Value::as_array)
         .ok_or_else(|| "cargo metadata omitted workspace_members".to_owned())?
         .iter()
-        .map(|member| member.as_str().ok_or_else(|| "invalid workspace member ID".to_owned()))
+        .map(|member| {
+            member
+                .as_str()
+                .ok_or_else(|| "invalid workspace member ID".to_owned())
+        })
         .collect::<Result<HashSet<_>, _>>()?;
 
     for package in package_list {
@@ -606,10 +613,16 @@ mod tests {
             std::thread::current().id()
         );
         let outside = std::env::temp_dir().join(format!("{name}-outside"));
-        let inside = util::repo_root().join("target").join(format!("{name}-link"));
+        let inside = util::repo_root()
+            .join("target")
+            .join(format!("{name}-link"));
         fs::create_dir_all(&outside).unwrap();
         fs::create_dir_all(inside.parent().unwrap()).unwrap();
-        fs::write(outside.join("Cargo.toml"), "[package]\nname = \"external\"\nversion = \"0.1.0\"\n").unwrap();
+        fs::write(
+            outside.join("Cargo.toml"),
+            "[package]\nname = \"external\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
         symlink(&outside, &inside).unwrap();
         let mut data = graph_fixture("0.261.0", "0.26.13");
         data["packages"][0]["manifest_path"] = json!(inside.join("Cargo.toml"));
@@ -658,9 +671,17 @@ mod tests {
         check(&graph_fixture("0.261.0", "0.26.13")).unwrap();
         let mut data = graph_fixture("0.261.0", "0.26.13");
         data["packages"][3]["source"] = json!(format!("{CRATES_IO_SOURCE}-evil"));
-        assert!(check(&data).unwrap_err().contains("unreviewed dependency source"));
+        assert!(
+            check(&data)
+                .unwrap_err()
+                .contains("unreviewed dependency source")
+        );
         data["packages"][3]["source"] = json!("registry+https://example.org/other-index");
-        assert!(check(&data).unwrap_err().contains("unreviewed dependency source"));
+        assert!(
+            check(&data)
+                .unwrap_err()
+                .contains("unreviewed dependency source")
+        );
     }
 
     #[test]
