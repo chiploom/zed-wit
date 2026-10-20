@@ -28,7 +28,7 @@ Native binary lookup and local release packaging read the effective output direc
 | --- | --- |
 | `check` | Run workspace rustfmt, all-target/all-feature Clippy, and locked `cargo check`. |
 | `test` | Native tests; supports `--package <name>`, `--filter <substring>`, `--runner <auto|cargo|nextest>`. Auto prefers installed nextest unless a substring filter is given. |
-| `verify` | Repository policy + dependency checks, `check` and `test-all`. |
+| `verify` | Repository policy + metadata-derived dependency checks, `check` and `test-all`. |
 | `test-all` | Native workspace tests, doctests and a Wasm extension build; optional `--with-zed true` for real Zed smoke. GUI/hosted tests remain separate. |
 | `test-publish` | Offline LSP/extension release lifecycle tests plus the protected-CD asset SHA-256 verifier exercised against mocked GitHub API responses (23 LSP assets and extension zero-assets). Never publishes anything. |
 | `test-lsp` | Test syntax, analysis and language-server packages. |
@@ -38,6 +38,14 @@ Native binary lookup and local release packaging read the effective output direc
 | `doctor` | Inspect Rust/Cargo/rustup/Git and wasm target; report optional nextest, llvm-cov, and Zed tools separately. |
 
 `test --filter` uses Cargo substring syntax. Do not pair it with `--runner nextest`, which requires different filter expressions. A default test pass does **not** qualify hosted distribution or cross-platform Zed runtime behavior.
+
+## Dependency policy
+
+`cargo xtask check-dependencies` reads the locked, resolved Cargo graph. The manifests and `Cargo.lock` are the source of truth for versions: xtask does not maintain a second list of expected `wit-parser` or `tree-sitter` releases.
+
+The checker requires exactly one resolved semantic-parser **package identity** in each of the native language-server and Zed adapter normal/build dependency closures, and one Tree-sitter runtime **package identity** across the workspace (even when distinct identities share a version). It does **not** require the adapter's transitive WIT parser to have the same version as the native semantic parser. The JSON report displays actual resolved versions, not pinned strings from xtask source. A version change still requires API/fixture/compatibility review and passing tests.
+
+The checker also rejects unreviewed dependency sources and license expressions. Crates.io registry sources are checked by exact identity. Packages whose Cargo metadata source is null must be recognized workspace members, and their canonicalized Cargo.toml paths must resolve inside the canonical repository boundary; external, unlisted and symlink-escaping local dependencies are rejected. The permitted `tree-sitter-wit` Git commit is derived from the two matching, 40-character revision pins in `crates/wit-syntax/Cargo.toml` and `extension.toml`; both the repository origin and the resolved Git source must match. The approved release-target matrix, target-filtered native normal/build closure, and `collect-licenses` redistribution notices remain independently enforced. Valid dependency updates must not bypass those checks.
 
 ## Local release preparation, not publication
 
