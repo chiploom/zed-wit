@@ -59,7 +59,9 @@ fn grammar_revision(syntax_manifest: &str, extension_manifest: &str) -> Result<S
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
-        return Err(format!("invalid tree-sitter-wit commit revision: {syntax_rev:?}"));
+        return Err(format!(
+            "invalid tree-sitter-wit commit revision: {syntax_rev:?}"
+        ));
     }
 
     Ok(syntax_rev.to_owned())
@@ -201,9 +203,8 @@ fn closure_packages(data: &Value, root_name: &str) -> Result<Vec<Value>, String>
         .iter()
         .filter_map(|package| {
             let id = package.get("id")?.as_str()?;
-            (package.get("name")?.as_str()? == root_name
-                && workspace_members.contains(id))
-            .then(|| id.to_owned())
+            (package.get("name")?.as_str()? == root_name && workspace_members.contains(id))
+                .then(|| id.to_owned())
         })
         .collect();
     if roots.len() != 1 {
@@ -434,7 +435,10 @@ mod tests {
     fn normal_parser_and_runtime_upgrades_do_not_require_xtask_changes() {
         let data = graph_fixture("0.261.0", "0.26.13");
         let native = check(&data).unwrap();
-        assert_eq!(single_version(&native, "wit-parser", "native").unwrap(), "0.261.0");
+        assert_eq!(
+            single_version(&native, "wit-parser", "native").unwrap(),
+            "0.261.0"
+        );
         let adapter = closure_packages(&data, "zed-wit").unwrap();
         assert_eq!(
             single_version(&adapter, "wit-parser", "adapter").unwrap(),
@@ -453,10 +457,11 @@ mod tests {
     #[test]
     fn duplicate_native_semantic_parsers_are_rejected() {
         let mut data = graph_fixture("0.261.0", "0.26.13");
-        data["packages"]
-            .as_array_mut()
-            .unwrap()
-            .push(fake_package("other-parser", "wit-parser", "0.262.0"));
+        data["packages"].as_array_mut().unwrap().push(fake_package(
+            "other-parser",
+            "wit-parser",
+            "0.262.0",
+        ));
         data["resolve"]["nodes"]
             .as_array_mut()
             .unwrap()
@@ -471,10 +476,11 @@ mod tests {
     #[test]
     fn duplicate_tree_sitter_runtime_versions_are_rejected() {
         let mut data = graph_fixture("0.261.0", "0.26.13");
-        data["packages"]
-            .as_array_mut()
-            .unwrap()
-            .push(fake_package("other-runtime", "tree-sitter", "0.27.0"));
+        data["packages"].as_array_mut().unwrap().push(fake_package(
+            "other-runtime",
+            "tree-sitter",
+            "0.27.0",
+        ));
         assert!(check(&data).unwrap_err().contains("workspace"));
     }
 
@@ -482,7 +488,11 @@ mod tests {
     fn unreviewed_registry_or_git_sources_are_rejected() {
         let mut data = graph_fixture("0.261.0", "0.26.13");
         data["packages"][3]["source"] = json!("git+https://example.com/unreviewed#123");
-        assert!(check(&data).unwrap_err().contains("unreviewed dependency source"));
+        assert!(
+            check(&data)
+                .unwrap_err()
+                .contains("unreviewed dependency source")
+        );
     }
 
     #[test]
@@ -491,7 +501,11 @@ mod tests {
         data["packages"][6]["source"] = json!(
             "git+https://github.com/bytecodealliance/tree-sitter-wit?rev=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         );
-        assert!(check(&data).unwrap_err().contains("unreviewed tree-sitter-wit source"));
+        assert!(
+            check(&data)
+                .unwrap_err()
+                .contains("unreviewed tree-sitter-wit source")
+        );
     }
 
     #[test]
@@ -500,18 +514,22 @@ mod tests {
         let syntax = util::read_nonempty(&root.join("crates/wit-syntax/Cargo.toml")).unwrap();
         let extension = util::read_nonempty(&root.join("extension.toml")).unwrap();
         let revision = grammar_revision(&syntax, &extension).unwrap();
-        assert!(grammar_revision(&syntax, &extension.replace(
-            &revision,
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        ))
-        .unwrap_err()
-        .contains("grammar pin mismatch"));
-        assert!(grammar_revision(
-            &syntax.replace(&revision, "not-a-git-revision"),
-            &extension.replace(&revision, "not-a-git-revision")
-        )
-        .unwrap_err()
-        .contains("invalid tree-sitter-wit commit revision"));
+        assert!(
+            grammar_revision(
+                &syntax,
+                &extension.replace(&revision, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            )
+            .unwrap_err()
+            .contains("grammar pin mismatch")
+        );
+        assert!(
+            grammar_revision(
+                &syntax.replace(&revision, "not-a-git-revision"),
+                &extension.replace(&revision, "not-a-git-revision")
+            )
+            .unwrap_err()
+            .contains("invalid tree-sitter-wit commit revision")
+        );
     }
 
     #[test]
@@ -528,5 +546,4 @@ mod tests {
         }
         assert!(ensure_target("aarch64-pc-windows-msvc").is_err());
     }
-
 }
