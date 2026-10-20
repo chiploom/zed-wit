@@ -1,6 +1,10 @@
 use crate::util;
 use serde_json::{Value, json};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    fs,
+    path::Path,
+};
 
 pub const TARGETS: [&str; 5] = [
     "aarch64-apple-darwin",
@@ -11,6 +15,7 @@ pub const TARGETS: [&str; 5] = [
 ];
 
 const GRAMMAR_REPOSITORY: &str = "https://github.com/bytecodealliance/tree-sitter-wit";
+const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
 fn grammar_revision(syntax_manifest: &str, extension_manifest: &str) -> Result<String, String> {
     let syntax: toml::Value = toml::from_str(syntax_manifest)
@@ -76,17 +81,54 @@ fn pinned_grammar_revision() -> Result<String, String> {
 }
 
 fn single_version(packages: &[Value], name: &str, scope: &str) -> Result<String, String> {
-    let versions = packages
+    let matches = packages
         .iter()
         .filter(|package| package.get("name").and_then(Value::as_str) == Some(name))
-        .map(|package| package_string(package, "version"))
-        .collect::<Result<BTreeSet<_>, _>>()?;
-    if versions.len() != 1 {
+        .map(|package| {
+            Ok((
+                package_string(package, "id")?,
+                package_string(package, "version")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if matches.len() != 1 {
         return Err(format!(
-            "{scope}: expected exactly one {name} version in resolved dependency graph, found {versions:?}"
+            "{scope}: expected exactly one resolved {name} package identity, found {matches:?}"
         ));
     }
-    Ok(versions.into_iter().next().expect("one version").to_owned())
+    Ok(matches[0].1.to_owned())
+}
+
+fn approve_local_package(
+    package: &Value,
+    workspace_members: &HashSet<&str>,
+    trusted_root: &Path,
+) -> Result<(), String> {
+    let id = package_string(package, "id")?;
+    if !workspace_members.contains(id) {
+        return Err(format!(
+            "unreviewed local dependency: {id} is not a workspace member"
+        ));
+    }
+
+    let manifest_path = Path::new(package_string(package, "manifest_path")?);
+    let canonical_manifest = fs::canonicalize(manifest_path).map_err(|error| {
+        format!(
+            "canonicalize local dependency manifest {}: {error}",
+            manifest_path.display()
+        )
+    })?;
+    if !canonical_manifest.starts_with(trusted_root)
+        || canonical_manifest.file_name().and_then(|name| name.to_str()) != Some("Cargo.toml")
+        || !canonical_manifest.is_file()
+    {
+        return Err(format!(
+            "unreviewed local dependency manifest for {id}: {} resolves to {} outside the trusted workspace",
+            manifest_path.display(),
+            canonical_manifest.display()
+        ));
+    }
+    Ok(())
 }
 
 pub fn ensure_target(target: &str) -> Result<(), String> {
@@ -292,20 +334,42 @@ pub fn check(data: &Value) -> Result<Vec<Value>, String> {
         ));
     }
 
+    let trusted_root = fs::canonicalize(util::repo_root())
+        .map_err(|error| format!("canonicalize repository root: {error}"))?;
+    let workspace_members = data
+        .get("workspace_members")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "cargo metadata omitted workspace_members".to_owned())?
+        .iter()
+        .map(|member| member.as_str().ok_or_else(|| "invalid workspace member ID".to_owned()))
+        .collect::<Result<HashSet<_>, _>>()?;
+
     for package in package_list {
         license_choice(package)?;
         let name = package_string(package, "name")?;
-        let source = package.get("source").and_then(Value::as_str);
-        if name == "tree-sitter-wit" {
-            if source != Some(expected_grammar_source.as_str()) {
+        match package.get("source") {
+            Some(Value::String(source)) if name == "tree-sitter-wit" => {
+                if source != &expected_grammar_source {
+                    return Err(format!(
+                        "unreviewed tree-sitter-wit source: {source:?}; expected {expected_grammar_source:?}"
+                    ));
+                }
+            }
+            Some(Value::String(source)) if source == CRATES_IO_SOURCE => {}
+            Some(Value::Null) if name != "tree-sitter-wit" => {
+                approve_local_package(package, &workspace_members, &trusted_root)?;
+            }
+            Some(Value::String(source)) if name == "tree-sitter-wit" => {
                 return Err(format!(
                     "unreviewed tree-sitter-wit source: {source:?}; expected {expected_grammar_source:?}"
                 ));
             }
-        } else if let Some(source) = source
-            && !source.starts_with("registry+https://github.com/rust-lang/crates.io-index")
-        {
-            return Err(format!("unreviewed dependency source: {source}"));
+            Some(Value::String(source)) => {
+                return Err(format!("unreviewed dependency source: {source}"));
+            }
+            _ => {
+                return Err(format!("missing or malformed dependency source for {name}"));
+            }
         }
     }
 
@@ -385,7 +449,7 @@ mod tests {
             "name": name,
             "version": version,
             "license": "MIT",
-            "source": null,
+            "source": CRATES_IO_SOURCE,
         })
     }
 
@@ -395,11 +459,21 @@ mod tests {
         grammar["source"] = json!(format!(
             "git+{GRAMMAR_REPOSITORY}?rev={revision}#{revision}"
         ));
+        let root = util::repo_root();
+        let mut native = fake_package("native", "wit-language-server", "0.1.2");
+        native["source"] = Value::Null;
+        native["manifest_path"] = json!(root.join("crates/wit-language-server/Cargo.toml"));
+        let mut adapter = fake_package("adapter", "zed-wit", "0.5.4");
+        adapter["source"] = Value::Null;
+        adapter["manifest_path"] = json!(root.join("Cargo.toml"));
+        let mut syntax = fake_package("syntax", "wit-syntax", "0.1.0");
+        syntax["source"] = Value::Null;
+        syntax["manifest_path"] = json!(root.join("crates/wit-syntax/Cargo.toml"));
         json!({
             "packages": [
-                fake_package("native", "wit-language-server", "0.1.2"),
-                fake_package("adapter", "zed-wit", "0.5.4"),
-                fake_package("syntax", "wit-syntax", "0.1.0"),
+                native,
+                adapter,
+                syntax,
                 fake_package("native-parser", "wit-parser", native_parser),
                 fake_package("adapter-parser", "wit-parser", "0.227.1"),
                 fake_package("runtime", "tree-sitter", runtime),
@@ -493,6 +567,100 @@ mod tests {
                 .unwrap_err()
                 .contains("unreviewed dependency source")
         );
+    }
+
+    #[test]
+    fn approved_local_workspace_members_pass() {
+        check(&graph_fixture("0.261.0", "0.26.13")).unwrap();
+    }
+
+    #[test]
+    fn external_path_dependency_is_rejected_even_if_declared_a_workspace_member() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"][0]["manifest_path"] = json!(std::env::temp_dir());
+        assert!(
+            check(&data)
+                .unwrap_err()
+                .contains("outside the trusted workspace")
+        );
+    }
+
+    #[test]
+    fn in_repo_path_package_not_in_workspace_is_rejected() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"][7]["source"] = Value::Null;
+        data["packages"][7]["manifest_path"] = json!(util::repo_root().join("Cargo.toml"));
+        assert!(check(&data).unwrap_err().contains("not a workspace member"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_manifest_outside_repo_is_rejected() {
+        use std::os::unix::fs::symlink;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let nonce = NEXT.fetch_add(1, Ordering::Relaxed);
+        let name = format!(
+            "dependency-policy-{}-{nonce}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        );
+        let outside = std::env::temp_dir().join(format!("{name}-outside"));
+        let inside = util::repo_root().join("target").join(format!("{name}-link"));
+        fs::create_dir_all(&outside).unwrap();
+        fs::create_dir_all(inside.parent().unwrap()).unwrap();
+        fs::write(outside.join("Cargo.toml"), "[package]\nname = \"external\"\nversion = \"0.1.0\"\n").unwrap();
+        symlink(&outside, &inside).unwrap();
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"][0]["manifest_path"] = json!(inside.join("Cargo.toml"));
+        let result = check(&data);
+        fs::remove_file(&inside).unwrap();
+        fs::remove_dir_all(&outside).unwrap();
+        assert!(
+            result
+                .unwrap_err()
+                .contains("outside the trusted workspace")
+        );
+    }
+
+    #[test]
+    fn identical_versions_with_distinct_native_parser_package_ids_are_rejected() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"].as_array_mut().unwrap().push(fake_package(
+            "other-parser",
+            "wit-parser",
+            "0.261.0",
+        ));
+        data["resolve"]["nodes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": "other-parser", "deps": []}));
+        data["resolve"]["nodes"][0]["deps"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"pkg": "other-parser", "dep_kinds": [{"kind": null}]}));
+        assert!(check(&data).unwrap_err().contains("package identity"));
+    }
+
+    #[test]
+    fn identical_versions_with_distinct_tree_sitter_package_ids_are_rejected() {
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"].as_array_mut().unwrap().push(fake_package(
+            "other-runtime",
+            "tree-sitter",
+            "0.26.13",
+        ));
+        assert!(check(&data).unwrap_err().contains("package identity"));
+    }
+
+    #[test]
+    fn exact_registry_source_passes_and_prefix_lookalikes_fail() {
+        check(&graph_fixture("0.261.0", "0.26.13")).unwrap();
+        let mut data = graph_fixture("0.261.0", "0.26.13");
+        data["packages"][3]["source"] = json!(format!("{CRATES_IO_SOURCE}-evil"));
+        assert!(check(&data).unwrap_err().contains("unreviewed dependency source"));
+        data["packages"][3]["source"] = json!("registry+https://example.org/other-index");
+        assert!(check(&data).unwrap_err().contains("unreviewed dependency source"));
     }
 
     #[test]
